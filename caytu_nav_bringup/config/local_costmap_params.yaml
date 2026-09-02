@@ -1,0 +1,65 @@
+# caytu_nav_bringup — local_costmap_params.yaml
+# Trinôme 2 / Johny — PARC 2026 — CAYTU Sito-É
+# Local costmap : fenêtre glissante autour du robot, critique pour foules dynamiques
+
+local_costmap:
+  ros__parameters:
+    global_frame: odom
+    robot_base_frame: base_footprint
+    use_sim_time: true
+    # Fenêtre locale — compromis : assez grande pour voir les humains, assez petite pour 10 Hz
+    rolling_window: true
+    width: 5
+    height: 5
+    resolution: 0.05
+    # Pas de static layer en local par défaut — on ne fige pas la carte, on suit le LiDAR
+    # Si besoin de static en local pour passages étroits, ajouter static_layer en 1ère position
+    plugins: ["obstacle_layer", "inflation_layer"]
+    # Alternative avec static (décommenter si Trinôme 1 map nécessaire en local) :
+    # plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+    # static_layer:
+    #   plugin: "nav2_costmap_2d::StaticLayer"
+    #   map_subscribe_transient_local: true
+
+    update_frequency: 10.0
+    publish_frequency: 10.0
+    transform_tolerance: 0.3
+
+    footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+    footprint_padding: 0.02
+
+    # Même source que global — cohérence obligatoire
+    obstacle_layer:
+      plugin: "nav2_costmap_2d::ObstacleLayer"
+      enabled: true
+      observation_sources: scan
+      scan:
+        topic: /scan
+        sensor_frame: lidar_link
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: false
+        obstacle_max_range: 8.0
+        obstacle_min_range: 0.15
+        raytrace_max_range: 9.0
+        raytrace_min_range: 0.15
+        max_obstacle_height: 2.0
+        min_obstacle_height: 0.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.0
+      combination_method: 1
+      track_unknown_space: false
+
+    # Inflation locale légèrement plus douce que globale pour laisser le controller respirer
+    # tout en gardant une marge de sécurité en dynamique
+    inflation_layer:
+      plugin: "nav2_costmap_2d::InflationLayer"
+      enabled: true
+      cost_scaling_factor: 3.0
+      inflation_radius: 0.30
+      inflate_unknown: false
+      inflate_around_unknown: false
+
+    # Filtrage dynamique : clearing = raytrace efface les obstacles mobiles partis
+    # Vérifier en RViz : obstacle vu → rouge, après départ → disparaît en <0.5 s

@@ -1,0 +1,75 @@
+# caytu_nav_bringup — costmap_common_params.yaml
+# Trinôme 2 / Johny — PARC 2026 — CAYTU Sito-É
+# Référence robot : parc_robot_description (read-only)
+# - Drivetrain : differential drive, wheel_separation 0.3409 m, wheel_radius 0.08565 m
+# - Frames : base_footprint (enfant de odom) → base_link → lidar_link
+# - LiDAR : RPLiDAR C1, topic /scan, frame lidar_link, range 0.05–12.0 m, 360 pts, 10 Hz
+# - cmd_vel : Nav2 → robot_base_controller/cmd_vel_unstamped → GZ cmd_vel (ros_gz_bridge)
+# - Max vitesses Gazebo : max_linear_velocity 1.5 / max_velocity 0.5, max_angular_velocity 1.0
+
+# Paramètres communs factorisés — inclus conceptuellement par global et local costmaps.
+# Nav2 Jazzy charge chaque costmap séparément, ce fichier sert de référence unique.
+
+costmap_common:
+  ros__parameters:
+    # -- TF et tolérance --
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.3
+
+    # -- Footprint : polygone ajusté au robot réel --
+    # Hypothèse documentée (à valider au mètre ruban / mesure Gazebo) :
+    # Dimensions chassis : top 0.4437 × 1.248 m, bottom 0.4437 × 0.03785 m (URDF, rotation pi/2)
+    # Positions roues : left/right à x=±0.19649, y=-0.095, caster à (0, 0.133)
+    # Largeur utile ≈ 0.44 m, longueur ≈ 0.54 m. On prend une marge 16 % pour sécurité.
+    # Le polygone est défini dans le repère base_footprint, sens horaire.
+    # Si mesure réelle différente, ajuster ici et régénérer les 2 costmaps.
+    footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+    footprint_padding: 0.02
+
+    # -- Couches par défaut (peuvent être surchargées par global/local) --
+    plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+
+    # Static layer — carte fournie par Trinôme 1 (stadium_map.yaml, resolution 0.05)
+    static_layer:
+      plugin: "nav2_costmap_2d::StaticLayer"
+      map_subscribe_transient_local: true
+
+    # Obstacle layer — RPLiDAR C1 sur /scan
+    obstacle_layer:
+      plugin: "nav2_costmap_2d::ObstacleLayer"
+      enabled: true
+      observation_sources: scan
+      scan:
+        topic: /scan
+        sensor_frame: lidar_link
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: false
+        # Portées adaptées au LiDAR réel (min 0.05, max 12.0) + marge
+        obstacle_max_range: 10.0
+        obstacle_min_range: 0.15
+        raytrace_max_range: 12.0
+        raytrace_min_range: 0.15
+        max_obstacle_height: 2.0
+        min_obstacle_height: 0.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.0
+      # Combinaison des observations
+      combination_method: 1
+      track_unknown_space: false
+
+    # Inflation layer — compromis sécurité / passages étroits
+    # inflation_radius 0.35 = footprint (≈0.22 demi-largeur) + 0.13 marge
+    # cost_scaling_factor 3.0 = décroissance modérée (ni trop douce ni trop abrupte)
+    inflation_layer:
+      plugin: "nav2_costmap_2d::InflationLayer"
+      enabled: true
+      cost_scaling_factor: 3.0
+      inflation_radius: 0.35
+      inflate_unknown: false
+      inflate_around_unknown: false
+
+    # Filtrage optionnel : masquage auto-détection du châssis (à activer si faux positifs)
+    # Voir caytu_nav_bringup/config/laser_filter_params.yaml (Trinôme 1)
+    # scan_filtered_topic: /scan_filtered  # si filter chain activée, changer scan.topic
