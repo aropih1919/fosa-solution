@@ -1,0 +1,150 @@
+<?xml version="1.0"?>
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+
+  <BehaviorTree ID="MainTree">
+
+    <!--
+      Navigation bornée :
+      - 2 tentatives globales maximum
+      - 1 retry pour le planner
+      - 1 retry pour le controller
+      - recovery limité
+      - aucun cycle de recovery infini
+    -->
+
+    <RecoveryNode
+        number_of_retries="2"
+        name="NavigateRecovery">
+
+      <!-- 1. NAVIGATION NORMALE                                     -->
+
+      <PipelineSequence name="NavigateWithReplanning">
+
+        <!-- Sélection du controller -->
+        <ControllerSelector
+            selected_controller="{selected_controller}"
+            default_controller="FollowPath"
+            topic_name="controller_selector"/>
+
+        <!-- Sélection du planner -->
+        <PlannerSelector
+            selected_planner="{selected_planner}"
+            default_planner="GridBased"
+            topic_name="planner_selector"/>
+
+        <!-- Replanification à 1 Hz -->
+        <RateController hz="1.0">
+
+          <RecoveryNode
+              number_of_retries="1"
+              name="ComputePathToPose">
+
+            <ComputePathToPose
+                goal="{goal}"
+                path="{path}"
+                planner_id="{selected_planner}"
+                error_code_id="{compute_path_error_code}"/>
+
+            <!-- Recovery planner -->
+            <Sequence name="PlannerRecovery">
+
+              <WouldAPlannerRecoveryHelp
+                  error_code="{compute_path_error_code}"/>
+
+              <ClearEntireCostmap
+                  name="ClearGlobalCostmapPlannerRecovery"
+                  service_name="global_costmap/clear_entirely_global_costmap"/>
+
+            </Sequence>
+
+          </RecoveryNode>
+
+        </RateController>
+
+        <!-- Suivi du chemin -->
+        <RecoveryNode
+            number_of_retries="1"
+            name="FollowPath">
+
+          <FollowPath
+              path="{path}"
+              controller_id="{selected_controller}"
+              error_code_id="{follow_path_error_code}"/>
+
+          <!-- Recovery controller -->
+          <Sequence name="ControllerRecovery">
+
+            <WouldAControllerRecoveryHelp
+                error_code="{follow_path_error_code}"/>
+
+            <ClearEntireCostmap
+                name="ClearLocalCostmapControllerRecovery"
+                service_name="local_costmap/clear_entirely_local_costmap"/>
+
+          </Sequence>
+
+        </RecoveryNode>
+
+      </PipelineSequence>
+
+
+      <!-- 2. RECOVERY GLOBAL                                       -->
+
+      <Sequence name="GlobalRecovery">
+
+        <!-- On ne récupère que si le planner ou controller indique
+             qu'une recovery peut réellement aider. -->
+        <Fallback name="RecoveryCheck">
+
+          <WouldAControllerRecoveryHelp
+              error_code="{follow_path_error_code}"/>
+
+          <WouldAPlannerRecoveryHelp
+              error_code="{compute_path_error_code}"/>
+
+        </Fallback>
+
+
+        <!-- Une seule série d'actions de récupération par retry -->
+        <RoundRobin name="RecoveryActions">
+
+          <!-- Recovery 1 : nettoyer les costmaps -->
+          <Sequence name="ClearCostmaps">
+
+            <ClearEntireCostmap
+                name="ClearLocalCostmap"
+                service_name="local_costmap/clear_entirely_local_costmap"/>
+
+            <ClearEntireCostmap
+                name="ClearGlobalCostmap"
+                service_name="global_costmap/clear_entirely_global_costmap"/>
+
+          </Sequence>
+
+
+          <!-- Recovery 2 : petite rotation -->
+          <Spin
+              spin_dist="1.57"
+              error_code_id="{spin_error_code}"/>
+
+
+          <!-- Recovery 3 : attendre très brièvement -->
+          <Wait
+              wait_duration="2.0"/>
+
+
+          <!-- Recovery 4 : petit recul -->
+          <BackUp
+              backup_dist="0.20"
+              backup_speed="0.10"
+              error_code_id="{backup_code_id}"/>
+
+        </RoundRobin>
+
+      </Sequence>
+
+    </RecoveryNode>
+
+  </BehaviorTree>
+
+</root>
