@@ -1,0 +1,30 @@
+amcl:
+  ros__parameters:
+    use_sim_time: true
+
+    # -- Frames confirmées --
+    odom_frame_id: odom
+    base_frame_id: base_footprint     # enfant direct de odom, comme pour SLAM
+    global_frame_id: map
+
+    # -- Capteur --
+    scan_topic: /scan_filtered         # IMPORTANT : le scan filtré, pas /scan brut
+
+    # -- Particules --
+    min_particles: 500
+    max_particles: 2000
+
+    # -- Modèle du mouvement (dépend du type de robot : différentiel ici) --
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    alpha1: 0.2   # bruit rotation dû à la rotation
+    alpha2: 0.2   # bruit rotation dû à la translation
+    alpha3: 0.2   # bruit translation dû à la translation
+    alpha4: 0.2   # bruit translation dû à la rotation
+
+    # -- Fréquence de mise à jour --
+    update_min_d: 0.2       # ne recalcule que si le robot a bougé de 20cm
+    update_min_a: 0.2       # ou tourné d'environ 11°
+
+    # -- Portée laser --
+    laser_max_range: 12.0   # cohérent avec range_max de ton /scan (12.0)
+    laser_min_range: 0.1    # légèrement au-dessus de range_min pour éviter le bruit proche
