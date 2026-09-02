@@ -1,18 +1,4 @@
-# caytu_nav_bringup — controller_server_params.yaml
-# Trinôme 2 / Johny — PARC 2026 — CAYTU Sito-É
-# Controller : DWBLocalPlanner retenu pour differential + évitement foules dynamiques
-#
-# Justification (Jazzy Nav2) :
-# - Candidats : DWB, Regulated Pure Pursuit (RPP), MPPI
-# - MPPI : très performant en dynamique, mais CPU élevé, tuning complexe, risque de latence
-# - RPP : stable, lisse, faible CPU, régulation vitesse près obstacles, idéal en intérieur
-#          statique. Moins agressif en évitement latéral rapide (foule qui coupe la trajectoire).
-# - DWB : échantillonne (v, w), évalue plusieurs critics, très tunable, bonne réactivité
-#          obstacles mobiles, contrôle fin des oscillations, compatible forte inflation.
-#          Plus adapté à la tâche PARC (foules dynamiques, passages étroits, critères collisions).
-# → Choix : dwb_core/DWBLocalPlanner (plugin FollowPath)
-#   Fallback documenté : regulated_pure_pursuit (RPP) en commentaire.
-#   MPPI laissé en option si CPU disponible et tuning avancé souhaité.
+# Controller — DWB (réactif aux foules, tunable)
 
 controller_server:
   ros__parameters:
@@ -26,7 +12,6 @@ controller_server:
     goal_checker_plugins: ["goal_checker"]
     controller_plugins: ["FollowPath"]
 
-    # --- Progress & Goal Checkers ---
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.3
@@ -38,13 +23,9 @@ controller_server:
       yaw_goal_tolerance: 0.25
       stateful: true
 
-    # --- DWB Controller ---
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
-
-      # Robot kinematics — alignées sur Gazebo diff_drive
-      # Gazebo : max_linear 0.5, max_angular 1.0, accel lin 1.0, ang 2.0
-      # DWB : on reste à 80 % des limites Gazebo pour marge sécurité
+      # limites Gazebo: 0.5 m/s, 1.0 rad/s, accel 1.0/2.0 — on garde 80% marge
       max_vel_x: 0.40
       min_vel_x: -0.10
       max_vel_theta: 1.0
@@ -52,13 +33,10 @@ controller_server:
       max_speed_xy: 0.40
       min_speed_xy: -0.10
       min_speed_theta: -1.0
-
       acc_lim_x: 1.0
       acc_lim_theta: 2.0
       decel_lim_x: -1.0
       decel_lim_theta: -2.0
-
-      # Simulation trajectory
       vx_samples: 20
       vy_samples: 5
       vtheta_samples: 20
@@ -69,70 +47,28 @@ controller_server:
       xy_goal_tolerance: 0.15
       trans_stopped_velocity: 0.25
       short_circuit_trajectory_evaluation: true
-
-      # Critics — pondérations tunées pour éviter collisions > optimiser vitesse
       critics: ["BaseObstacle", "GoalAlign", "PathAlign", "GoalDist", "PreferForward", "RotateToGoal", "Oscillation"]
-
       BaseObstacle:
         scale: 0.7
-
       PathAlign:
         scale: 32.0
         forward_point_distance: 0.1
-
       GoalAlign:
         scale: 24.0
         forward_point_distance: 0.1
-
       PathDist:
         scale: 32.0
-
       GoalDist:
         scale: 24.0
-
       PreferForward:
         scale: 3.0
-
       RotateToGoal:
         scale: 32.0
         slowing_factor: 5.0
         lookahead_time: -1.0
-
       Oscillation:
         scale: 1.0
         oscillation_reset_dist: 0.05
         oscillation_reset_angle: 0.2
         oscillation_reset_time: -1.0
         x_only_threshold: 0.05
-
-      # Publication cmd_vel — doit correspondre au bridge GZ
-      # Si Nav2 publie sur /cmd_vel (défaut), vérifier que le bridge écoute bien /cmd_vel
-      # Sinon changer en robot_base_controller/cmd_vel_unstamped et mettre à jour gz_bridge.yaml
-      # Pour compatibilité, on laisse /cmd_vel et on documente l'alternative ci-dessous
-      # cmd_vel_topic: "robot_base_controller/cmd_vel_unstamped"
-
-    # --- Fallback RPP (décommenter pour test A/B) ---
-    # FollowPath:
-    #   plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-    #   desired_linear_vel: 0.35
-    #   lookahead_dist: 0.6
-    #   min_lookahead_dist: 0.3
-    #   max_lookahead_dist: 0.9
-    #   lookahead_time: 1.5
-    #   rotate_to_heading_angular_vel: 0.8
-    #   transform_tolerance: 0.3
-    #   use_velocity_scaled_lookahead_dist: true
-    #   min_approach_linear_velocity: 0.05
-    #   approach_velocity_scaling_dist: 0.6
-    #   use_collision_detection: true
-    #   max_allowed_time_to_collision_up_to_carrot: 1.0
-    #   use_regulated_linear_velocity_scaling: true
-    #   regulated_linear_scaling_min_radius: 0.9
-    #   regulated_linear_scaling_min_speed: 0.25
-    #   allow_reversing: false
-    #   use_rotate_to_heading: true
-    #   rotate_to_heading_min_angle: 0.785
-    #   max_angular_accel: 2.0
-    #   max_robot_pose_search_dist: 10.0
-    #   use_interpolation: true
-    #   allow_unknown: false
