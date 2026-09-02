@@ -1,0 +1,59 @@
+# caytu_nav_bringup — planner_server_params.yaml
+# Trinôme 2 / Johny — PARC 2026 — CAYTU Sito-É
+# Planner : SmacPlanner2D retenu pour robot différentiel en environnement stade/café
+#
+# Justification (Jazzy Nav2) :
+# - Candidats évalués : NavFn, SmacPlanner2D, ThetaStar, SmacPlannerHybrid/Lattice
+# - Sito-É = differential drive (wheel_separation 0.3409), pas ackermann → Hybrid/Lattice inutiles
+# - NavFn : rapide, simple, mais trajectoires en grille 4/8-directions, moins lisse, pas d'optim
+#            distance-obstacle native, replanning basique.
+# - ThetaStar : any-angle, chemins plus courts, mais plus coûteux, sensible aux cartes bruitées,
+#               pas de prise en compte footprint orienté fine.
+# - SmacPlanner2D : A* optimisé 2D, cost-aware (inflation), lissage, compatible différentiel,
+#                   très robuste en passages étroits, temps de calcul maîtrisé, recommandé
+#                   par Nav2 pour robots différentiels en intérieur.
+# → Choix : nav2_smac_planner/SmacPlanner2D (plugin GridBased)
+#   Fallback documenté : nav2_navfn_planner/NavfnPlanner si Smac indisponible.
+
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    expected_planner_frequency: 10.0
+
+    planner_plugins: ["GridBased"]
+
+    GridBased:
+      plugin: "nav2_smac_planner/SmacPlanner2D"
+      # Tolérance au but — permet un chemin même si goal en zone légèrement enflée
+      tolerance: 0.3
+      downsample_costmap: false
+      downsampling_factor: 1
+      allow_unknown: false
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      max_planning_time: 2.0
+      motion_model_for_search: "MOORE"
+      angle_quantization_bins: 72
+      analytic_expansion_ratio: 3.5
+      analytic_expansion_max_length: 3.0
+      minimum_turning_radius: 0.2
+      # Inspiré par inflation_radius 0.35 — Smac applique son propre inflate
+      cost_travel_multiplier: 2.0
+      # Lissage du chemin — améliore suivi par DWB/RPP
+      smooth_path: true
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+        do_refinement: true
+        refinement_num: 2
+
+    # Plugin secondaire (optionnel) — NavFn pour comparaison / fallback
+    # Décommenter si besoin de test A/B en tuning :
+    # planner_plugins: ["GridBased", "NavFn"]
+    # NavFn:
+    #   plugin: "nav2_navfn_planner/NavfnPlanner"
+    #   tolerance: 0.3
+    #   use_astar: false
+    #   allow_unknown: false
