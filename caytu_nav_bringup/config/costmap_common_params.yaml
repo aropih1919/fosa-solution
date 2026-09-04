@@ -1,0 +1,61 @@
+# Parametres communs aux costmaps global et local (ROS 2 Jazzy / Nav2 1.3.x).
+#
+# Les costmaps sont des noeuds internes nommes respectivement
+# /global_costmap/global_costmap et /local_costmap/local_costmap. Les motifs
+# ci-dessous permettent aussi de conserver ces parametres si la pile est
+# lancee dans un namespace.
+
+/**/global_costmap:
+  ros__parameters:
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.3
+    footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+    footprint_padding: 0.02
+
+    obstacle_layer:
+      plugin: "nav2_costmap_2d::ObstacleLayer"
+      enabled: true
+      observation_sources: scan
+      scan:
+        topic: /scan
+        sensor_frame: lidar_link
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: false
+        obstacle_max_range: 10.0
+        # Le LiDAR est dans le volume du chassis : ignorer les retours propres
+        # au robot jusqu'a son rayon circonscrit (environ 0.35 m).
+        obstacle_min_range: 0.35
+        raytrace_max_range: 12.0
+        raytrace_min_range: 0.0
+        max_obstacle_height: 2.0
+        min_obstacle_height: 0.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.2
+/**/local_costmap:
+  ros__parameters:
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.3
+    footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+    footprint_padding: 0.02
+
+    obstacle_layer:
+      plugin: "nav2_costmap_2d::ObstacleLayer"
+      enabled: true
+      observation_sources: scan
+      scan:
+        topic: /scan
+        sensor_frame: lidar_link
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: false
+        obstacle_max_range: 4.0
+        obstacle_min_range: 0.35
+        raytrace_max_range: 4.5
+        raytrace_min_range: 0.0
+        max_obstacle_height: 2.0
+        min_obstacle_height: 0.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.2
