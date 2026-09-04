@@ -4,11 +4,13 @@
   <BehaviorTree ID="MainTree">
 
     <!--
-      Navigation bornée :
-      - 2 tentatives globales maximum
+      Behavior Tree de navigation.
+      Objectifs :
+      - Replanification à 1 Hz
       - 1 retry pour le planner
       - 1 retry pour le controller
-      - recovery limité
+      - nombre de recoveries globales borné
+      - nettoyage des costmaps avant les recoveries physiques
       - aucun cycle de recovery infini
     -->
 
@@ -16,7 +18,7 @@
         number_of_retries="2"
         name="NavigateRecovery">
 
-      <!-- 1. NAVIGATION NORMALE                                     -->
+      <!-- NAVIGATION NORMALE                                        -->
 
       <PipelineSequence name="NavigateWithReplanning">
 
@@ -32,7 +34,7 @@
             default_planner="GridBased"
             topic_name="planner_selector"/>
 
-        <!-- Replanification à 1 Hz -->
+        <!-- Replanification périodique à 1 Hz -->
         <RateController hz="1.0">
 
           <RecoveryNode
@@ -45,7 +47,7 @@
                 planner_id="{selected_planner}"
                 error_code_id="{compute_path_error_code}"/>
 
-            <!-- Recovery planner -->
+            <!-- Recovery spécifique au planner -->
             <Sequence name="PlannerRecovery">
 
               <WouldAPlannerRecoveryHelp
@@ -71,7 +73,7 @@
               controller_id="{selected_controller}"
               error_code_id="{follow_path_error_code}"/>
 
-          <!-- Recovery controller -->
+          <!-- Recovery spécifique au controller -->
           <Sequence name="ControllerRecovery">
 
             <WouldAControllerRecoveryHelp
@@ -88,12 +90,15 @@
       </PipelineSequence>
 
 
-      <!-- 2. RECOVERY GLOBAL                                       -->
+      <!-- RECOVERY GLOBALE                                          -->
 
       <Sequence name="GlobalRecovery">
 
-        <!-- On ne récupère que si le planner ou controller indique
-             qu'une recovery peut réellement aider. -->
+        <!--
+          On ne lance une recovery globale que si le planner
+          ou le controller indique qu'une recovery peut aider.
+        -->
+
         <Fallback name="RecoveryCheck">
 
           <WouldAControllerRecoveryHelp
@@ -104,42 +109,52 @@
 
         </Fallback>
 
+        <!--
+          ReactiveFallback permet de surveiller le changement de goal
+          pendant les actions de recovery.
+        -->
 
-        <!-- Une seule série d'actions de récupération par retry -->
-        <RoundRobin name="RecoveryActions">
+        <ReactiveFallback name="RecoveryFallback">
 
-          <!-- Recovery 1 : nettoyer les costmaps -->
-          <Sequence name="ClearCostmaps">
+          <GoalUpdated/>
 
-            <ClearEntireCostmap
-                name="ClearLocalCostmap"
-                service_name="local_costmap/clear_entirely_local_costmap"/>
+          <RoundRobin name="RecoveryActions">
 
-            <ClearEntireCostmap
-                name="ClearGlobalCostmap"
-                service_name="global_costmap/clear_entirely_global_costmap"/>
+            <!-- Recovery 1 : nettoyer les deux costmaps -->
+            <Sequence name="ClearCostmaps">
 
-          </Sequence>
+              <ClearEntireCostmap
+                  name="ClearLocalCostmap"
+                  service_name="local_costmap/clear_entirely_local_costmap"/>
 
+              <ClearEntireCostmap
+                  name="ClearGlobalCostmap"
+                  service_name="global_costmap/clear_entirely_global_costmap"/>
 
-          <!-- Recovery 2 : petite rotation -->
-          <Spin
-              spin_dist="1.57"
-              error_code_id="{spin_error_code}"/>
+            </Sequence>
 
+            <!-- Recovery 2 : rotation de 90 degrés -->
+            <Spin
+                name="SpinRecovery"
+                spin_dist="1.57"
+                error_code_id="{spin_error_code}"/>
 
-          <!-- Recovery 3 : attendre très brièvement -->
-          <Wait
-              wait_duration="2.0"/>
+            <!-- Recovery 3 : courte attente -->
+            <Wait
+                name="WaitRecovery"
+                wait_duration="2.0"
+                error_code_id="{wait_error_code}"/>
 
+            <!-- Recovery 4 : petit recul -->
+            <BackUp
+                name="BackUpRecovery"
+                backup_dist="0.20"
+                backup_speed="0.10"
+                error_code_id="{backup_error_code}"/>
 
-          <!-- Recovery 4 : petit recul -->
-          <BackUp
-              backup_dist="0.20"
-              backup_speed="0.10"
-              error_code_id="{backup_code_id}"/>
+          </RoundRobin>
 
-        </RoundRobin>
+        </ReactiveFallback>
 
       </Sequence>
 
