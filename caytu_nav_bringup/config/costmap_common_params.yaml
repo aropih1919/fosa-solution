@@ -1,20 +1,16 @@
-# CAYTU Sito-É — costmaps communes (Jazzy)
-# Sito-É: diff-drive, base_footprint, LiDAR /scan (lidar_link) 0.05–12m
+# Parametres communs aux costmaps global et local (ROS 2 Jazzy / Nav2 1.3.x).
+#
+# Les costmaps sont des noeuds internes nommes respectivement
+# /global_costmap/global_costmap et /local_costmap/local_costmap. Les motifs
+# ci-dessous permettent aussi de conserver ces parametres si la pile est
+# lancee dans un namespace.
 
-costmap_common:
+/**/global_costmap:
   ros__parameters:
     robot_base_frame: base_footprint
     transform_tolerance: 0.3
-
-    # footprint 0.54x0.44 m — basé sur URDF (roues ±0.196, caster 0.133)
     footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
     footprint_padding: 0.02
-
-    plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
-
-    static_layer:
-      plugin: "nav2_costmap_2d::StaticLayer"
-      map_subscribe_transient_local: true
 
     obstacle_layer:
       plugin: "nav2_costmap_2d::ObstacleLayer"
@@ -28,20 +24,38 @@ costmap_common:
         clearing: true
         inf_is_valid: false
         obstacle_max_range: 10.0
-        obstacle_min_range: 0.15
+        # Le LiDAR est dans le volume du chassis : ignorer les retours propres
+        # au robot jusqu'a son rayon circonscrit (environ 0.35 m).
+        obstacle_min_range: 0.35
         raytrace_max_range: 12.0
-        raytrace_min_range: 0.15
+        raytrace_min_range: 0.0
         max_obstacle_height: 2.0
         min_obstacle_height: 0.0
         observation_persistence: 0.0
-        expected_update_rate: 0.0
-      combination_method: 1
-      track_unknown_space: false
+        expected_update_rate: 0.2
+/**/local_costmap:
+  ros__parameters:
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.3
+    footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+    footprint_padding: 0.02
 
-    inflation_layer:
-      plugin: "nav2_costmap_2d::InflationLayer"
+    obstacle_layer:
+      plugin: "nav2_costmap_2d::ObstacleLayer"
       enabled: true
-      cost_scaling_factor: 3.0
-      inflation_radius: 0.35
-      inflate_unknown: false
-      inflate_around_unknown: false
+      observation_sources: scan
+      scan:
+        topic: /scan
+        sensor_frame: lidar_link
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: false
+        obstacle_max_range: 4.0
+        obstacle_min_range: 0.35
+        raytrace_max_range: 4.5
+        raytrace_min_range: 0.0
+        max_obstacle_height: 2.0
+        min_obstacle_height: 0.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.2

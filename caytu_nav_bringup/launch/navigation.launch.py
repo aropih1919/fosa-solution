@@ -20,6 +20,22 @@ def generate_launch_description():
         "nav2_params.yaml",
     )
 
+    costmap_common_params_file = os.path.join(
+        bringup_dir, "config", "costmap_common_params.yaml"
+    )
+    global_costmap_params_file = os.path.join(
+        bringup_dir, "config", "global_costmap_params.yaml"
+    )
+    local_costmap_params_file = os.path.join(
+        bringup_dir, "config", "local_costmap_params.yaml"
+    )
+    planner_params_file = os.path.join(
+        bringup_dir, "config", "planner_server_params.yaml"
+    )
+    controller_params_file = os.path.join(
+        bringup_dir, "config", "controller_server_params.yaml"
+    )
+
     # LAUNCH ARGUMENTS
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -40,6 +56,9 @@ def generate_launch_description():
 
         parameters=[
             params_file,
+            costmap_common_params_file,
+            local_costmap_params_file,
+            controller_params_file,
             {
                 "use_sim_time": use_sim_time,
             },
@@ -63,6 +82,9 @@ def generate_launch_description():
 
         parameters=[
             params_file,
+            costmap_common_params_file,
+            global_costmap_params_file,
+            planner_params_file,
             {
                 "use_sim_time": use_sim_time,
             },

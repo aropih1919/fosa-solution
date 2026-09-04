@@ -1,4 +1,4 @@
-# Planner — SmacPlanner2D (diff-drive, bon compromis vitesse/sécurité)
+# Planner global : SmacPlanner2D, A* 2D sensible aux couts de la costmap.
 
 planner_server:
   ros__parameters:
@@ -7,21 +7,17 @@ planner_server:
     planner_plugins: ["GridBased"]
 
     GridBased:
-      plugin: "nav2_smac_planner/SmacPlanner2D"
+      plugin: "nav2_smac_planner::SmacPlanner2D"
       tolerance: 0.3
       downsample_costmap: false
       downsampling_factor: 1
       allow_unknown: false
       max_iterations: 1000000
       max_on_approach_iterations: 1000
+      terminal_checking_interval: 5000
       max_planning_time: 2.0
-      motion_model_for_search: "MOORE"
-      angle_quantization_bins: 72
-      analytic_expansion_ratio: 3.5
-      analytic_expansion_max_length: 3.0
-      minimum_turning_radius: 0.2
       cost_travel_multiplier: 2.0
-      smooth_path: true
+      use_final_approach_orientation: true
       smoother:
         max_iterations: 1000
         w_smooth: 0.3

@@ -1,52 +1,30 @@
-# Global costmap — map + obstacles + inflation
+# Costmap globale : carte statique, obstacles LiDAR et inflation.
 
 global_costmap:
-  ros__parameters:
-    global_frame: map
-    robot_base_frame: base_footprint
-    use_sim_time: true
-    resolution: 0.05  # aligné sur stadium_map.yaml
-    rolling_window: false
-    track_unknown_space: false
-    always_send_full_costmap: true
-    update_frequency: 5.0
-    publish_frequency: 2.0
-    transform_tolerance: 0.3
+  global_costmap:
+    ros__parameters:
+      global_frame: map
+      use_sim_time: true
+      resolution: 0.05
+      rolling_window: false
+      track_unknown_space: false
+      always_send_full_costmap: true
+      update_frequency: 5.0
+      publish_frequency: 2.0
 
-    footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
-    footprint_padding: 0.02
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
 
-    plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
 
-    static_layer:
-      plugin: "nav2_costmap_2d::StaticLayer"
-      map_subscribe_transient_local: true
+      obstacle_layer:
+        combination_method: 1
 
-    obstacle_layer:
-      plugin: "nav2_costmap_2d::ObstacleLayer"
-      enabled: true
-      observation_sources: scan
-      scan:
-        topic: /scan
-        sensor_frame: lidar_link
-        data_type: "LaserScan"
-        marking: true
-        clearing: true
-        inf_is_valid: false
-        obstacle_max_range: 10.0
-        obstacle_min_range: 0.15
-        raytrace_max_range: 12.0
-        raytrace_min_range: 0.15
-        max_obstacle_height: 2.0
-        min_obstacle_height: 0.0
-        observation_persistence: 0.0
-        expected_update_rate: 0.0
-      combination_method: 1
-
-    inflation_layer:
-      plugin: "nav2_costmap_2d::InflationLayer"
-      enabled: true
-      cost_scaling_factor: 3.0
-      inflation_radius: 0.35
-      inflate_unknown: false
-      inflate_around_unknown: false
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.45
+        inflate_unknown: false
+        inflate_around_unknown: false
