@@ -1,0 +1,418 @@
+# FOSA - NAV2 PARAMETERS
+
+
+# BT NAVIGATOR - FANEVA
+
+bt_navigator:
+  ros__parameters:
+
+    use_sim_time: true
+
+    global_frame: map
+    robot_base_frame: base_footprint
+    odom_topic: /odom
+
+    transform_tolerance: 0.3
+
+    default_nav_to_pose_bt_xml: "$(find-pkg-share caytu_nav_bringup)/behavior_trees/navigate_bounded_recovery.xml"
+
+    always_reload_bt_xml: false
+
+    navigators:
+      - navigate_to_pose
+
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+
+      goal_blackboard_id: goal
+      path_blackboard_id: path
+
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    default_cancel_timeout: 20
+
+    error_code_names:
+      - compute_path_error_code
+      - follow_path_error_code
+      - navigate_to_pose_error_code
+      - spin_error_code
+      - backup_error_code
+
+
+# PLANNER SERVER
+#
+# CONFIGURATION PROVISOIRE
+# Johny remplacera cette section avec son planner final.
+
+planner_server:
+  ros__parameters:
+
+    use_sim_time: true
+
+    expected_planner_frequency: 5.0
+
+    planner_plugins:
+      - GridBased
+
+    GridBased:
+      plugin: "nav2_navfn_planner::NavfnPlanner"
+
+      tolerance: 0.5
+
+      use_astar: false
+
+      allow_unknown: true
+
+      use_final_approach_orientation: true
+
+
+# GLOBAL COSTMAP
+#
+# Basée sur les paramètres actuellement fournis par Johny.
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+
+      use_sim_time: true
+
+      global_frame: map
+      robot_base_frame: base_footprint
+
+      resolution: 0.05
+
+      rolling_window: false
+
+      track_unknown_space: false
+
+      always_send_full_costmap: true
+
+      update_frequency: 5.0
+      publish_frequency: 2.0
+
+      transform_tolerance: 0.3
+
+      footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+
+      footprint_padding: 0.02
+
+      plugins:
+        - static_layer
+        - obstacle_layer
+        - inflation_layer
+
+
+      # STATIC LAYER
+
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+
+        map_subscribe_transient_local: true
+
+
+      # OBSTACLE LAYER
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+
+        enabled: true
+
+        observation_sources: scan
+
+        scan:
+          topic: /scan
+
+          sensor_frame: lidar_link
+
+          data_type: "LaserScan"
+
+          marking: true
+          clearing: true
+
+          inf_is_valid: false
+
+          obstacle_min_range: 0.15
+          obstacle_max_range: 10.0
+
+          raytrace_min_range: 0.15
+          raytrace_max_range: 12.0
+
+          max_obstacle_height: 2.0
+          min_obstacle_height: 0.0
+
+          observation_persistence: 0.0
+
+          expected_update_rate: 0.0
+
+        combination_method: 1
+
+        track_unknown_space: false
+
+
+      # INFLATION LAYER
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+
+        enabled: true
+
+        cost_scaling_factor: 3.0
+
+        inflation_radius: 0.35
+
+        inflate_unknown: false
+
+        inflate_around_unknown: false
+
+
+# CONTROLLER SERVER
+#
+# CONFIGURATION PROVISOIRE
+#
+# DWB est utilisé pour permettre les premiers tests.
+# Johny pourra remplacer cette section par son controller final.
+
+controller_server:
+  ros__parameters:
+
+    use_sim_time: true
+
+    controller_frequency: 20.0
+
+    costmap_update_timeout: 0.3
+
+    min_x_velocity_threshold: 0.001
+
+    min_y_velocity_threshold: 0.0
+
+    min_theta_velocity_threshold: 0.001
+
+    failure_tolerance: 0.3
+
+    odom_topic: /odom
+
+    enable_stamped_cmd_vel: false
+
+    controller_plugins:
+      - FollowPath
+
+    progress_checker_plugins:
+      - progress_checker
+
+    goal_checker_plugins:
+      - goal_checker
+
+    # PROGRESS CHECKE
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+
+      required_movement_radius: 0.20
+
+      movement_time_allowance: 10.0
+
+    # GOAL CHECKE
+
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+
+      xy_goal_tolerance: 0.20
+
+      yaw_goal_tolerance: 0.30
+
+      stateful: true
+
+    # DWB CONTROLLE
+
+    FollowPath:
+      plugin: "dwb_core::DWBLocalPlanner"
+
+      debug_trajectory_details: false
+
+      min_vel_x: 0.0
+      max_vel_x: 0.40
+
+      min_vel_y: 0.0
+      max_vel_y: 0.0
+
+      max_vel_theta: 1.0
+
+      min_speed_xy: 0.0
+      max_speed_xy: 0.40
+
+      min_speed_theta: 0.0
+
+      acc_lim_x: 1.0
+      decel_lim_x: -1.0
+
+      acc_lim_y: 0.0
+      decel_lim_y: 0.0
+
+      acc_lim_theta: 2.0
+      decel_lim_theta: -2.0
+
+      vx_samples: 20
+      vy_samples: 1
+      vtheta_samples: 20
+
+      sim_time: 1.7
+
+      linear_granularity: 0.05
+      angular_granularity: 0.025
+
+      transform_tolerance: 0.2
+
+      xy_goal_tolerance: 0.20
+
+      trans_stopped_velocity: 0.05
+      short_circuit_trajectory_evaluation: true
+
+      stateful: true
+
+      critics:
+        - RotateToGoal
+        - Oscillation
+        - BaseObstacle
+        - GoalAlign
+        - PathAlign
+        - PathDist
+        - GoalDist
+
+
+# LOCAL COSTMAP
+#
+# Basée sur les paramètres actuels de Johny.
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+
+      use_sim_time: true
+
+      global_frame: odom
+      robot_base_frame: base_footprint
+
+      rolling_window: true
+
+      width: 5.0
+      height: 5.0
+
+      resolution: 0.05
+
+      update_frequency: 10.0
+      publish_frequency: 10.0
+
+      transform_tolerance: 0.3
+
+      footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+
+      footprint_padding: 0.02
+
+      plugins:
+        - obstacle_layer
+        - inflation_layer
+
+
+      # OBSTACLE LAYER
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+
+        enabled: true
+
+        observation_sources: scan
+
+        scan:
+          topic: /scan
+
+          sensor_frame: lidar_link
+
+          data_type: "LaserScan"
+
+          marking: true
+          clearing: true
+
+          inf_is_valid: false
+
+          obstacle_min_range: 0.15
+          obstacle_max_range: 8.0
+
+          raytrace_min_range: 0.15
+          raytrace_max_range: 9.0
+
+          max_obstacle_height: 2.0
+          min_obstacle_height: 0.0
+
+          observation_persistence: 0.0
+
+          expected_update_rate: 0.0
+
+        combination_method: 1
+
+        track_unknown_space: false
+
+
+      # INFLATION LAYER
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+
+        enabled: true
+
+        cost_scaling_factor: 3.0
+
+        inflation_radius: 0.30
+
+        inflate_unknown: false
+
+        inflate_around_unknown: false
+
+
+# BEHAVIOR SERVER
+#
+# Utilisé par :
+#   Spin
+#   BackUp
+#   Wait
+#
+# Les actions sont nécessaires à notre Behavior Tree.
+
+behavior_server:
+  ros__parameters:
+
+    use_sim_time: true
+
+    cycle_frequency: 10.0
+
+    global_frame: map
+    robot_base_frame: base_footprint
+
+    behavior_plugins:
+      - spin
+      - backup
+      - wait
+
+    spin:
+      plugin: "nav2_behaviors::Spin"
+
+    backup:
+      plugin: "nav2_behaviors::BackUp"
+
+    wait:
+      plugin: "nav2_behaviors::Wait"
+
+
+# LIFECYCLE MANAGER
+
+lifecycle_manager_navigation:
+  ros__parameters:
+
+    use_sim_time: true
+
+    autostart: true
+
+    node_names:
+      - controller_server
+      - planner_server
+      - behavior_server
+      - bt_navigator
