@@ -14,7 +14,7 @@ bt_navigator:
 
     transform_tolerance: 0.3
 
-    default_nav_to_pose_bt_xml: "$(find-pkg-share caytu_nav_bringup)/behavior_trees/navigate_bounded_recovery.xml"
+    default_nav_to_pose_bt_xml: "/home/aropih/ros2_ws/install/caytu_nav_bringup/share/caytu_nav_bringup/behavior_trees/navigate_bounded_recovery.xml"
 
     always_reload_bt_xml: false
 
@@ -121,7 +121,7 @@ global_costmap:
         observation_sources: scan
 
         scan:
-          topic: /scan
+          topic: /scan_filtered
 
           sensor_frame: lidar_link
 
@@ -323,7 +323,7 @@ local_costmap:
         observation_sources: scan
 
         scan:
-          topic: /scan
+          topic: /scan_filtered
 
           sensor_frame: lidar_link
 

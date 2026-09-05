@@ -9,8 +9,8 @@ class LocalizationWatchdog(Node):
         super().__init__('localization_watchdog')
 
         # Seuils de confiance (à ajuster selon vos tests réels de Tâche 5)
-        self.declare_parameter('xy_covariance_threshold', 0.05)   # m^2
-        self.declare_parameter('yaw_covariance_threshold', 0.05)  # rad^2
+        self.declare_parameter('xy_covariance_threshold', 0.3)   # m^2
+        self.declare_parameter('yaw_covariance_threshold', 0.15)  # rad^2
 
         self.xy_threshold = self.get_parameter('xy_covariance_threshold').value
         self.yaw_threshold = self.get_parameter('yaw_covariance_threshold').value

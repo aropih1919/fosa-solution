@@ -17,7 +17,7 @@
       enabled: true
       observation_sources: scan
       scan:
-        topic: /scan
+        topic: /scan_filtered
         sensor_frame: lidar_link
         data_type: "LaserScan"
         marking: true
@@ -45,7 +45,7 @@
       enabled: true
       observation_sources: scan
       scan:
-        topic: /scan
+        topic: /scan_filtered
         sensor_frame: lidar_link
         data_type: "LaserScan"
         marking: true
