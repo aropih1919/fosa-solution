@@ -25,6 +25,8 @@ global_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         enabled: true
         cost_scaling_factor: 3.0
-        inflation_radius: 0.45
+        # Marge initiale cohérente avec le châssis réel ; à ajuster uniquement
+        # après visualisation RViz des passages les plus étroits.
+        inflation_radius: 0.40
         inflate_unknown: false
         inflate_around_unknown: false

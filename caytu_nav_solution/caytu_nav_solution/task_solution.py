@@ -21,7 +21,10 @@ class TaskSolution(Node):
         self._localization_ready = False
         self._navigation_started = False
 
-        self.declare_parameter('test_mode', True)
+        # Un goal réel ne doit jamais partir après le simple délai de développement.
+        # Les tests locaux peuvent réactiver ce comportement avec -p test_mode:=true.
+        self.declare_parameter('test_mode', False)
+        self.declare_parameter('cancel_on_localization_loss', True)
 
         self.create_subscription(Bool, '/localization_ready', self._on_localization_ready, 10)
 
@@ -38,10 +41,24 @@ class TaskSolution(Node):
         )
 
     def _on_localization_ready(self, msg: Bool):
-        if msg.data and not self._localization_ready:
-            self._localization_ready = True
+        was_ready = self._localization_ready
+        self._localization_ready = msg.data
+
+        if msg.data and not was_ready:
             self.get_logger().info('Signal localization_ready reçu (réel).')
             self._start_navigation()
+        elif not msg.data and was_ready and self._navigation_started:
+            # Une covariance redevenue mauvaise peut rendre le plan en map dangereux.
+            # La politique est paramétrable pour garder les essais de tuning possibles.
+            if self.get_parameter('cancel_on_localization_loss').value:
+                self.get_logger().error(
+                    'Localisation perdue pendant la navigation — annulation du goal.'
+                )
+                self.nav2_client.cancel_active_goal()
+            else:
+                self.get_logger().warn(
+                    'Localisation perdue pendant la navigation (annulation désactivée).'
+                )
 
     def _on_fallback_timeout(self):
         self._fallback_timer.cancel()

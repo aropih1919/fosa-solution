@@ -137,7 +137,7 @@
           <BackUp
               backup_dist="0.20"
               backup_speed="0.10"
-              error_code_id="{backup_code_id}"/>
+              error_code_id="{backup_error_code}"/>
 
         </RoundRobin>
 

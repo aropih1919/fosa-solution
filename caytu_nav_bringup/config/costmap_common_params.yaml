@@ -9,7 +9,9 @@
   ros__parameters:
     robot_base_frame: base_footprint
     transform_tolerance: 0.3
-    footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+    # top_chassis occupe environ x=[-0.67, 0.58], y=[-0.22, 0.22] dans
+    # base_footprint. Cette marge protège aussi des petites erreurs de simulation.
+    footprint: "[ [0.60, 0.25], [0.60, -0.25], [-0.70, -0.25], [-0.70, 0.25] ]"
     footprint_padding: 0.02
 
     obstacle_layer:
@@ -37,7 +39,8 @@
   ros__parameters:
     robot_base_frame: base_footprint
     transform_tolerance: 0.3
-    footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+    # La costmap locale doit employer exactement la même enveloppe que la globale.
+    footprint: "[ [0.60, 0.25], [0.60, -0.25], [-0.70, -0.25], [-0.70, 0.25] ]"
     footprint_padding: 0.02
 
     obstacle_layer:

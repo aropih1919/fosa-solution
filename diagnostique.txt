@@ -1,0 +1,321 @@
+============================================================
+DIAGNOSTIC NAVIGATION — PARC ROBOTIQUE 2026
+============================================================
+Date du diagnostic : 2026-09-05
+Repository analysé : /home/faneva/PNSolution/ros2_ws/src/PARC2026-Engineers-League/fosa-solution
+Branche : tri2/fusion, HEAD d6a36ff4aef8ec932c870a4a5056512be33171e8
+Environnement ROS : ROS 2 Jazzy détecté. La simulation/Nav2 n'était pas active durant l'audit : seuls /parameter_events et /rosout étaient visibles. Les constats dynamiques ci-dessous sont donc explicitement marqués NON VÉRIFIÉ.
+
+Méthode : analyse en lecture des launch, YAML, BT, Python, URDF/Xacro et configuration Gazebo. Le PDF joint est traité comme document de contexte ; les consignes exécutées sont celles de la mission fournie. Aucun fichier existant n'a été modifié.
+
+============================================================
+1. RÉSUMÉ EXÉCUTIF
+============================================================
+1. CONFIRMÉ — navigation.launch.py lance Nav2 seul : ni filtre LiDAR, ni map_server, ni AMCL, ni watchdog. Or la localisation/costmaps attendent /scan_filtered et Nav2 a besoin de map -> odom.
+2. CONFIRMÉ — /scan_filtered est produit seulement par une commande manuelle de stepCompleted.md ; le robot fourni ne publie nativement que /scan.
+3. CONFIRMÉ — footprint Nav2 = 0.54 x 0.44 m, mais top_chassis fait environ 1.25 x 0.44 m dans base_footprint. Le robot est sous-modélisé d'environ 0.71 m sur un axe.
+4. TRÈS PROBABLE — le LiDAR auto-détecte le châssis (documenté par le projet). Sans filtre correct, ObstacleFootprint peut rejeter les translations et laisser des rotations valides.
+5. CONFIRMÉ — GoalLocator lit le goal une seule fois et le BT ne le modifie pas. La mauvaise direction tardive est donc plus compatible avec localisation/TF ou costmap erronée qu'avec un changement de goal.
+
+============================================================
+2. PROBLÈMES OBSERVÉS
+============================================================
+2.1 Robot qui tourne mais n'avance pas : la présence de rotations BT est certaine, mais /cmd_vel et LocalPlanEvaluation n'ont pu être observés. Il faut distinguer une Spin recovery d'une décision DWB.
+2.2 Robot qui part vers un mur après une longue période : Nav2Client impose 600 s (10 min), non 20 min. Le BT est borné et ne comporte pas de boucle infinie. La dérive AMCL/TF ou une costmap polluée restent des hypothèses à mesurer.
+
+============================================================
+3. ARCHITECTURE DE NAVIGATION IDENTIFIÉE
+============================================================
+Nodes utilisés : task.launch.py fournit Gazebo, robot_state_publisher, bridge /clock,/scan,/odom,/tf. navigation.launch.py lance controller_server, planner_server, behavior_server, bt_navigator et lifecycle_manager_navigation. Les nœuds filter, map_server, AMCL et watchdog ne sont pas lancés par ce launch.
+Planner : nav2_smac_planner::SmacPlanner2D (GridBased), 10 Hz, tolerance 0.3, allow_unknown=false.
+Controller : dwb_core::DWBLocalPlanner (FollowPath), 15 Hz, max_vel_x=0.40, 20 vx samples, 20 vtheta samples, sim_time=1.7.
+Localization : nav2_amcl est configuré (DifferentialMotionModel) mais doit être lancé/activé manuellement.
+BT Navigator : navigate_bounded_recovery.xml, ComputePath 1 retry, FollowPath 1 retry, RecoveryNode externe 2 retries.
+Costmaps : globale map/static+obstacle+inflation ; locale odom/rolling 5 x 5 m/obstacle+inflation. Les deux consomment /scan_filtered en lidar_link.
+Sensors : LiDAR /scan à 10 Hz, range 0.05–12 m ; odom 30 Hz ; Gazebo publie /tf.
+TF : attendu map -> odom -> base_footprint -> base_link -> lidar_link.
+cmd_vel : Nav2 remappé vers /robot_base_controller/cmd_vel_unstamped ; ros_gz_bridge le relaie vers Gazebo /cmd_vel et DiffDrive le consomme.
+Goal : task_solution.py lit une fois goal_x=-2.293350, goal_y=2.232090 depuis parc_robot_bringup/config/task_params.yaml, dans map.
+
+Fichiers réellement chargés par navigation.launch.py : nav2_params.yaml puis costmap_common_params.yaml, local/global_costmap_params.yaml, planner_server_params.yaml et controller_server_params.yaml selon le serveur. amcl_params.yaml, laser_filter_params.yaml et la carte ne sont pas chargés par ce launch.
+
+============================================================
+4. DIAGNOSTIC TF
+============================================================
+Constatations : DiffDrive est configuré odom -> base_footprint à 30 Hz. robot_state_publisher publie les liens fixes ; base_footprint -> base_link a un yaw +pi/2. AMCL est le fournisseur attendu de map -> odom, mais n'est pas déclaré par navigation.launch.py.
+Preuves : parc_robot_description/urdf/gz_control.xacro, sitoe_core.xacro, rplidar_c1.xacro, amcl_params.yaml et navigation.launch.py.
+
+PROBLÈME : map -> odom peut manquer lors du lancement de navigation seul.
+CAUSE : aucun Node AMCL/map_server ni activation lifecycle dans navigation.launch.py ; stepCompleted.md les demande dans d'autres terminaux.
+NIVEAU DE CERTITUDE : CONFIRMÉ
+FICHIER CONCERNÉ : caytu_nav_bringup/launch/navigation.launch.py ; stepCompleted.md
+PARAMÈTRE : orchestration AMCL/map_server
+VALEUR ACTUELLE : seuls controller, planner, behavior_server et bt_navigator sont lancés.
+VALEUR RECOMMANDÉE : launch d'assemblage qui démarre filtre, map_server, AMCL, watchdog et Nav2 avec use_sim_time:=true.
+CORRECTION À APPLIQUER : créer solution_bringup.launch.py (ou intégrer ces nœuds au launch) et automatiser leur activation/ordre.
+EXPLICATION : sans map -> odom, un goal et le plan global dans map ne peuvent pas être transformés de façon fiable vers odom/base.
+TEST À EFFECTUER : ros2 run tf2_ros tf2_echo map base_footprint ; ros2 run tf2_tools view_frames ; chercher aussi les avertissements d'extrapolation TF.
+
+NON VÉRIFIÉ : fréquence/âge effectifs de map->odom, orientation LiDAR, doublon de publishers /tf et transform timeout runtime.
+
+============================================================
+5. DIAGNOSTIC ODOMÉTRIE
+============================================================
+Constatations : /odom est donné par DiffDrive avec frame_id=odom, child_frame_id=base_footprint, 30 Hz. controller_server, bt_navigator et AMCL utilisent /odom ; le câblage nominal est cohérent.
+
+PROBLÈME : dérive/compatibilité de l'odométrie avec le mouvement réel non mesurée.
+CAUSE : simulation absente durant l'audit, pas de trace odom/pose Gazebo.
+NIVEAU DE CERTITUDE : NON VÉRIFIÉ
+FICHIER CONCERNÉ : parc_robot_description/urdf/gz_control.xacro
+PARAMÈTRE : odom_publish_frequency, frame_id, child_frame_id
+VALEUR ACTUELLE : 30, odom, base_footprint.
+VALEUR RECOMMANDÉE : conserver si les essais confirment le mouvement et l'orientation.
+CORRECTION À APPLIQUER : aucune sans mesure ; enregistrer odom et pose Gazebo pendant translation et rotation.
+EXPLICATION : une dérive non corrigée déplace le plan dans le référentiel réel.
+TEST À EFFECTUER : ros2 topic hz /odom ; ros2 topic echo /odom --once ; comparer sur 10 min /odom, /sitoe_robot/pose et /amcl_pose.
+
+============================================================
+6. DIAGNOSTIC AMCL / LOCALISATION
+============================================================
+Constatations : AMCL emploie /scan_filtered, odom, base_footprint et map ; 500–2000 particules, update_min_d=0.2 m, update_min_a=0.2 rad. README_perception.md documente des covariances x/y proches de 0.24 m2 et des contours de carte possiblement dédoublés. Le watchdog ne teste que la covariance.
+
+PROBLÈME : navigation peut continuer après une perte de confiance localisation.
+CAUSE : task_solution démarre au premier /localization_ready=true puis ignore tout false ultérieur. De plus test_mode=true force le départ après 5 s si le watchdog est absent.
+NIVEAU DE CERTITUDE : CONFIRMÉ pour l'absence de supervision après départ ; HYPOTHÈSE pour la dérive expliquant les 20 minutes.
+FICHIER CONCERNÉ : caytu_nav_solution/task_solution.py ; localization_watchdog.py ; amcl_params.yaml
+PARAMÈTRE : test_mode ; thresholds xy=0.3 m2, yaw=0.15 rad2 ; /localization_ready
+VALEUR ACTUELLE : test_mode=true ; premier true suffit pour démarrer ; aucun arrêt sur false ultérieur.
+VALEUR RECOMMANDÉE : test_mode=false en compétition ; stabilité sur fenêtre temporelle et réaction définie (pause/annulation) si ready redevient false ou map->odom saute.
+CORRECTION À APPLIQUER : surveiller la localisation durant NavigateToPose et mesurer l'écart AMCL vs pose Gazebo en simulation.
+EXPLICATION : une covariance faible ne garantit pas une pose juste ; AMCL peut être confiant mais recollé au mauvais endroit.
+TEST À EFFECTUER : rosbag de /amcl_pose,/tf,/odom,/sitoe_robot/pose pendant 10+ min ; tracer l'erreur de pose et les sauts map->odom.
+
+============================================================
+7. DIAGNOSTIC GLOBAL COSTMAP
+============================================================
+Constatations : global frame=map, 0.05 m, 5 Hz, static_layer+obstacle_layer+inflation_layer. La surcharge finale global_costmap_params.yaml fixe inflation_radius=0.20 m, remplaçant le fallback 0.35 de nav2_params.yaml. Source d'obstacle=/scan_filtered/lidar_link ; map_server est externe.
+
+PROBLÈME : la costmap globale peut ne disposer ni de carte statique ni d'observations laser.
+CAUSE : map_server et producteur de /scan_filtered sont absents du launch Nav2.
+NIVEAU DE CERTITUDE : CONFIRMÉ
+FICHIER CONCERNÉ : navigation.launch.py ; global_costmap_params.yaml ; costmap_common_params.yaml
+PARAMÈTRE : static map source, scan.topic, inflation_radius
+VALEUR ACTUELLE : /scan_filtered ; 0.20 m ; map_server manuel.
+VALEUR RECOMMANDÉE : map_server et filtre supervisés par launch ; inflation 0.40 m initialement, à valider dans les passages étroits.
+CORRECTION À APPLIQUER : attendre /map et /scan_filtered avant l'activation Nav2 ; corriger empreinte avant le réglage d'inflation.
+EXPLICATION : sans carte, Smac ne peut produire de chemin ; sans scan, les obstacles dynamiques ne sont pas intégrés.
+TEST À EFFECTUER : ros2 topic echo /map --once ; ros2 topic hz /scan_filtered ; visualiser /global_costmap/costmap, footprint et /plan dans RViz.
+
+============================================================
+8. DIAGNOSTIC LOCAL COSTMAP
+============================================================
+Constatations : global_frame=odom, rolling window 5 x 5 m, 0.05 m, update 10 Hz, publication 5 Hz. observation_persistence=0.0 ; la costmap dépend du même /scan_filtered.
+
+PROBLÈME : des retours du châssis peuvent occuper la zone devant le robot ; si le filtre n'est pas lancé, la costmap ne reçoit rien.
+CAUSE : LiDAR très bas (z≈0.048 m dans base_footprint), et README_perception documente explicitement son auto-détection avec un filtre externe.
+NIVEAU DE CERTITUDE : CONFIRMÉ pour la dépendance/auto-détection documentée ; TRÈS PROBABLE pour le rejet de translations avec un filtre absent ou incorrect.
+FICHIER CONCERNÉ : rplidar_c1.xacro ; laser_filter_params.yaml ; costmap_common_params.yaml ; local_costmap_params.yaml
+PARAMÈTRE : scan.topic=/scan_filtered, obstacle_min_range=0.35, inflation_radius=0.20, observation_persistence=0.0
+VALEUR ACTUELLE : filtre manuel ; footprint 0.54 x 0.44 m.
+VALEUR RECOMMANDÉE : filtre intégré au launch ; empreinte corrigée ; inflation 0.40 m comme point de départ.
+CORRECTION À APPLIQUER : ne pas activer controller_server avant publication stable de /scan_filtered (~10 Hz) et visualisation d'une zone libre devant le robot.
+EXPLICATION : ObstacleFootprint invalide toute trajectoire dont l'enveloppe touche une cellule occupée. Une rotation peut rester admissible quand une translation ne l'est pas.
+TEST À EFFECTUER : RViz avec scan/local costmap/footprint ; à l'arrêt aucune cellule occupée ne doit recouvrir le footprint. Ajouter un obstacle mobile et vérifier marking/clearing sous 0.2 s.
+
+============================================================
+9. DIAGNOSTIC PLANNER
+============================================================
+Constatations : le fichier chargé en dernier sélectionne SmacPlanner2D (et non Navfn), expected_planner_frequency=10, tolerance=0.3, allow_unknown=false, max_planning_time=2 s. Le BT relance ComputePathToPose à 1 Hz et le réessaie une fois avec clear global costmap.
+
+PROBLÈME : aucun chemin runtime n'a pu être vu.
+CAUSE : pile Nav2 inactive lors de l'audit.
+NIVEAU DE CERTITUDE : NON VÉRIFIÉ
+FICHIER CONCERNÉ : planner_server_params.yaml ; behavior_trees/navigate_bounded_recovery.xml
+PARAMÈTRE : GridBased plugin/tolerance/allow_unknown
+VALEUR ACTUELLE : SmacPlanner2D, 0.3, false.
+VALEUR RECOMMANDÉE : conserver avant validation TF/carte/scan/empreinte ; ne pas tuner le planner sans plan observé.
+CORRECTION À APPLIQUER : activer logs et visualiser /plan ; corriger seulement si un chemin valide est absent ou incohérent.
+EXPLICATION : le code ne démontre ni un échec planner ni un mauvais chemin.
+TEST À EFFECTUER : ros2 topic echo /plan --once ; envoyer ComputePathToPose avec pose/goal valides et vérifier frame_id=map.
+
+============================================================
+10. DIAGNOSTIC CONTROLLER / DWB
+============================================================
+Constatations : cinématique différentielle cohérente (min/max_vel_y=0, vy_samples=1), max_vel_x=0.40, vx_samples=20, vtheta_samples=20, sim_time=1.7. Critics actifs : RotateToGoal, Oscillation, ObstacleFootprint, GoalAlign, PathAlign, PathDist, GoalDist, PreferForward. Weights : PathAlign=32, GoalAlign=24, PathDist=32, GoalDist=24, RotateToGoal=32, PreferForward=3 ; ObstacleFootprint scale=0.02. debug_trajectory_details=false.
+
+PROBLÈME : la cause exacte du vx=0 est invisible.
+CAUSE : les évaluations détaillées de trajectoire ne sont pas demandées.
+NIVEAU DE CERTITUDE : CONFIRMÉ pour le manque de télémétrie ; TRÈS PROBABLE pour ObstacleFootprint lorsque la costmap contient l'auto-détection.
+FICHIER CONCERNÉ : controller_server_params.yaml
+PARAMÈTRE : FollowPath.debug_trajectory_details ; critics/weights ; min_vel_x
+VALEUR ACTUELLE : false ; min_vel_x=0 ; max_vel_x=0.40.
+VALEUR RECOMMANDÉE : debug_trajectory_details=true pendant diagnostic ; conserver les limites cinématiques jusqu'à preuve d'un critic dominant.
+CORRECTION À APPLIQUER : capturer LocalPlanEvaluation puis comparer meilleur vx>0 et meilleur vx=0 ; ne régler un poids qu'après cette preuve.
+EXPLICATION : min_vel_x=0 autorise l'arrêt mais n'empêche pas d'avancer. RotateToGoal est normal près du goal ou si la trajectoire sûre nécessite l'orientation ; il n'est pas seul une cause prouvée.
+TEST À EFFECTUER : ros2 topic list -t | grep -E 'LocalPlanEvaluation|trajectory' ; ros2 topic echo <topic-trouvé> ; chercher scores -1/illégaux et le critic responsable.
+
+============================================================
+11. DIAGNOSTIC CMD_VEL
+============================================================
+Constatations : le câblage est cohérent : controller_server et behavior_server publient Twist non stampé vers /robot_base_controller/cmd_vel_unstamped ; le bridge ROS->Gazebo le relaie vers /cmd_vel de DiffDrive. Aucun velocity_smoother ni mux n'est présent dans le dépôt.
+
+PROBLÈME : aucune mesure ne sépare « Nav2 demande seulement une rotation » de « Nav2 demande l'avance mais le transport la perd ».
+CAUSE : simulation inactive pendant l'audit.
+NIVEAU DE CERTITUDE : NON VÉRIFIÉ
+FICHIER CONCERNÉ : navigation.launch.py ; parc_robot_bringup/config/gz_bridge.yaml
+PARAMÈTRE : cmd_vel remapping ; enable_stamped_cmd_vel=false
+VALEUR ACTUELLE : /robot_base_controller/cmd_vel_unstamped, Twist non stampé.
+VALEUR RECOMMANDÉE : conserver si le test end-to-end confirme un publisher Nav2 et le subscriber bridge.
+CORRECTION À APPLIQUER : aucune valeur à changer sans trace ; instrumenter ce topic.
+EXPLICATION : le remapping statique est juste ; linear.x/angular.z sont la preuve qui manque pour attribuer le défaut à DWB ou au transport.
+TEST À EFFECTUER : ros2 topic info -v /robot_base_controller/cmd_vel_unstamped ; ros2 topic echo du même topic pendant 10 s de blocage ; comparer aux contacts /base_collisions et /odom.
+
+============================================================
+12. DIAGNOSTIC BEHAVIOR TREE
+============================================================
+Constatations : BT référencé = navigate_bounded_recovery.xml. ComputePath et FollowPath ont chacun number_of_retries=1, RecoveryNode externe=2. RoundRobin propose ClearCostmaps, Spin(1.57 rad), Wait(2 s), BackUp(0.20 m), mais deux retries externes ne permettent que Clear puis Spin. Le BT ne modifie jamais {goal}.
+
+PROBLÈME : une rotation de 1.57 rad est une recovery explicitement configurée et peut être confondue avec DWB.
+CAUSE : Spin est la seconde action de recovery globale.
+NIVEAU DE CERTITUDE : CONFIRMÉ
+FICHIER CONCERNÉ : behavior_trees/navigate_bounded_recovery.xml
+PARAMÈTRE : RecoveryNode number_of_retries=2 ; Spin spin_dist=1.57
+VALEUR ACTUELLE : Clear puis Spin peuvent être exécutés après les échecs.
+VALEUR RECOMMANDÉE : conserver le BT borné ; rendre les transitions/recoveries visibles dans logs/feedback avant de décider de retirer Spin.
+CORRECTION À APPLIQUER : instrumenter les recoveries ; modifier Spin seulement si la trace établit qu'il aggrave le scénario.
+EXPLICATION : le BT ne peut pas expliquer une errance infinie de 20 min ; il est borné et Nav2Client annule à 600 s. Il peut expliquer une courte rotation après échec.
+TEST À EFFECTUER : observer logs bt_navigator/feedback NavigateToPose et distinguer explicitement « Spin recovery » de FollowPath/DWB.
+
+============================================================
+13. DIAGNOSTIC SIMULATION TIME
+============================================================
+Constatations : task.launch.py, navigation.launch.py et YAML Nav2/AMCL mettent use_sim_time=true ; le bridge publie /clock. map_server reçoit true dans la procédure manuelle. AMCL le reçoit de son YAML. task_solution et watchdog ne le déclarent pas explicitement ; GoalLocator horodate le goal avec leur horloge.
+
+PROBLÈME : l'architecture multi-terminaux rend l'uniformité de use_sim_time fragile.
+CAUSE : absence de launch unique et de vérification systématique des paramètres.
+NIVEAU DE CERTITUDE : TRÈS PROBABLE pour le risque ; NON VÉRIFIÉ pour une erreur de timestamps observée.
+FICHIER CONCERNÉ : stepCompleted.md ; task_solution.py ; navigation.launch.py
+PARAMÈTRE : use_sim_time
+VALEUR ACTUELLE : true dans YAML Nav2/AMCL, dépendant de l'invocation pour les autres nœuds ; absent des paramètres task_solution/watchdog.
+VALEUR RECOMMANDÉE : use_sim_time:=true passé explicitement à tous les nœuds par le launch d'assemblage.
+CORRECTION À APPLIQUER : centraliser LaunchConfiguration('use_sim_time') et vérifier le paramètre runtime de chaque nœud.
+EXPLICATION : une horloge murale mélangée à /clock provoque scans/TF rejetés, extrapolation et costmaps instables.
+TEST À EFFECTUER : ros2 param get /amcl use_sim_time, puis controller_server, planner_server, bt_navigator, map_server, task_solution et watchdog ; ros2 topic echo /clock --once ; rechercher « extrapolation », « transform timeout », « timestamp ».
+
+============================================================
+14. DIAGNOSTIC DU PROBLÈME DES 20 MINUTES
+============================================================
+Éléments exclus par lecture : GoalLocator lit goal_x/y une fois ; le BT transmet toujours {goal} ; aucun nœud ne remplace le goal ; Nav2Client TIMEOUT_SEC=600 s ; le BT n'est pas infini.
+
+Cause candidate principale : HYPOTHÈSE de dérive/saut AMCL ou TF map->odom. Si elle se décale, un goal fixe en map paraît être dans une autre direction depuis base_footprint ; un replanning vers un mur devient possible. Seconde HYPOTHÈSE : costmap polluée par scan/empreinte qui impose un contournement erroné. Elles ne doivent pas être présentées comme confirmées sans chronologie de mesures.
+
+Protocole de preuve : enregistrer depuis le départ /tf,/tf_static,/amcl_pose,/odom,/sitoe_robot/pose,/plan,/local_plan, costmaps, cmd_vel et feedback Nav2. À la première divergence, comparer : pose réelle vs AMCL ; map->odom avant/après ; goal/plan global ; cellules locales ; linear.x/angular.z ; recovery BT. L'événement causal doit précéder la mauvaise direction.
+
+============================================================
+15. CAUSES IDENTIFIÉES
+============================================================
+Priorité 1 — CONFIRMÉ : orchestration incomplète (filtre, carte, localisation et watchdog non lancés par navigation.launch.py).
+Priorité 2 — CONFIRMÉ : footprint Nav2 trop petit. top_chassis, transformé dans base_footprint, occupe approximativement x=[-0.67,0.58] m et y=[-0.22,0.22] m, contre x=[-0.27,0.27] m, y=[-0.22,0.22] m dans Nav2.
+Priorité 3 — TRÈS PROBABLE : auto-détection LiDAR et ObstacleFootprint empêchent vx>0 quand /scan_filtered est absent/mauvais.
+Priorité 4 — HYPOTHÈSE : dérive AMCL/TF pour l'errance tardive.
+Priorité 5 — CONFIRMÉ : les tests attendent /scan et inflation >=0.40, mais les YAML actuels ont /scan_filtered et 0.20 ; ils ne valident plus le contrat actuel.
+
+============================================================
+16. CORRECTIONS À APPLIQUER
+============================================================
+Correction 1 : launch d'assemblage.
+PROBLÈME : les prérequis navigation sont manuels et non garantis.
+CAUSE : navigation.launch.py ne déclare que les serveurs Nav2.
+NIVEAU DE CERTITUDE : CONFIRMÉ
+FICHIER CONCERNÉ : nouveau caytu_nav_bringup/launch/solution_bringup.launch.py (ou navigation.launch.py).
+PARAMÈTRE : Nodes filtre, map_server, amcl, watchdog, Nav2 ; lifecycle ; use_sim_time.
+VALEUR ACTUELLE : absents du launch Nav2.
+VALEUR RECOMMANDÉE : les lancer tous avec use_sim_time=true ; activer map_server/AMCL avant Nav2 ; attendre /scan_filtered et map->odom avant le goal.
+CORRECTION À APPLIQUER : remplacer la procédure à six terminaux par ce launch.
+EXPLICATION : assure les préconditions planner/controller.
+TEST À EFFECTUER : un seul ros2 launch doit exposer map_server, amcl, scan_to_scan_filter_chain, controller_server, planner_server, bt_navigator ; /scan_filtered ~10 Hz.
+
+Correction 2 : footprint physique.
+PROBLÈME : footprint sous-estime top_chassis.
+CAUSE : rectangle Nav2 0.54 x 0.44 m vs collision ~1.25 x 0.44 m.
+NIVEAU DE CERTITUDE : CONFIRMÉ
+FICHIER CONCERNÉ : caytu_nav_bringup/config/costmap_common_params.yaml.
+PARAMÈTRE : footprint ; footprint_padding.
+VALEUR ACTUELLE : [[0.27,0.22],[0.27,-0.22],[-0.27,-0.22],[-0.27,0.22]], padding=0.01.
+VALEUR RECOMMANDÉE : après validation RViz, [[0.60,0.25],[0.60,-0.25],[-0.70,-0.25],[-0.70,0.25]], padding=0.02.
+CORRECTION À APPLIQUER : mesurer l'enveloppe finale dans base_footprint et appliquer ce polygone conservateur aux deux costmaps.
+EXPLICATION : interdit les passages physiquement impossibles.
+TEST À EFFECTUER : superposer RobotModel et footprint dans RViz, puis passer le long d'un mur dans les deux orientations sans collision.
+
+Correction 3 : fiabiliser scan/costmap/inflation.
+PROBLÈME : le scan filtré dépend d'un processus externe ; inflation active seulement 0.20 m.
+CAUSE : surcharge finale costmap charge 0.20 ; filtre absent du launch.
+NIVEAU DE CERTITUDE : CONFIRMÉ
+FICHIER CONCERNÉ : laser_filter_params.yaml, costmap_common_params.yaml, global_costmap_params.yaml, local_costmap_params.yaml.
+PARAMÈTRE : scan.topic ; obstacle_min_range ; inflation_radius.
+VALEUR ACTUELLE : /scan_filtered ; 0.35 m ; 0.20 m.
+VALEUR RECOMMANDÉE : /scan_filtered conservé mais producteur supervisé ; inflation=0.40 m au départ, à réduire seulement si un passage réel devient impraticable.
+CORRECTION À APPLIQUER : lancer/monitorer le filtre dans bringup, visualiser ses angles supprimés, corriger footprint puis augmenter inflation.
+EXPLICATION : élimine la pollution du châssis et fournit une marge autour des murs/foule.
+TEST À EFFECTUER : aucun retour laser ne doit occuper le footprint ; obstacle mobile marké et effacé à la fréquence attendue.
+
+Correction 4 : rendre DWB observable avant tuning.
+PROBLÈME : cause de vx=0 inconnue.
+CAUSE : debug_trajectory_details=false.
+NIVEAU DE CERTITUDE : CONFIRMÉ
+FICHIER CONCERNÉ : controller_server_params.yaml.
+PARAMÈTRE : FollowPath.debug_trajectory_details.
+VALEUR ACTUELLE : false.
+VALEUR RECOMMANDÉE : true pendant les essais de diagnostic, false ensuite si nécessaire.
+CORRECTION À APPLIQUER : capturer les évaluations ; modifier uniquement le critic prouvé responsable.
+EXPLICATION : modifier max_vel_x ou RotateToGoal aveuglément peut masquer une costmap erronée.
+TEST À EFFECTUER : prouver via LocalPlanEvaluation si vx>0 est illégal (ObstacleFootprint) ou seulement moins bon (alignement/rotation).
+
+Correction 5 : sécuriser localisation et portabilité.
+PROBLÈME : départ forcé après 5 s, watchdog ignoré après ready, chemins absolus machine.
+CAUSE : test_mode=true ; aucune gestion de false ultérieur ; default_nav_to_pose_bt_xml=/home/faneva/... ; guide avec ~/ros2_ws/src/fosa-solution différent de ce workspace ; watchdog non installé en console_script.
+NIVEAU DE CERTITUDE : CONFIRMÉ
+FICHIER CONCERNÉ : task_solution.py, nav2_params.yaml, stepCompleted.md, setup.py.
+PARAMÈTRE : test_mode ; default_nav_to_pose_bt_xml ; entry_points watchdog.
+VALEUR ACTUELLE : true ; chemin absolu ; watchdog lancé par python direct.
+VALEUR RECOMMANDÉE : false hors test ; ressource BT résolue par package share/launch ; watchdog installé/lancé par bringup ; action définie sur perte de ready.
+CORRECTION À APPLIQUER : rendre le déploiement indépendant du répertoire/utilisateur et empêcher un goal compétition sans localisation confirmée.
+EXPLICATION : un launch cassé ou une pose non fiable rend tout réglage Nav2 invalide.
+TEST À EFFECTUER : colcon build puis lancer depuis un autre répertoire/utilisateur ; sans /localization_ready, aucun goal compétition ne doit partir.
+
+Correction 6 : aligner les tests.
+PROBLÈME : test_navigation_config.py contredit les YAML actuels.
+CAUSE : le test exige topic /scan et inflation >=0.40, les YAML actifs ont /scan_filtered et 0.20.
+NIVEAU DE CERTITUDE : CONFIRMÉ
+FICHIER CONCERNÉ : test/test_navigation_config.py ; fichiers costmap.
+PARAMÈTRE : attentes scan.topic/inflation_radius.
+VALEUR ACTUELLE : contradiction ci-dessus.
+VALEUR RECOMMANDÉE : après décision d'équipe, même contrat dans code/test/YAML (recommandation de ce rapport : scan filtré + inflation 0.40).
+CORRECTION À APPLIQUER : synchroniser tests et configuration finalisée ; ajouter test footprint/bringup intégré.
+EXPLICATION : des tests obsolètes rouges ne détectent pas les régressions pertinentes.
+TEST À EFFECTUER : colcon test --packages-select caytu_nav_bringup ; colcon test-result.
+
+============================================================
+17. PLAN DE TEST
+============================================================
+Test 1 — Prérequis : lancer le bringup intégré ; vérifier /clock,/scan,/scan_filtered,/map,/amcl_pose,/odom et TF map->odom->base_footprint. Tous lifecycle Nav2 doivent être active avant NavigateToPose.
+Test 2 — Costmap/empreinte : RViz avec scan, costmaps, footprint, RobotModel et plan. À l'arrêt, aucune cellule occupée dans footprint ; le polygone couvre top_chassis.
+Test 3 — DWB : détails activés ; envoyer un goal dégagé ; enregistrer cmd_vel et LocalPlanEvaluation. Succès : un vx>0 valide et linear.x>0.
+Test 4 — Chaîne commande : topic info -v/echo du topic remappé ; comparer linear.x/angular.z avec mouvement, odom et contacts.
+Test 5 — Longue durée : rosbag au moins 10 min, puis 20 min si nécessaire ; comparer pose Gazebo, AMCL et map->odom, conserver goal/plans/costmaps/cmd_vel/recoveries.
+Test 6 — Régression : vérifier BT borné, annulation à 600 s, et bringup exécutable hors du répertoire de développement actuel.
+
+============================================================
+18. ORDRE DE CORRECTION RECOMMANDÉ
+============================================================
+1. Créer le launch d'assemblage et confirmer TF/carte/scan filtré.
+2. Corriger l'empreinte, puis inflation et image des costmaps.
+3. Activer la télémétrie DWB et prouver la cause de vx=0 avant de régler les critics.
+4. Exécuter le test long instrumenté ; ne modifier AMCL/watchdog/use_sim_time que selon les corrélations mesurées ; enfin synchroniser les tests.
+
+============================================================
+19. CONCLUSION
+============================================================
+Le symptôme « tourne sans avancer » n'est pas, à ce stade, un simple problème de max_vel_x ou RotateToGoal. Les prérequis de navigation sont externes au launch, l'empreinte ne représente pas le robot et le LiDAR se voit lui-même. Ces défauts sont démontrés et prioritaires.
+
+La direction tardive ne vient pas d'un changement de goal dans le code ni d'une boucle BT infinie. Localisation/TF ou costmap restent les pistes à départager par le rosbag décrit ; aucune hypothèse ne doit être promue au rang de certitude sans cette chronologie.

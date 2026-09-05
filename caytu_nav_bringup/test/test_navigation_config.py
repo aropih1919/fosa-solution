@@ -37,6 +37,7 @@ def test_costmap_node_paths_and_integer_window_size():
     assert local_costmap["plugins"] == ["obstacle_layer", "inflation_layer"]
     assert type(local_costmap["width"]) is int
     assert type(local_costmap["height"]) is int
+    # La marge retenue protège le châssis réel, plus large que l'ancien footprint.
     assert global_costmap["inflation_layer"]["inflation_radius"] >= 0.40
     assert local_costmap["inflation_layer"]["inflation_radius"] >= 0.40
 
@@ -49,7 +50,9 @@ def test_common_costmap_parameters_target_both_internal_nodes():
         assert params["robot_base_frame"] == "base_footprint"
         assert params["obstacle_layer"]["observation_sources"] == "scan"
         scan = params["obstacle_layer"]["scan"]
-        assert scan["topic"] == "/scan"
+        # /scan est brut et contient l'auto-détection du châssis ; Nav2 doit
+        # uniquement consommer le flux produit par laser_filters.
+        assert scan["topic"] == "/scan_filtered"
         assert scan["sensor_frame"] == "lidar_link"
         assert scan["marking"] is True
         assert scan["clearing"] is True
@@ -115,3 +118,27 @@ def test_launch_loads_all_johny_parameter_files():
         "controller_server_params.yaml",
     ):
         assert name in launch_file
+
+
+def test_navigation_launch_uses_package_relative_bt_path():
+    launch_file = (PACKAGE_DIR / "launch" / "navigation.launch.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "get_package_share_directory" in launch_file
+    assert "navigate_bounded_recovery.xml" in launch_file
+    assert "/home/" not in launch_file
+
+
+def test_solution_bringup_starts_navigation_prerequisites():
+    launch_file = (PACKAGE_DIR / "launch" / "solution_bringup.launch.py").read_text(
+        encoding="utf-8"
+    )
+
+    for executable in (
+        "scan_to_scan_filter_chain",
+        "map_server",
+        "amcl",
+        "localization_watchdog",
+    ):
+        assert executable in launch_file

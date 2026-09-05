@@ -14,7 +14,8 @@ bt_navigator:
 
     transform_tolerance: 0.3
 
-    default_nav_to_pose_bt_xml: "/home/aropih/ros2_ws/install/caytu_nav_bringup/share/caytu_nav_bringup/behavior_trees/navigate_bounded_recovery.xml"
+    # Le launch injecte ce chemin depuis le partage du package.  Ne jamais mettre
+    # ici un chemin /home/<utilisateur> : il casserait après installation/déploiement.
 
     always_reload_bt_xml: false
 
@@ -93,7 +94,9 @@ global_costmap:
 
       transform_tolerance: 0.3
 
-      footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+      # Enveloppe conservatrice de top_chassis dans base_footprint (le châssis
+      # est asymétrique après la rotation fixe base_footprint -> base_link).
+      footprint: "[ [0.60, 0.25], [0.60, -0.25], [-0.70, -0.25], [-0.70, 0.25] ]"
 
       footprint_padding: 0.02
 
@@ -159,7 +162,7 @@ global_costmap:
 
         cost_scaling_factor: 3.0
 
-        inflation_radius: 0.35
+        inflation_radius: 0.40
 
         inflate_unknown: false
 
@@ -304,7 +307,9 @@ local_costmap:
 
       transform_tolerance: 0.3
 
-      footprint: "[ [0.27, 0.22], [0.27, -0.22], [-0.27, -0.22], [-0.27, 0.22] ]"
+      # Même enveloppe que la costmap globale : planner et controller doivent
+      # toujours raisonner sur la même taille physique de robot.
+      footprint: "[ [0.60, 0.25], [0.60, -0.25], [-0.70, -0.25], [-0.70, 0.25] ]"
 
       footprint_padding: 0.02
 
@@ -361,7 +366,7 @@ local_costmap:
 
         cost_scaling_factor: 3.0
 
-        inflation_radius: 0.30
+        inflation_radius: 0.40
 
         inflate_unknown: false
 

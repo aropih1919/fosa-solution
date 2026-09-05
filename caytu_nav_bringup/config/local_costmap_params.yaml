@@ -23,6 +23,8 @@ local_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         enabled: true
         cost_scaling_factor: 3.0
-        inflation_radius: 0.45
+        # Garder la même marge que la costmap globale évite des plans locaux
+        # réalisables en apparence mais dangereux pour le châssis large.
+        inflation_radius: 0.40
         inflate_unknown: false
         inflate_around_unknown: false

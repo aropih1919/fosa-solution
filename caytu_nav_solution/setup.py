@@ -21,6 +21,9 @@ setup(
     entry_points={
         'console_scripts': [
             'task_solution = caytu_nav_solution.task_solution:main',
+            # Installé afin que le bringup puisse le lancer depuis le package,
+            # sans chemin source absolu ni `python3 <fichier>` manuel.
+            'localization_watchdog = caytu_nav_solution.localization_watchdog:main',
         ],
     },
 )

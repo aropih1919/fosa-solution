@@ -35,6 +35,11 @@ def generate_launch_description():
     controller_params_file = os.path.join(
         bringup_dir, "config", "controller_server_params.yaml"
     )
+    # Résolution par le package installé : fonctionne en workspace source comme
+    # après `colcon build`, sans dépendre du répertoire personnel du développeur.
+    bt_xml_file = os.path.join(
+        bringup_dir, "behavior_trees", "navigate_bounded_recovery.xml"
+    )
 
     # LAUNCH ARGUMENTS
 
@@ -126,6 +131,8 @@ def generate_launch_description():
             params_file,
             {
                 "use_sim_time": use_sim_time,
+                # Surcharge le YAML volontairement dépourvu de chemin absolu.
+                "default_nav_to_pose_bt_xml": bt_xml_file,
             },
         ],
     )

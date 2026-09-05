@@ -17,7 +17,9 @@ avec un signal `/localization_ready` indiquant quand le robot est prêt pour la 
 - `/localization_ready` (nouveau, publié par notre watchdog) : signal booléen
 
 ## ⚠️ Découvertes critiques pour l'équipe
-1. **Le but de la tâche est communiqué via `/goal_pose`.**
+1. **Le but de la tâche est lu dans `parc_robot_bringup/config/task_params.yaml`**
+   (`goal_x`, `goal_y`). `/goal_pose` reste un outil RViz manuel et ne doit pas
+   être considéré comme la source automatique du but de compétition.
 2. **Le topic de commande réel du robot est `/robot_base_controller/cmd_vel_unstamped`**,
    pas `/cmd_vel` — nécessite un remapping dans la config Nav2 de Trinôme 2.
 3. **Le LiDAR se détecte lui-même** (auto-collision du scan avec le châssis) à quatres plages

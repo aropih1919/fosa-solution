@@ -28,7 +28,9 @@ controller_server:
 
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
-      debug_trajectory_details: false
+      # Publie les scores DWB afin d'identifier le critic qui élimine vx > 0.
+      # À repasser à false uniquement lorsque le comportement est validé.
+      debug_trajectory_details: true
       min_vel_x: 0.0
       min_vel_y: 0.0
       max_vel_x: 0.40
