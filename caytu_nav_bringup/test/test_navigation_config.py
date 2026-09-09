@@ -37,9 +37,10 @@ def test_costmap_node_paths_and_integer_window_size():
     assert local_costmap["plugins"] == ["obstacle_layer", "inflation_layer"]
     assert type(local_costmap["width"]) is int
     assert type(local_costmap["height"]) is int
-    # La marge retenue protège le châssis réel, plus large que l'ancien footprint.
-    assert global_costmap["inflation_layer"]["inflation_radius"] >= 0.40
-    assert local_costmap["inflation_layer"]["inflation_radius"] >= 0.40
+    # Le footprint physique protège le châssis ; ces rayons conservent ensuite
+    # une marge sans fermer les couloirs de la carte du stade.
+    assert global_costmap["inflation_layer"]["inflation_radius"] == 0.30
+    assert local_costmap["inflation_layer"]["inflation_radius"] == 0.25
 
 
 def test_common_costmap_parameters_target_both_internal_nodes():
@@ -48,6 +49,11 @@ def test_common_costmap_parameters_target_both_internal_nodes():
     for node_pattern in ("/**/global_costmap", "/**/local_costmap"):
         params = common[node_pattern]["ros__parameters"]
         assert params["robot_base_frame"] == "base_footprint"
+        assert params["footprint"] == (
+            "[ [0.22, 0.25], [0.22, -0.25], "
+            "[-0.31, -0.25], [-0.31, 0.25] ]"
+        )
+        assert params["footprint_padding"] == 0.02
         assert params["obstacle_layer"]["observation_sources"] == "scan"
         scan = params["obstacle_layer"]["scan"]
         # /scan est brut et contient l'auto-détection du châssis ; Nav2 doit

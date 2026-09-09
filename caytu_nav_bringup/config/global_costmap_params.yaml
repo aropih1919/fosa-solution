@@ -25,8 +25,9 @@ global_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         enabled: true
         cost_scaling_factor: 3.0
-        # Marge initiale cohérente avec le châssis réel ; à ajuster uniquement
-        # après visualisation RViz des passages les plus étroits.
-        inflation_radius: 0.40
+        # Le footprint décrit déjà le robot réel (environ 0.53 x 0.50 m avec
+        # padding). Une inflation de 0.30 m garde une distance aux murs sans
+        # fermer artificiellement les couloirs de la carte du stade.
+        inflation_radius: 0.30
         inflate_unknown: false
         inflate_around_unknown: false
