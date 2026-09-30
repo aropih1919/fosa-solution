@@ -1,0 +1,647 @@
+#!/usr/bin/env python3
+"""Benchmark d'un run de navigation PARC 2026 (moniteur passif).
+
+Ce script ne pilote PAS le robot. Il écoute ce qui se passe pendant un run et
+mesure les 3 critères officiels :
+  1. contacts (évitement d'obstacles)
+  2. distance finale entre le centre du robot et le but
+  3. durée d'exécution (en temps SIMULÉ, pas en temps réel)
+Il ajoute des infos de diagnostic (recoveries, statut Nav2, gel du simulateur...).
+
+Utilisation : lancer ce script en même temps que la solution, dans un terminal
+où le workspace est sourcé :
+    python3 tools/benchmark.py --label baseline_sans_camera
+
+Le résultat est écrit dans tools/results/run_<date>_<label>.json
+"""
+
+import argparse
+import json
+import math
+import os
+import subprocess
+import time
+import xml.etree.ElementTree as ET
+from datetime import datetime
+
+import tf2_ros
+import yaml
+import rclpy
+from action_msgs.msg import GoalStatusArray
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from nav2_msgs.action import NavigateToPose
+from nav_msgs.msg import Odometry
+from rclpy.clock import Clock
+from rclpy.node import Node
+from rclpy.parameter import Parameter
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rosidl_runtime_py.utilities import get_message
+from std_msgs.msg import Bool
+
+import bench_core as core
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Rayon utilisé si on ne peut pas le lire dans le modèle du but (à vérifier !)
+DEFAULT_GOAL_RADIUS = 0.5
+
+
+# --------------------------------------------------------------------------
+# Lecture de la configuration de la tâche
+# --------------------------------------------------------------------------
+
+def load_task_params():
+    """Lit goal_x, goal_y et la pose de départ dans task_params.yaml."""
+    path = os.path.join(
+        get_package_share_directory('parc_robot_bringup'), 'config', 'task_params.yaml'
+    )
+    with open(path, encoding='utf-8') as handle:
+        data = yaml.safe_load(handle)
+    return data['/**']['ros__parameters']
+
+
+def read_goal_radius():
+    """Cherche le rayon du cercle vert dans models/goal_location/model.sdf.
+
+    Retourne (rayon, source). Le rayon est None si le fichier est introuvable.
+    """
+    candidates = []
+    try:
+        share = get_package_share_directory('parc_robot_bringup')
+        candidates.append(os.path.join(share, 'models', 'goal_location', 'model.sdf'))
+    except PackageNotFoundError:
+        pass
+    # Dépôt source : fosa-solution/ et parc_robot_bringup/ sont côte à côte
+    candidates.append(os.path.join(
+        SCRIPT_DIR, '..', '..', 'parc_robot_bringup', 'models', 'goal_location', 'model.sdf'
+    ))
+
+    for path in candidates:
+        if not os.path.isfile(path):
+            continue
+        try:
+            tree = ET.parse(path)
+            for element in tree.iter('radius'):
+                return float(element.text), path
+        except (ET.ParseError, ValueError):
+            continue
+    return None, None
+
+
+def get_git_commit():
+    """Commit courant, avec '-dirty' si des fichiers suivis sont modifiés."""
+    try:
+        commit = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            cwd=SCRIPT_DIR, capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        changes = subprocess.run(
+            ['git', 'status', '--porcelain', '--untracked-files=no'],
+            cwd=SCRIPT_DIR, capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        if not commit:
+            return 'inconnu'
+        return commit + ('-dirty' if changes else '')
+    except Exception:
+        return 'inconnu'
+
+
+# --------------------------------------------------------------------------
+# Le noeud de mesure
+# --------------------------------------------------------------------------
+
+class BenchmarkNode(Node):
+
+    def __init__(self, args, goal_x, goal_y, goal_radius, goal_radius_source):
+        super().__init__(
+            'benchmark_monitor',
+            parameter_overrides=[Parameter('use_sim_time', Parameter.Type.BOOL, True)],
+        )
+        self.args = args
+        self.goal_x = goal_x
+        self.goal_y = goal_y
+        self.goal_radius = goal_radius
+        self.goal_radius_source = goal_radius_source
+        self.ignore_keywords = [k.strip().lower() for k in args.ignore_keywords.split(',')]
+
+        # Temps
+        self.wall_start = time.time()
+        self.sim_start = None
+        self.last_sim = None
+        self.last_sim_change_wall = time.time()
+        self.max_freeze_wall = 0.0
+        self.last_print_wall = 0.0
+
+        # Position du robot
+        self.pose = None
+        self.first_pose = None
+        self.last_path_pose = None
+        self.path_length = 0.0
+        self.center_distance = None
+        self.edge_distance = None
+        self.min_center_distance = None
+        self.t_first_motion = None
+
+        # Nav2
+        self.goal_ids = set()
+        self.t_first_goal = None
+        self.last_status = None
+        self.status_history = []
+        self.terminal_since = None
+        self.recoveries = 0
+        self.distance_remaining = None
+
+        # Localisation
+        self.loc_ready = None
+        self.loc_ready_at = None
+        self.loc_loss_count = 0
+
+        # Contacts
+        self.contact_subs = {}
+        self.contacts_total = core.ContactCounter(args.contact_gap)
+        self.contacts_by_sensor = {}
+        self.contact_events = []
+        self.contact_pairs_seen = set()
+        self.last_discovery_wall = 0.0
+        self.discovery_done = False
+
+        # Fin du run
+        self.finished = False
+        self.report = None
+        self.report_path = None
+
+        self._setup_pose_source()
+        self._setup_subscriptions()
+
+        # Timer en temps MUR : il continue de tourner même si Gazebo gèle
+        self.create_timer(0.2, self.on_tick, clock=Clock())
+
+    # ---------------- abonnements ----------------
+
+    def _setup_pose_source(self):
+        self.tf_buffer = None
+        if self.args.pose_source == 'tf':
+            self.tf_buffer = tf2_ros.Buffer()
+            self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+            return
+
+        msg_types = {
+            'posestamped': PoseStamped,
+            'odometry': Odometry,
+            'posewithcovariancestamped': PoseWithCovarianceStamped,
+        }
+        msg_class = msg_types[self.args.pose_type]
+        self.create_subscription(msg_class, self.args.pose_topic, self.on_pose_msg, 10)
+
+    def _setup_subscriptions(self):
+        # Le topic de statut de l'action est "transient local" : on reçoit le dernier état
+        status_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(
+            GoalStatusArray, '/navigate_to_pose/_action/status', self.on_status, status_qos
+        )
+        self.create_subscription(
+            NavigateToPose.Impl.FeedbackMessage,
+            '/navigate_to_pose/_action/feedback',
+            self.on_feedback,
+            10,
+        )
+        self.create_subscription(Bool, '/localization_ready', self.on_localization, 10)
+
+    def discover_contact_topics(self):
+        """Cherche les topics de collision (ils ne sont pas connus à l'avance)."""
+        if self.discovery_done:
+            return
+        now = time.time()
+        if now - self.last_discovery_wall < 2.0:
+            return
+        self.last_discovery_wall = now
+
+        for name, types in self.get_topic_names_and_types():
+            if 'collision' not in name or name in self.contact_subs or not types:
+                continue
+            try:
+                msg_class = get_message(types[0])
+            except Exception as error:
+                self.get_logger().warn(f'Type inconnu pour {name} ({types[0]}) : {error}')
+                continue
+            self.contact_subs[name] = self.create_subscription(
+                msg_class, name, lambda msg, topic=name: self.on_contacts(topic, msg), 10
+            )
+            self.contacts_by_sensor[name] = core.ContactCounter(self.args.contact_gap)
+            self.get_logger().info(f'Capteur de contact trouvé : {name} ({types[0]})')
+
+        # On arrête de chercher après 20 s
+        if now - self.wall_start > 20.0:
+            self.discovery_done = True
+            if not self.contact_subs:
+                self.get_logger().warn(
+                    'AUCUN topic de collision trouvé : les contacts ne seront pas mesurés.'
+                )
+
+    # ---------------- callbacks ----------------
+
+    def sim_now(self):
+        return self.get_clock().now().nanoseconds / 1e9
+
+    def elapsed_now(self):
+        if self.sim_start is None:
+            return None
+        return self.sim_now() - self.sim_start
+
+    def on_pose_msg(self, msg):
+        pose = msg.pose
+        if hasattr(pose, 'pose'):  # PoseWithCovarianceStamped et Odometry
+            pose = pose.pose
+        q = pose.orientation
+        yaw = core.yaw_from_quaternion(q.x, q.y, q.z, q.w)
+        self.pose = (pose.position.x, pose.position.y, yaw)
+
+    def on_status(self, msg):
+        if not msg.status_list:
+            return
+
+        for status in msg.status_list:
+            goal_id = bytes(status.goal_info.goal_id.uuid).hex()
+            if goal_id not in self.goal_ids:
+                self.goal_ids.add(goal_id)
+                if self.t_first_goal is None:
+                    self.t_first_goal = self.elapsed_now()
+
+        last = msg.status_list[-1].status
+        if last != self.last_status:
+            self.last_status = last
+            self.status_history.append({
+                't': self._round(self.elapsed_now()),
+                'status': core.STATUS_NAMES.get(last, str(last)),
+            })
+            self.get_logger().info(
+                f'Nav2 : statut du goal = {core.STATUS_NAMES.get(last, last)}'
+            )
+
+    def on_feedback(self, msg):
+        feedback = msg.feedback
+        self.recoveries = max(self.recoveries, feedback.number_of_recoveries)
+        self.distance_remaining = feedback.distance_remaining
+
+    def on_localization(self, msg):
+        if self.loc_ready is not None and self.loc_ready and not msg.data:
+            self.loc_loss_count += 1
+            self.get_logger().warn('Localisation perdue (/localization_ready est passé à false).')
+        if msg.data and self.loc_ready_at is None:
+            self.loc_ready_at = self._round(self.elapsed_now())
+        self.loc_ready = msg.data
+
+    def on_contacts(self, topic, msg):
+        if self.sim_start is None or self.finished:
+            return
+
+        sim_now = self.sim_now()
+        for contact in getattr(msg, 'contacts', []):
+            name1 = getattr(getattr(contact, 'collision1', None), 'name', '')
+            name2 = getattr(getattr(contact, 'collision2', None), 'name', '')
+            real = core.is_real_contact(name1, name2, self.ignore_keywords)
+
+            if self.args.debug_contacts and (name1, name2) not in self.contact_pairs_seen:
+                self.contact_pairs_seen.add((name1, name2))
+                verdict = 'COMPTÉ' if real else 'ignoré'
+                print(f'[contact {verdict}] {topic} : {name1}  <->  {name2}')
+
+            if not real:
+                continue
+
+            new_episode = self.contacts_total.add(sim_now)
+            self.contacts_by_sensor[topic].add(sim_now)
+            if new_episode and len(self.contact_events) < 30:
+                self.contact_events.append({
+                    't': self._round(sim_now - self.sim_start),
+                    'sensor': topic,
+                    'collision1': name1,
+                    'collision2': name2,
+                })
+                self.get_logger().warn(f'CONTACT #{self.contacts_total.episodes} : {name1} <-> {name2}')
+
+    # ---------------- boucle principale ----------------
+
+    def on_tick(self):
+        if self.finished:
+            return
+
+        sim_now = self.sim_now()
+        wall_now = time.time()
+        self.check_freeze(sim_now, wall_now)
+
+        # Attendre que l'horloge de simulation démarre
+        if self.sim_start is None:
+            if sim_now > 0.0:
+                self.sim_start = sim_now
+                self.get_logger().info('Horloge simulée détectée : chronomètre démarré.')
+            elif wall_now - self.wall_start > 120.0:
+                self.finish('NO_CLOCK', "Pas de /clock reçu : Gazebo est-il en lecture (Play) ?")
+            return
+
+        self.discover_contact_topics()
+        self.update_pose(sim_now)
+        self.print_progress(sim_now, wall_now)
+        self.check_end(sim_now, wall_now)
+
+    def check_freeze(self, sim_now, wall_now):
+        frozen_for = wall_now - self.last_sim_change_wall
+        if self.sim_start is not None:
+            self.max_freeze_wall = max(self.max_freeze_wall, frozen_for)
+        if self.last_sim is None or sim_now != self.last_sim:
+            self.last_sim = sim_now
+            self.last_sim_change_wall = wall_now
+
+    def update_pose(self, sim_now):
+        if self.tf_buffer is not None:
+            try:
+                transform = self.tf_buffer.lookup_transform(
+                    'map', 'base_footprint', rclpy.time.Time()
+                )
+            except tf2_ros.TransformException:
+                return
+            t = transform.transform.translation
+            q = transform.transform.rotation
+            self.pose = (t.x, t.y, core.yaw_from_quaternion(q.x, q.y, q.z, q.w))
+
+        if self.pose is None:
+            return
+
+        x, y, yaw = self.pose
+
+        if self.first_pose is None:
+            self.first_pose = (x, y)
+            self.last_path_pose = (x, y)
+
+        # Distance parcourue (on ignore les petits tremblements de la localisation)
+        step = math.hypot(x - self.last_path_pose[0], y - self.last_path_pose[1])
+        if step > 0.01:
+            self.path_length += step
+            self.last_path_pose = (x, y)
+
+        # Première mise en mouvement
+        if self.t_first_motion is None:
+            moved = math.hypot(x - self.first_pose[0], y - self.first_pose[1])
+            if moved > 0.10:
+                self.t_first_motion = sim_now - self.sim_start
+
+        self.center_distance = math.hypot(self.goal_x - x, self.goal_y - y)
+        self.edge_distance = core.distance_to_robot_body(self.goal_x, self.goal_y, x, y, yaw)
+        if self.min_center_distance is None or self.center_distance < self.min_center_distance:
+            self.min_center_distance = self.center_distance
+
+    def check_end(self, sim_now, wall_now):
+        elapsed = sim_now - self.sim_start
+
+        # 1. Arrivée : une partie du robot est dans le cercle
+        if self.edge_distance is not None and self.edge_distance <= self.goal_radius:
+            self.finish('SUCCESS')
+            return
+
+        # 2. Temps écoulé
+        if elapsed >= self.args.time_limit:
+            self.finish('TIMEOUT')
+            return
+
+        # 3. Simulateur gelé ou en pause trop longtemps
+        frozen_for = wall_now - self.last_sim_change_wall
+        if frozen_for >= self.args.freeze_abort:
+            self.finish(
+                'SIM_FROZEN',
+                f"L'horloge simulée n'avance plus depuis {frozen_for:.0f} s (temps réel) : "
+                'Gazebo gelé ou en pause.',
+            )
+            return
+
+        # 4. Pas de position du robot
+        if self.pose is None and wall_now - self.wall_start > 60.0:
+            self.finish('NO_POSE', 'Aucune position du robot reçue (TF map -> base_footprint ?).')
+            return
+
+        # 5. Nav2 a terminé son goal alors que le robot n'est pas arrivé
+        if self.args.stop_on_nav_end and self.last_status in core.TERMINAL_STATUSES:
+            if self.terminal_since is None:
+                self.terminal_since = sim_now
+            elif sim_now - self.terminal_since >= self.args.nav_end_grace:
+                name = core.STATUS_NAMES.get(self.last_status)
+                self.finish(
+                    'NAV_ENDED_EARLY',
+                    f'Nav2 a terminé le goal (statut {name}) sans que le robot atteigne le cercle.',
+                )
+        else:
+            self.terminal_since = None
+
+    def print_progress(self, sim_now, wall_now):
+        if wall_now - self.last_print_wall < 10.0:
+            return
+        self.last_print_wall = wall_now
+        elapsed = sim_now - self.sim_start
+        dist = 'n/a' if self.center_distance is None else f'{self.center_distance:.2f} m'
+        status = core.STATUS_NAMES.get(self.last_status, 'aucun goal')
+        self.get_logger().info(
+            f't_sim={elapsed:5.0f}s | distance au but={dist} | contacts={self.contacts_total.episodes} '
+            f'| recoveries={self.recoveries} | Nav2={status}'
+        )
+
+    # ---------------- fin du run ----------------
+
+    @staticmethod
+    def _round(value, digits=2):
+        if value is None:
+            return None
+        return round(value, digits)
+
+    def finish(self, result, note=''):
+        if self.finished:
+            return
+        self.finished = True
+
+        sim_end = self.last_sim if self.last_sim is not None else 0.0
+        start = self.sim_start if self.sim_start is not None else sim_end
+        elapsed = sim_end - start
+        wall_elapsed = time.time() - self.wall_start
+
+        start_distance = None
+        if self.first_pose is not None:
+            start_distance = math.hypot(
+                self.goal_x - self.first_pose[0], self.goal_y - self.first_pose[1]
+            )
+
+        time_since_goal = None
+        if self.t_first_goal is not None:
+            time_since_goal = elapsed - self.t_first_goal
+
+        average_speed = None
+        if elapsed > 0 and self.first_pose is not None:
+            average_speed = self.path_length / elapsed
+
+        self.report = {
+            'label': self.args.label,
+            'result': result,
+            'note': note,
+            'date': datetime.now().isoformat(timespec='seconds'),
+            'git_commit': get_git_commit(),
+            'time_sec': self._round(elapsed, 1),
+            'time_since_first_goal_sec': self._round(time_since_goal, 1),
+            'time_limit_sec': self.args.time_limit,
+            'wall_seconds': self._round(wall_elapsed, 1),
+            'real_time_factor': self._round(elapsed / wall_elapsed) if wall_elapsed > 0 else None,
+            'goal': {
+                'x': self.goal_x,
+                'y': self.goal_y,
+                'radius': self.goal_radius,
+                'radius_source': self.goal_radius_source,
+            },
+            'pose_source': self.args.pose_source,
+            'start_distance_to_goal': self._round(start_distance),
+            'final_center_distance': self._round(self.center_distance),
+            'final_edge_distance': self._round(self.edge_distance),
+            'min_center_distance': self._round(self.min_center_distance),
+            'path_length_m': self._round(self.path_length),
+            'average_speed_mps': self._round(average_speed),
+            'contacts_available': bool(self.contact_subs),
+            'contacts_episodes': self.contacts_total.episodes if self.contact_subs else None,
+            'contacts_messages': self.contacts_total.messages,
+            'contacts_by_sensor': {
+                topic: counter.episodes for topic, counter in self.contacts_by_sensor.items()
+            },
+            'contact_events': self.contact_events,
+            'recoveries': self.recoveries,
+            'nav2': {
+                'goals_seen': len(self.goal_ids),
+                'last_status': core.STATUS_NAMES.get(self.last_status, 'aucun'),
+                'status_history': self.status_history,
+            },
+            't_first_goal': self._round(self.t_first_goal),
+            't_first_motion': self._round(self.t_first_motion),
+            'localization': {
+                'ready_at': self.loc_ready_at,
+                'loss_count': self.loc_loss_count,
+            },
+            'sim_freeze': {
+                'max_wall_seconds': self._round(self.max_freeze_wall, 1),
+            },
+        }
+
+        os.makedirs(self.args.output_dir, exist_ok=True)
+        safe_label = ''.join(c if c.isalnum() or c in '-_.' else '_' for c in self.args.label)
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.report_path = os.path.join(self.args.output_dir, f'run_{stamp}_{safe_label}.json')
+        with open(self.report_path, 'w', encoding='utf-8') as handle:
+            json.dump(self.report, handle, indent=2, ensure_ascii=False)
+
+        self.print_report()
+
+    def print_report(self):
+        r = self.report
+        print()
+        print('=' * 60)
+        print(f" RÉSULTAT : {r['result']}   (label : {r['label']})")
+        if r['note']:
+            print(f" Note     : {r['note']}")
+        print('=' * 60)
+        print(f" Temps (simulé)        : {r['time_sec']} s   (limite {r['time_limit_sec']} s)")
+        print(f" Distance finale       : {r['final_center_distance']} m (centre -> but)")
+        print(f" Distance parcourue    : {r['path_length_m']} m")
+        if r['contacts_available']:
+            print(f" Contacts (épisodes)   : {r['contacts_episodes']}")
+        else:
+            print(' Contacts (épisodes)   : NON MESURÉS (aucun topic de collision)')
+        print(f" Recoveries Nav2       : {r['recoveries']}")
+        print(f" Dernier statut Nav2   : {r['nav2']['last_status']}")
+        print(f" Pertes localisation   : {r['localization']['loss_count']}")
+        print(f" Facteur temps réel    : {r['real_time_factor']}")
+        print(f" Fichier               : {self.report_path}")
+        print('=' * 60)
+
+
+# --------------------------------------------------------------------------
+# Programme principal
+# --------------------------------------------------------------------------
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Benchmark d\'un run de navigation PARC 2026.')
+    parser.add_argument('--label', default='run',
+                        help="Nom de la configuration testée (ex: baseline_sans_camera)")
+    parser.add_argument('--time-limit', type=float, default=600.0,
+                        help='Durée maximale en secondes simulées (défaut 600)')
+    parser.add_argument('--goal-x', type=float, default=None,
+                        help='But X (défaut : lu dans task_params.yaml)')
+    parser.add_argument('--goal-y', type=float, default=None,
+                        help='But Y (défaut : lu dans task_params.yaml)')
+    parser.add_argument('--goal-radius', type=float, default=None,
+                        help='Rayon du cercle vert (défaut : lu dans model.sdf)')
+    parser.add_argument('--pose-source', choices=['tf', 'topic'], default='tf',
+                        help="'tf' = TF map->base_footprint (AMCL) ; 'topic' = un topic de pose")
+    parser.add_argument('--pose-topic', default=None,
+                        help='Topic de pose (avec --pose-source topic)')
+    parser.add_argument('--pose-type', choices=['posestamped', 'odometry', 'posewithcovariancestamped'],
+                        default='posestamped', help='Type du topic de pose')
+    parser.add_argument('--output-dir', default=os.path.join(SCRIPT_DIR, 'results'),
+                        help='Dossier des résultats')
+    parser.add_argument('--contact-gap', type=float, default=1.0,
+                        help='Secondes sans contact pour séparer deux épisodes (défaut 1.0)')
+    parser.add_argument('--ignore-keywords', default='ground,floor,plane',
+                        help='Contacts ignorés si un nom de collision contient un de ces mots')
+    parser.add_argument('--debug-contacts', action='store_true',
+                        help='Affiche chaque paire de collisions vue (pour régler les mots ignorés)')
+    parser.add_argument('--freeze-abort', type=float, default=60.0,
+                        help='Arrêter si /clock n\'avance plus depuis N secondes réelles')
+    parser.add_argument('--no-stop-on-nav-end', dest='stop_on_nav_end', action='store_false',
+                        help='Continuer jusqu\'à la limite de temps même si Nav2 a fini son goal')
+    parser.add_argument('--nav-end-grace', type=float, default=5.0,
+                        help='Secondes simulées d\'attente après la fin du goal Nav2 (défaut 5)')
+    args = parser.parse_args()
+
+    if args.pose_source == 'topic' and not args.pose_topic:
+        parser.error('--pose-source topic demande --pose-topic')
+    return args
+
+
+def main():
+    args = parse_args()
+
+    # But : arguments, sinon task_params.yaml
+    goal_x, goal_y = args.goal_x, args.goal_y
+    if goal_x is None or goal_y is None:
+        params = load_task_params()
+        goal_x = float(params['goal_x']) if goal_x is None else goal_x
+        goal_y = float(params['goal_y']) if goal_y is None else goal_y
+
+    # Rayon du cercle : argument, sinon model.sdf, sinon valeur par défaut
+    if args.goal_radius is not None:
+        goal_radius, radius_source = args.goal_radius, 'argument'
+    else:
+        goal_radius, radius_source = read_goal_radius()
+        if goal_radius is None:
+            goal_radius = DEFAULT_GOAL_RADIUS
+            radius_source = 'DEFAUT (a verifier)'
+            print(f'ATTENTION : rayon du but introuvable, valeur par défaut {goal_radius} m.')
+            print('            Donnez le vrai rayon avec --goal-radius.')
+
+    print(f'Benchmark "{args.label}" : but=({goal_x:.3f}, {goal_y:.3f}), rayon={goal_radius} m '
+          f'({radius_source})')
+
+    rclpy.init()
+    node = BenchmarkNode(args, goal_x, goal_y, goal_radius, radius_source)
+    try:
+        while rclpy.ok() and not node.finished:
+            rclpy.spin_once(node, timeout_sec=0.1)
+    except KeyboardInterrupt:
+        pass
+
+    # Ctrl+C : on enregistre quand même ce qu'on a mesuré
+    if not node.finished:
+        node.finish('INTERRUPTED', 'Run arrêté à la main (Ctrl+C).')
+
+    node.destroy_node()
+    rclpy.try_shutdown()
+
+
+if __name__ == '__main__':
+    main()
