@@ -14,10 +14,31 @@ local_costmap:
       update_frequency: 10.0
       publish_frequency: 5.0
 
-      plugins: ["obstacle_layer", "inflation_layer"]
+      # [Mpiaro] camera_layer ajouté avant inflation_layer
+      plugins: ["obstacle_layer", "camera_layer", "inflation_layer"]
 
       obstacle_layer:
         combination_method: 1
+
+      # ---- [Mpiaro] Source d'obstacles CAMERA : identique au global (même topic) ----
+      camera_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        combination_method: 1
+        observation_sources: camera_points
+        camera_points:
+          topic: /top_camera/obstacles_points
+          data_type: "PointCloud2"
+          marking: true
+          clearing: true
+          min_obstacle_height: 0.0
+          max_obstacle_height: 2.0
+          obstacle_min_range: 0.0
+          obstacle_max_range: 3.5
+          raytrace_min_range: 0.0
+          raytrace_max_range: 4.0
+          observation_persistence: 0.0
+          expected_update_rate: 0.0
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"

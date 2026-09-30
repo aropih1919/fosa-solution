@@ -1,4 +1,4 @@
-# Costmap globale : carte statique, obstacles LiDAR et inflation.
+# Costmap globale : carte statique, obstacles LiDAR, obstacles caméra et inflation.
 
 global_costmap:
   global_costmap:
@@ -12,7 +12,9 @@ global_costmap:
       update_frequency: 5.0
       publish_frequency: 2.0
 
-      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      # camera_layer AVANT inflation_layer : l'inflation doit gonfler
+      # les obstacles de TOUTES les couches qui la précèdent.
+      plugins: ["static_layer", "obstacle_layer", "camera_layer", "inflation_layer"]
 
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
@@ -20,6 +22,29 @@ global_costmap:
 
       obstacle_layer:
         combination_method: 1
+
+      # ---- [Mpiaro] Source d'obstacles CAMERA (top_camera, filtrée par hauteur) ----
+      # Couche séparée du LiDAR : on ne touche pas à obstacle_layer.
+      camera_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        combination_method: 1            # 1 = Max avec les autres couches
+        observation_sources: camera_points
+        camera_points:
+          # CONTRAT D'INTERFACE avec le Trinôme OpenCV (à confirmer Jour 1) :
+          topic: /top_camera/obstacles_points
+          data_type: "PointCloud2"       # ou "LaserScan" si projection 2D retenue
+          marking: true                  # les points ajoutent des obstacles
+          clearing: true                 # les rayons capteur->point effacent le libre
+          min_obstacle_height: 0.0       # hauteur min (repère global_frame)
+          max_obstacle_height: 2.0
+          obstacle_min_range: 0.0
+          obstacle_max_range: 3.5        # D435 : au-delà, profondeur trop bruitée
+          raytrace_min_range: 0.0
+          raytrace_max_range: 4.0
+          observation_persistence: 0.0   # 0 = ne garde que la dernière observation
+          expected_update_rate: 0.0      # 0 = pas de contrôle de fraîcheur
+          # sensor_frame : volontairement absent -> on utilise le frame_id du message
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
