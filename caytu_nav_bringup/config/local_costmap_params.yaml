@@ -14,7 +14,7 @@ local_costmap:
       update_frequency: 10.0
       publish_frequency: 5.0
 
-      plugins: ["obstacle_layer", "inflation_layer"]
+      plugins: ["obstacle_layer", "camera_layer", "inflation_layer"]
 
       obstacle_layer:
         combination_method: 1

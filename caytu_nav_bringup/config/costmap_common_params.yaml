@@ -35,6 +35,48 @@
         min_obstacle_height: 0.0
         observation_persistence: 0.0
         expected_update_rate: 0.2
+
+        # À AJOUTER dans caytu_nav_bringup/config/costmap_common_params.yaml
+# (dans /**/global_costmap ET /**/local_costmap, à côté de obstacle_layer).
+#
+# POURQUOI une couche SÉPARÉE (et pas une 2e observation_source dans obstacle_layer) :
+# dans une même ObstacleLayer, le raytracing du LiDAR (plan z~0.04 m, passe SOUS les
+# plateaux de table) effacerait les marques que la caméra a posées sur les plateaux dès que
+# la caméra ne les regarde plus (FOV 90 deg). Une couche a sa propre grille : le LiDAR ne
+# peut pas effacer la mémoire de la caméra, et inversement.
+# (Vérifié dans nav2_costmap_2d/plugins/obstacle_layer.cpp, branche jazzy.)
+
+# --- dans /**/global_costmap: ros__parameters: ---
+    camera_layer:
+      plugin: "nav2_costmap_2d::ObstacleLayer"
+      enabled: true
+      observation_sources: camera_scan
+      camera_scan:
+        topic: /top_camera/obstacles_scan
+        sensor_frame: top_camera_link
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: true          # +inf = « secteur libre » -> permet d'effacer un obstacle parti
+        obstacle_min_range: 0.30
+        obstacle_max_range: 3.5     # DOIT rester < range_max du scan (4.0) : sinon les secteurs
+                                    # libres (inf -> 3.9999) seraient MARQUÉS comme obstacles
+        raytrace_min_range: 1.0     # jamais d'effacement dans les 1ers mètres (angle mort,
+                                    # voir README_camera_perception.md) : la mémoire protège le robot
+        raytrace_max_range: 4.0
+        min_obstacle_height: 0.0    # z du scan = hauteur caméra (1.01 m) dans le repère global
+        max_obstacle_height: 2.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.0   # caméra HS en cours de route : ne pas figer Nav2 (le watchdog prévient)
+
+# --- identique dans /**/local_costmap: ros__parameters: ---
+#     (même bloc camera_layer)
+
+# --- et dans global_costmap_params.yaml / local_costmap_params.yaml ---
+# global : plugins: ["static_layer", "obstacle_layer", "camera_layer", "inflation_layer"]
+# local  : plugins: ["obstacle_layer", "camera_layer", "inflation_layer"]
+#          camera_layer:
+#            combination_method: 1
 /**/local_costmap:
   ros__parameters:
     robot_base_frame: base_footprint
@@ -62,3 +104,44 @@
         min_obstacle_height: 0.0
         observation_persistence: 0.0
         expected_update_rate: 0.2
+# À AJOUTER dans caytu_nav_bringup/config/costmap_common_params.yaml
+# (dans /**/global_costmap ET /**/local_costmap, à côté de obstacle_layer).
+#
+# POURQUOI une couche SÉPARÉE (et pas une 2e observation_source dans obstacle_layer) :
+# dans une même ObstacleLayer, le raytracing du LiDAR (plan z~0.04 m, passe SOUS les
+# plateaux de table) effacerait les marques que la caméra a posées sur les plateaux dès que
+# la caméra ne les regarde plus (FOV 90 deg). Une couche a sa propre grille : le LiDAR ne
+# peut pas effacer la mémoire de la caméra, et inversement.
+# (Vérifié dans nav2_costmap_2d/plugins/obstacle_layer.cpp, branche jazzy.)
+
+# --- dans /**/global_costmap: ros__parameters: ---
+    camera_layer:
+      plugin: "nav2_costmap_2d::ObstacleLayer"
+      enabled: true
+      observation_sources: camera_scan
+      camera_scan:
+        topic: /top_camera/obstacles_scan
+        sensor_frame: top_camera_link
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: true          # +inf = « secteur libre » -> permet d'effacer un obstacle parti
+        obstacle_min_range: 0.30
+        obstacle_max_range: 3.5     # DOIT rester < range_max du scan (4.0) : sinon les secteurs
+                                    # libres (inf -> 3.9999) seraient MARQUÉS comme obstacles
+        raytrace_min_range: 1.0     # jamais d'effacement dans les 1ers mètres (angle mort,
+                                    # voir README_camera_perception.md) : la mémoire protège le robot
+        raytrace_max_range: 4.0
+        min_obstacle_height: 0.0    # z du scan = hauteur caméra (1.01 m) dans le repère global
+        max_obstacle_height: 2.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.0   # caméra HS en cours de route : ne pas figer Nav2 (le watchdog prévient)
+
+# --- identique dans /**/local_costmap: ros__parameters: ---
+#     (même bloc camera_layer)
+
+# --- et dans global_costmap_params.yaml / local_costmap_params.yaml ---
+# global : plugins: ["static_layer", "obstacle_layer", "camera_layer", "inflation_layer"]
+# local  : plugins: ["obstacle_layer", "camera_layer", "inflation_layer"]
+#          camera_layer:
+#            combination_method: 1

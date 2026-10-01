@@ -115,11 +115,16 @@ def generate_launch_description():
         ),
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
-
+    perception = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            [os.path.join(bringup_dir, "launch", "perception.launch.py")]),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
+    )
     # Laisser le lifecycle manager localiser/configurer la carte et AMCL avant
     # que les costmaps Nav2 ne demandent map -> odom. Le task_solution attendra
     # toujours /localization_ready avant d'envoyer un goal.
     delayed_navigation = TimerAction(period=3.0, actions=[navigation])
+    delayed_perception = TimerAction(period=3.0, actions=[perception])
 
     return LaunchDescription(
         [
@@ -131,5 +136,6 @@ def generate_launch_description():
             localization_manager,
             localization_watchdog,
             delayed_navigation,
+            delayed_perception,
         ]
     )

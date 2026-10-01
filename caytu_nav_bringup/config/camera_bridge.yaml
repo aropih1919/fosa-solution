@@ -1,0 +1,8 @@
+# À copier dans caytu_nav_bringup/config/camera_bridge.yaml
+# Nom du topic gz vérifié dans parc_robot_description/urdf/sitoe_robot.sdf (sensor top_camera_color).
+- ros_topic_name: "top_camera_color/image_raw"
+  gz_topic_name: "top_camera_color/image_raw"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+

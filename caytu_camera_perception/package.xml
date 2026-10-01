@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>caytu_camera_perception</name>
+  <version>0.1.0</version>
+  <description>Obstacles en hauteur (invisibles au LiDAR) à partir de la top_camera, publiés en LaserScan pour Nav2</description>
+  <maintainer email="team@fosa.mg">Trinôme OpenCV &amp; Caméra</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <!-- Volontairement ni cv_bridge ni OpenCV : le coeur n'en a pas besoin.
+       À ajouter seulement si crowd_detector_node.py est réellement livré. -->
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -30,7 +30,8 @@
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>laser_filters</exec_depend>
   <exec_depend>caytu_nav_solution</exec_depend>
-
+  <exec_depend>caytu_camera_perception</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>python3-yaml</test_depend>
 

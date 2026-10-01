@@ -32,9 +32,10 @@ def test_costmap_node_paths_and_integer_window_size():
     assert global_costmap["plugins"] == [
         "static_layer",
         "obstacle_layer",
+        "camera_layer",
         "inflation_layer",
     ]
-    assert local_costmap["plugins"] == ["obstacle_layer", "inflation_layer"]
+    assert local_costmap["plugins"] == ["obstacle_layer", "camera_layer", "inflation_layer"]
     assert type(local_costmap["width"]) is int
     assert type(local_costmap["height"]) is int
     # La marge retenue protège le châssis réel, plus large que l'ancien footprint.

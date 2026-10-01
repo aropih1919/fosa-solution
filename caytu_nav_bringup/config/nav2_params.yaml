@@ -104,6 +104,7 @@ global_costmap:
         - static_layer
         - obstacle_layer
         - inflation_layer
+        - camera_layer
 
 
       # STATIC LAYER
@@ -315,6 +316,7 @@ local_costmap:
 
       plugins:
         - obstacle_layer
+        - camera_layer
         - inflation_layer
 
 

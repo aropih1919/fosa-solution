@@ -1,0 +1,30 @@
+# Paramètres de camera_obstacle_node et camera_perception_watchdog.
+# Chaque valeur est justifiée dans README_camera_perception.md.
+camera_obstacle_node:
+  ros__parameters:
+    cloud_topic: /top_camera_depth/points
+    scan_topic: /top_camera/obstacles_scan
+    scan_frame: top_camera_link      # horizontal (pitch 0, roll 0 d'après le URDF)
+    base_frame: base_footprint
+    row_stride: 2                    # 480 -> 240 lignes
+    col_stride: 4                    # 640 -> 160 colonnes (=> angle_inc >= 0.0125 rad)
+    z_min: 0.30                      # sol bruité + marge ; LiDAR couvre le bas
+    z_max: 1.40                      # robot : 1.349 m
+    r_min: 0.30
+    r_max: 4.0
+    angle_min: -0.795
+    angle_max: 0.795
+    angle_inc: 0.015
+    quantile: 0.3
+    min_points: 2
+    min_valid: 3
+
+camera_perception_watchdog:
+  ros__parameters:
+    scan_topic: /top_camera/obstacles_scan
+    base_frame: base_footprint
+    min_rate_hz: 8.0
+    window_sec: 2.0
+    min_known_ratio: 0.5
+    ready_after: 4
+    lost_after: 3

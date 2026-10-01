@@ -44,7 +44,6 @@ fausserait l'odométrie et la localisation.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd /chemin/vers/ros2_ws
 source install/setup.bash
 ros2 launch caytu_nav_bringup solution_bringup.launch.py use_sim_time:=true
 ```
