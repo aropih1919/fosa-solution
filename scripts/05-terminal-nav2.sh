@@ -6,4 +6,5 @@
 set -e
 source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
+ros2 launch --help >/dev/null 2>&1 || { echo "[ERREUR] 'ros2 launch' manquant. Lancer : sudo apt install -y ros-jazzy-ros2launch ros-jazzy-ros2run ros-jazzy-ros2action ros-jazzy-ros2lifecycle"; exit 1; }
 ros2 launch caytu_nav_bringup navigation.launch.py use_sim_time:=true

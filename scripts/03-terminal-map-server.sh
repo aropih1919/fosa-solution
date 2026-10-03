@@ -7,6 +7,7 @@
 set -e
 source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
+ros2 run --help >/dev/null 2>&1 || { echo "[ERREUR] 'ros2 run' manquant. Lancer : sudo apt install -y ros-jazzy-ros2launch ros-jazzy-ros2run ros-jazzy-ros2action ros-jazzy-ros2lifecycle"; exit 1; }
 ros2 run nav2_map_server map_server --ros-args \
   -p yaml_filename:="$(ros2 pkg prefix caytu_nav_bringup)/share/caytu_nav_bringup/maps/stadium_map.yaml" \
   -p use_sim_time:=true
