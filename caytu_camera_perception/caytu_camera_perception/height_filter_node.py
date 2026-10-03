@@ -7,9 +7,22 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2
 from tf2_ros import Buffer, TransformListener
-from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
 
 from caytu_camera_perception.point_filter import filter_obstacle_points
+
+
+def transform_to_matrix(t):
+    """Matrice 4x4 numpy depuis geometry_msgs/Transform (pas de do_transform_cloud :
+    casse sur les champs rgb des nuages D435)."""
+    q, p = t.transform.rotation, t.transform.translation
+    x, y, z, w = q.x, q.y, q.z, q.w
+    m = np.eye(4)
+    m[:3, :3] = np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]])
+    m[:3, 3] = [p.x, p.y, p.z]
+    return m
 
 
 class HeightFilterNode(Node):
@@ -56,20 +69,20 @@ class HeightFilterNode(Node):
             t = self._tf.lookup_transform(
                 self._frame, msg.header.frame_id, msg.header.stamp,
                 timeout=rclpy.duration.Duration(seconds=self._tf_timeout))
+            pts = self._xyz_from_msg(msg)
+            if pts is None:
+                return
+            m = transform_to_matrix(t)
+            moved = (m[:3, :3] @ pts.T).T + m[:3, 3]
+            kept, stats = filter_obstacle_points(moved, self._zmin, self._zmax, self._range)
+            header = msg.header
+            header.frame_id = self._frame
+            self._pub.publish(point_cloud2.create_cloud_xyz32(header, kept.tolist()))
+            self.get_logger().debug(f'obstacles: {stats["kept"]}/{stats["total"]}',
+                                    throttle_duration_sec=5.0)
         except Exception as e:
-            self.get_logger().warn(f'TF {msg.header.frame_id} -> {self._frame} indisponible : {e}',
+            self.get_logger().warn(f'filtrage ignore (1 nuage) : {e}',
                                    throttle_duration_sec=5.0)
-            return
-        moved = do_transform_cloud(msg, t)
-        pts = self._xyz_from_msg(moved)
-        if pts is None:
-            return
-        kept, stats = filter_obstacle_points(pts, self._zmin, self._zmax, self._range)
-        out = point_cloud2.create_cloud_xyz32(moved.header, kept.tolist())
-        out.header.frame_id = self._frame
-        self._pub.publish(out)
-        self.get_logger().debug(f'obstacles: {stats["kept"]}/{stats["total"]}',
-                                throttle_duration_sec=5.0)
 
 
 def main(args=None):
