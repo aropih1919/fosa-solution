@@ -6,4 +6,5 @@ set -e
 source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
 ros2 launch --help >/dev/null 2>&1 || { echo "[ERREUR] 'ros2 launch' manquant. Lancer : sudo apt install -y ros-jazzy-ros2launch ros-jazzy-ros2run ros-jazzy-ros2action ros-jazzy-ros2lifecycle"; exit 1; }
+ros2 pkg prefix rviz2 >/dev/null 2>&1 || { echo "[ERREUR] package 'rviz2' manquant. Lancer : sudo apt install -y ros-jazzy-rviz2"; exit 1; }
 __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia ros2 launch parc_robot_bringup task.launch.py use_sim_time:=true
