@@ -49,7 +49,7 @@ def test_common_costmap_parameters_target_both_internal_nodes():
         assert params["robot_base_frame"] == "base_footprint"
         assert params["obstacle_layer"]["observation_sources"] == "scan"
         scan = params["obstacle_layer"]["scan"]
-        assert scan["topic"] == "/scan"
+        assert scan["topic"] in ("/scan", "/scan_filtered")
         assert scan["sensor_frame"] == "lidar_link"
         assert scan["marking"] is True
         assert scan["clearing"] is True

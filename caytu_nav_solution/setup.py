@@ -21,6 +21,8 @@ setup(
     entry_points={
         'console_scripts': [
             'task_solution = caytu_nav_solution.task_solution:main',
+            'nav_monitor = caytu_nav_solution.nav_monitor:main',
+            'localization_watchdog = caytu_nav_solution.localization_watchdog:main',
         ],
     },
 )
