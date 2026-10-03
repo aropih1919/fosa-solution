@@ -1,0 +1,37 @@
+# Gouverneur Nav2 standard : stop franc + ralenti, surveille LiDAR ET nuage camera.
+collision_monitor:
+  ros__parameters:
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    cmd_vel_in_topic: /surcouche/cmd_vel_raw
+    cmd_vel_out_topic: /robot_base_controller/cmd_vel_unstamped
+    transform_tolerance: 0.5
+    source_timeout: 2.0
+    base_shift_correction: true
+    stop_pub_timeout: 2.0
+    polygons: ["FootStop", "SlowDown"]
+    FootStop:
+      type: "polygon"
+      points: "[[0.45, 0.25], [0.45, -0.25], [-0.10, -0.25], [-0.10, 0.25]]"
+      action_type: "stop"
+      min_points: 4
+      enabled: true
+    SlowDown:
+      type: "polygon"
+      points: "[[0.90, 0.40], [0.90, -0.40], [-0.40, -0.40], [-0.40, 0.40]]"
+      action_type: "slowdown"
+      slowdown_ratio: 0.4
+      min_points: 4
+      enabled: true
+    observation_sources: ["lidar", "camcloud"]
+    lidar:
+      type: "scan"
+      topic: /scan_filtered
+      enabled: true
+    camcloud:
+      type: "pointcloud"
+      topic: /top_camera/obstacles_points
+      min_height: 0.1
+      max_height: 1.3
+      use_global_height: false
+      enabled: true

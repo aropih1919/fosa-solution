@@ -70,9 +70,10 @@ def generate_launch_description():
         ],
 
         remappings=[
+            # Surcouche locale : consigne brute, collision_monitor filtre vers le robot.
             (
                 "cmd_vel",
-                "/robot_base_controller/cmd_vel_unstamped",
+                "/surcouche/cmd_vel_raw",
             ),
         ],
     )
@@ -112,9 +113,10 @@ def generate_launch_description():
         ],
 
         remappings=[
+            # Surcouche locale : consigne brute, collision_monitor filtre vers le robot.
             (
                 "cmd_vel",
-                "/robot_base_controller/cmd_vel_unstamped",
+                "/surcouche/cmd_vel_raw",
             ),
         ],
     )
