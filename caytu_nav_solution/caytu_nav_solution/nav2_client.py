@@ -66,6 +66,22 @@ class Nav2Client:
             self._timeout_sec, self._on_timeout
         )
 
+    def cancel_active_goal(self):
+        """Annule le goal en cours sans conclure avant le résultat de l'action.
+
+        Requis par task_solution.py (double-attente localisation + caméra) :
+        annulation sur perte de localisation, sans dupliquer le callback.
+        """
+        if self._finished:
+            return
+        if self._goal_handle is None:
+            self._node.get_logger().warn(
+                'Nav2Client: annulation demandée avant acceptation du goal.'
+            )
+            return
+        self._node.get_logger().warn('Nav2Client: annulation du goal actif.')
+        self._goal_handle.cancel_goal_async()
+
     def _on_goal_response(self, future):
         goal_handle = future.result()
         if not goal_handle.accepted:
