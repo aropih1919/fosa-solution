@@ -104,15 +104,6 @@
         min_obstacle_height: 0.0
         observation_persistence: 0.0
         expected_update_rate: 0.2
-# À AJOUTER dans caytu_nav_bringup/config/costmap_common_params.yaml
-# (dans /**/global_costmap ET /**/local_costmap, à côté de obstacle_layer).
-#
-# POURQUOI une couche SÉPARÉE (et pas une 2e observation_source dans obstacle_layer) :
-# dans une même ObstacleLayer, le raytracing du LiDAR (plan z~0.04 m, passe SOUS les
-# plateaux de table) effacerait les marques que la caméra a posées sur les plateaux dès que
-# la caméra ne les regarde plus (FOV 90 deg). Une couche a sa propre grille : le LiDAR ne
-# peut pas effacer la mémoire de la caméra, et inversement.
-# (Vérifié dans nav2_costmap_2d/plugins/obstacle_layer.cpp, branche jazzy.)
 
 # --- dans /**/global_costmap: ros__parameters: ---
     camera_layer:
@@ -136,12 +127,3 @@
         max_obstacle_height: 2.0
         observation_persistence: 0.0
         expected_update_rate: 0.0   # caméra HS en cours de route : ne pas figer Nav2 (le watchdog prévient)
-
-# --- identique dans /**/local_costmap: ros__parameters: ---
-#     (même bloc camera_layer)
-
-# --- et dans global_costmap_params.yaml / local_costmap_params.yaml ---
-# global : plugins: ["static_layer", "obstacle_layer", "camera_layer", "inflation_layer"]
-# local  : plugins: ["obstacle_layer", "camera_layer", "inflation_layer"]
-#          camera_layer:
-#            combination_method: 1
