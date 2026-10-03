@@ -1,4 +1,6 @@
 # Planner global : SmacPlanner2D, A* 2D sensible aux couts de la costmap.
+# Tuning vitesse Jour 2 (Johny) : tolerance elargie, planification plus rapide
+# et moins de detours. max_planning_time 2.0 s bloquait le BT a chaque replan.
 
 planner_server:
   ros__parameters:
@@ -8,15 +10,15 @@ planner_server:
 
     GridBased:
       plugin: "nav2_smac_planner::SmacPlanner2D"
-      tolerance: 0.3
+      tolerance: 0.5
       downsample_costmap: false
       downsampling_factor: 1
-      allow_unknown: false
+      allow_unknown: true
       max_iterations: 1000000
       max_on_approach_iterations: 1000
       terminal_checking_interval: 5000
-      max_planning_time: 2.0
-      cost_travel_multiplier: 2.0
+      max_planning_time: 1.0
+      cost_travel_multiplier: 1.5
       use_final_approach_orientation: true
       smoother:
         max_iterations: 1000
@@ -24,4 +26,4 @@ planner_server:
         w_data: 0.2
         tolerance: 1.0e-10
         do_refinement: true
-        refinement_num: 2
+        refinement_num: 1

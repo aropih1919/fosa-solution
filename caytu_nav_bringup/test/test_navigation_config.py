@@ -29,16 +29,20 @@ def test_costmap_node_paths_and_integer_window_size():
         "ros__parameters"
     ]
 
-    assert global_costmap["plugins"] == [
-        "static_layer",
-        "obstacle_layer",
-        "inflation_layer",
-    ]
-    assert local_costmap["plugins"] == ["obstacle_layer", "inflation_layer"]
+    # Jour 2 (Johny) : inflation assouplie 0.45 -> 0.30 pour ne plus fermer
+    # les couloirs ; Jour 3 : camera_layer de Mpiaro s'insere avant inflation.
+    assert global_costmap["plugins"] in (
+        ["static_layer", "obstacle_layer", "inflation_layer"],
+        ["static_layer", "obstacle_layer", "camera_layer", "inflation_layer"],
+    )
+    assert local_costmap["plugins"] in (
+        ["obstacle_layer", "inflation_layer"],
+        ["obstacle_layer", "camera_layer", "inflation_layer"],
+    )
     assert type(local_costmap["width"]) is int
     assert type(local_costmap["height"]) is int
-    assert global_costmap["inflation_layer"]["inflation_radius"] >= 0.40
-    assert local_costmap["inflation_layer"]["inflation_radius"] >= 0.40
+    assert global_costmap["inflation_layer"]["inflation_radius"] >= 0.25
+    assert local_costmap["inflation_layer"]["inflation_radius"] >= 0.25
 
 
 def test_common_costmap_parameters_target_both_internal_nodes():
@@ -85,6 +89,9 @@ def test_dwb_kinematics_and_critics_are_consistent():
     assert "min_vel_theta" not in controller
     assert controller["min_speed_xy"] >= 0.0
     assert controller["min_speed_theta"] >= 0.0
+    # Jour 2 (Johny) : verrouille le gain vitesse, cause officielle de lenteur.
+    assert controller["max_vel_x"] >= 0.50
+    assert controller["max_speed_xy"] >= 0.50
 
     critics = controller["critics"]
     assert "ObstacleFootprint" in critics
