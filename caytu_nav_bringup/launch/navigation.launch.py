@@ -36,6 +36,11 @@ def generate_launch_description():
         bringup_dir, "config", "controller_server_params.yaml"
     )
 
+    # Chemin BT resolu ici (les YAML ne resolvent pas $(find-pkg-share ...)).
+    bt_xml_path = os.path.join(
+        bringup_dir, "behavior_trees", "navigate_bounded_recovery.xml"
+    )
+
     # LAUNCH ARGUMENTS
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -126,6 +131,7 @@ def generate_launch_description():
             params_file,
             {
                 "use_sim_time": use_sim_time,
+                "default_nav_to_pose_bt_xml": bt_xml_path,
             },
         ],
     )
