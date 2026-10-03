@@ -1,6 +1,5 @@
 # Planner global : SmacPlanner2D, A* 2D sensible aux couts de la costmap.
-# Tuning vitesse Jour 2 (Johny) : tolerance elargie, planification plus rapide
-# et moins de detours. max_planning_time 2.0 s bloquait le BT a chaque replan.
+# Planification rapide : tolerance 0.5, max 1.0 s, detours reduits.
 
 planner_server:
   ros__parameters:

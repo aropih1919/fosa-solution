@@ -29,8 +29,7 @@ def test_costmap_node_paths_and_integer_window_size():
         "ros__parameters"
     ]
 
-    # Jour 2 (Johny) : inflation assouplie 0.45 -> 0.30 pour ne plus fermer
-    # les couloirs ; Jour 3 : camera_layer de Mpiaro s'insere avant inflation.
+    # Inflation assouplie (0.30) ; camera_layer accepte en option.
     assert global_costmap["plugins"] in (
         ["static_layer", "obstacle_layer", "inflation_layer"],
         ["static_layer", "obstacle_layer", "camera_layer", "inflation_layer"],
@@ -89,7 +88,7 @@ def test_dwb_kinematics_and_critics_are_consistent():
     assert "min_vel_theta" not in controller
     assert controller["min_speed_xy"] >= 0.0
     assert controller["min_speed_theta"] >= 0.0
-    # Jour 2 (Johny) : verrouille le gain vitesse, cause officielle de lenteur.
+    # Verrou vitesse : max_vel >= 0.50.
     assert controller["max_vel_x"] >= 0.50
     assert controller["max_speed_xy"] >= 0.50
 

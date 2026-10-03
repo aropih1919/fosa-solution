@@ -67,11 +67,7 @@ class Nav2Client:
         )
 
     def cancel_active_goal(self):
-        """Annule le goal en cours sans conclure avant le résultat de l'action.
-
-        Requis par task_solution.py (double-attente localisation + caméra) :
-        annulation sur perte de localisation, sans dupliquer le callback.
-        """
+        """Annule le goal actif (requis par task_solution double-attente)."""
         if self._finished:
             return
         if self._goal_handle is None:

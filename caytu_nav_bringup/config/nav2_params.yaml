@@ -1,16 +1,7 @@
 # FOSA - NAV2 PARAMETERS
-# Fusion Jour 3 (Johny) : recopie des valeurs Jour 2 (DWB 0.55, planner rapide,
-# costmaps allegees). navigation.launch.py charge ensuite les fichiers specifiques
-# qui restent la source de verite ; ce fichier sert de repli coherent.
+# Repli coherent : memes valeurs que les fichiers specifiques.
 
-# CONTRAT D'INTERFACE CAMÉRA (Jour 1 — proposition alignée avec la branche
-# distante de Mpiaro, à confirmer par le trinôme OpenCV) :
-#   topic : /top_camera/obstacles_points
-#   type  : sensor_msgs/msg/PointCloud2
-#   débit : viser au moins 5 Hz
-#   TF    : frame_id cohérent, message horodaté et TF jusqu'à base_footprint
-# La couche caméra est configurée dans global_costmap_params.yaml et
-# local_costmap_params.yaml ; ce commentaire fixe le contrat, il ne l'active pas.
+# Camera : /top_camera/obstacles_points, PointCloud2, >=5 Hz, TF base_footprint.
 
 
 # BT NAVIGATOR - FANEVA

@@ -1,7 +1,5 @@
 # Costmap locale : fenetre glissante reactive aux obstacles mobiles.
-# Tuning vitesse Jour 2 (Johny, section vitesse uniquement) : resolution 0.075
-# (divise le nb de cellules par ~2.2 vs 0.05), fenetre 4 m, inflation 0.30.
-# NE PAS toucher aux blocs camera_layer / observation_sources (Mpiaro).
+# Resolution 0.075, fenetre 4 m, inflation 0.30 (camera : voir Mpiaro).
 
 local_costmap:
   local_costmap:

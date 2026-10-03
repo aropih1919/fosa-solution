@@ -1,6 +1,5 @@
 # Parametres communs aux costmaps global et local (ROS 2 Jazzy / Nav2 1.3.x).
-# Tuning vitesse Jour 2 (Johny) : portees locales elargies pour anticiper a
-# 0.55 m/s. La section observation_sources/camera reste a Mpiaro.
+# Portees locales elargies pour 0.55 m/s.
 #
 # Les costmaps sont des noeuds internes nommes respectivement
 # /global_costmap/global_costmap et /local_costmap/local_costmap. Les motifs

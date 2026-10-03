@@ -2,9 +2,7 @@ bt_navigator:
   ros__parameters:
 
     # SIMULATION
-    # Verif Jour 3 (Johny) : BT reste borne avec camera_layer active cote Mpiaro.
-    # Aucun retry infini : RecoveryNode 2 essais globaux, 1 planner + 1 controller,
-    # RoundRobin Clear/Spin(1.57)/Wait(2s)/BackUp(0.20) — compatible 600 s.
+    # BT borne : 2 essais globaux, recoveries limitees (600 s OK).
 
     use_sim_time: true
 

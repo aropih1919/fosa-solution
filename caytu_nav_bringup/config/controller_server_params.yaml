@@ -1,8 +1,5 @@
 # Controller local : DWB pour base differentielle et obstacles dynamiques.
-# Tuning vitesse Jour 2 (Johny) : 0.40 -> 0.55 m/s, accel plus franche,
-# progress_checker desensibilise aux micro-arrets, failure_tolerance elargie
-# pour ne pas avorter sur un seul cycle rate (cause majeure de lenteur constatee
-# meme sur PC puissant). Ne pas toucher aux topics/frames (contrat trinome).
+# Vitesse 0.55 m/s, accel franche, tolerances elargies (ne pas toucher topics/frames).
 
 controller_server:
   ros__parameters:
@@ -12,9 +9,7 @@ controller_server:
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.0
     min_theta_velocity_threshold: 0.001
-    # 0.3 s faisait avorter DWB des qu'un scan etait en retard (LiDAR 10 Hz).
-    # 1.5 s laisse retrouver une trajectoire sans masquer un vrai blocage.
-    failure_tolerance: 1.5
+    failure_tolerance: 1.5  # etait 0.3 : avortait au moindre cycle LiDAR rate
     odom_topic: /odom
     enable_stamped_cmd_vel: false
     progress_checker_plugins: ["progress_checker"]
