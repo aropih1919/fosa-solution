@@ -99,7 +99,7 @@ class NavMonitor(Node):
             from nav2_msgs.action import NavigateToPose
             # Le type feedback message est publié sur /navigate_to_pose/_action/feedback
             # On s'abonne en générique via rclpy (on importe le msg)
-            from nav2_msgs.action import NavigateToPose_FeedbackMessage  # type: ignore
+            from nav2_msgs.action._navigate_to_pose import NavigateToPose_FeedbackMessage
             self.create_subscription(NavigateToPose_FeedbackMessage, '/navigate_to_pose/_action/feedback', self._on_feedback, 10)
         except Exception as e:
             self.get_logger().warn(f'Feedback NavigateToPose non abonné: {e}')
