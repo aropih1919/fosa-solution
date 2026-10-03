@@ -2,7 +2,9 @@
 # 04-terminal-amcl — Localisation AMCL.
 # Terminal 4 : lance AMCL, puis activer le lifecycle :
 #   ros2 lifecycle set /amcl configure && ros2 lifecycle set /amcl activate
-# RViz obligatoire : 2D Pose Estimate -> clic a (-0.2,-7.4) + glisser vers le nord (yaw 1.57).
+# RViz obligatoire : Global Options -> Fixed Frame = "map" (le task.rviz des
+# organisateurs est en "base_footprint", sinon AMCL ignore le clic initial),
+# puis 2D Pose Estimate -> clic a (-0.2,-7.4) + glisser vers le nord (yaw 1.57).
 # Verif : ros2 topic echo /localization_ready
 set -e
 source /opt/ros/jazzy/setup.bash
