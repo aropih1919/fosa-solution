@@ -4,6 +4,10 @@
 # /global_costmap/global_costmap et /local_costmap/local_costmap. Les motifs
 # ci-dessous permettent aussi de conserver ces parametres si la pile est
 # lancee dans un namespace.
+#
+# Sources d'obstacles : lidar (/scan_filtered) + deux cameras de profondeur
+# converties en LaserScan 2D (/top_camera_scan, /bottom_camera_scan) par
+# pointcloud_to_laserscan dans solution_bringup.launch.py.
 
 /**/global_costmap:
   ros__parameters:
@@ -20,7 +24,9 @@
     obstacle_layer:
       plugin: "nav2_costmap_2d::ObstacleLayer"
       enabled: true
-      observation_sources: scan
+      # Si des obstacles fantomes persistent dans la costmap globale,
+      # remettre temporairement : observation_sources: scan
+      observation_sources: scan top_cam bottom_cam
       scan:
         topic: /scan_filtered
         sensor_frame: lidar_link
@@ -38,6 +44,34 @@
         min_obstacle_height: 0.0
         observation_persistence: 0.0
         expected_update_rate: 0.2
+      # Camera haute (horizontale, ~1 m) : obstacles a hauteur de robot
+      # (plateaux de table, personnes) que le lidar bas ne voit pas.
+      # Le scan est deja filtre en hauteur par pointcloud_to_laserscan.
+      top_cam:
+        topic: /top_camera_scan
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: true
+        obstacle_max_range: 3.0
+        obstacle_min_range: 0.3
+        raytrace_max_range: 3.5
+        raytrace_min_range: 0.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.0
+      # Camera basse (inclinee vers le sol) : obstacles proches.
+      bottom_cam:
+        topic: /bottom_camera_scan
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: true
+        obstacle_max_range: 1.5
+        obstacle_min_range: 0.3
+        raytrace_max_range: 2.0
+        raytrace_min_range: 0.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.0
 /**/local_costmap:
   ros__parameters:
     robot_base_frame: base_footprint
@@ -50,7 +84,7 @@
     obstacle_layer:
       plugin: "nav2_costmap_2d::ObstacleLayer"
       enabled: true
-      observation_sources: scan
+      observation_sources: scan top_cam bottom_cam
       scan:
         topic: /scan_filtered
         sensor_frame: lidar_link
@@ -66,3 +100,27 @@
         min_obstacle_height: 0.0
         observation_persistence: 0.0
         expected_update_rate: 0.2
+      top_cam:
+        topic: /top_camera_scan
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: true
+        obstacle_max_range: 3.0
+        obstacle_min_range: 0.3
+        raytrace_max_range: 3.5
+        raytrace_min_range: 0.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.0
+      bottom_cam:
+        topic: /bottom_camera_scan
+        data_type: "LaserScan"
+        marking: true
+        clearing: true
+        inf_is_valid: true
+        obstacle_max_range: 1.5
+        obstacle_min_range: 0.3
+        raytrace_max_range: 2.0
+        raytrace_min_range: 0.0
+        observation_persistence: 0.0
+        expected_update_rate: 0.0

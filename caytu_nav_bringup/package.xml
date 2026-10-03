@@ -29,6 +29,8 @@
   <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>laser_filters</exec_depend>
+  <!-- Conversion des nuages de points des caméras de profondeur en LaserScan. -->
+  <exec_depend>pointcloud_to_laserscan</exec_depend>
   <exec_depend>caytu_nav_solution</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>

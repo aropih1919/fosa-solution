@@ -2,6 +2,8 @@
 
 Ce launch remplace le démarrage manuel en plusieurs terminaux : il garantit que le
 filtre LiDAR, la carte et AMCL existent avant l'activation de la pile Nav2.
+Il convertit aussi les nuages de points des deux caméras de profondeur en
+LaserScan 2D, utilisés comme sources d'obstacles supplémentaires par Nav2.
 """
 
 import os
@@ -36,6 +38,8 @@ def generate_launch_description():
 
     use_sim_time = LaunchConfiguration("use_sim_time")
     map_yaml = LaunchConfiguration("map")
+    top_cloud_topic = LaunchConfiguration("top_cloud_topic")
+    bottom_cloud_topic = LaunchConfiguration("bottom_cloud_topic")
 
     declare_use_sim_time = DeclareLaunchArgument(
         "use_sim_time",
@@ -46,6 +50,17 @@ def generate_launch_description():
         "map",
         default_value=os.path.join(bringup_dir, "maps", "stadium_map.yaml"),
         description="Fichier YAML de carte ; valeur résolue depuis le package installé.",
+    )
+    # Noms supposés : à confirmer avec `ros2 topic list -t | grep points`.
+    declare_top_cloud = DeclareLaunchArgument(
+        "top_cloud_topic",
+        default_value="/top_camera_depth/points",
+        description="Nuage de points (PointCloud2) de la caméra haute.",
+    )
+    declare_bottom_cloud = DeclareLaunchArgument(
+        "bottom_cloud_topic",
+        default_value="/bottom_camera_depth/points",
+        description="Nuage de points (PointCloud2) de la caméra basse.",
     )
 
     laser_filter = Node(
@@ -59,6 +74,61 @@ def generate_launch_description():
         ],
         # Le robot publie /scan ; Nav2 et AMCL consomment exclusivement le scan filtré.
         remappings=[("scan", "/scan"), ("scan_filtered", "/scan_filtered")],
+    )
+
+    # Caméra haute (horizontale) : obstacles à hauteur de robot, jusqu'à 3 m.
+    # La hauteur est mesurée dans base_footprint (z=0 au sol) : min_height exclut
+    # le sol et le bruit de profondeur, max_height correspond à la hauteur du robot.
+    top_cam_to_scan = Node(
+        package="pointcloud_to_laserscan",
+        executable="pointcloud_to_laserscan_node",
+        name="top_cam_to_scan",
+        output="screen",
+        remappings=[("cloud_in", top_cloud_topic), ("scan", "/top_camera_scan")],
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+                "target_frame": "base_footprint",
+                "transform_tolerance": 0.3,
+                "min_height": 0.15,
+                "max_height": 1.4,
+                "angle_min": -0.785,
+                "angle_max": 0.785,
+                "angle_increment": 0.0087,
+                "scan_time": 0.067,
+                "range_min": 0.3,
+                "range_max": 3.0,
+                "use_inf": True,
+                "inf_epsilon": 1.0,
+            }
+        ],
+    )
+
+    # Caméra basse (inclinée vers le sol) : obstacles proches, jusqu'à 1.5 m.
+    # Seuil min_height plus haut : cette caméra voit beaucoup de sol.
+    bottom_cam_to_scan = Node(
+        package="pointcloud_to_laserscan",
+        executable="pointcloud_to_laserscan_node",
+        name="bottom_cam_to_scan",
+        output="screen",
+        remappings=[("cloud_in", bottom_cloud_topic), ("scan", "/bottom_camera_scan")],
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+                "target_frame": "base_footprint",
+                "transform_tolerance": 0.3,
+                "min_height": 0.20,
+                "max_height": 1.4,
+                "angle_min": -0.785,
+                "angle_max": 0.785,
+                "angle_increment": 0.0087,
+                "scan_time": 0.067,
+                "range_min": 0.3,
+                "range_max": 1.5,
+                "use_inf": True,
+                "inf_epsilon": 1.0,
+            }
+        ],
     )
 
     map_server = Node(
@@ -125,7 +195,11 @@ def generate_launch_description():
         [
             declare_use_sim_time,
             declare_map,
+            declare_top_cloud,
+            declare_bottom_cloud,
             laser_filter,
+            top_cam_to_scan,
+            bottom_cam_to_scan,
             map_server,
             amcl,
             localization_manager,
