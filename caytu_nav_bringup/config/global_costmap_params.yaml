@@ -1,4 +1,6 @@
-# Costmap globale : carte statique, obstacles LiDAR et inflation.
+# Costmap globale : carte statique, lidar, camera haute et inflation.
+# Les couches obstacle_layer / top_camera_layer sont definies dans
+# costmap_common_params.yaml. La camera basse reste locale (voir ce fichier).
 
 global_costmap:
   global_costmap:
@@ -12,14 +14,14 @@ global_costmap:
       update_frequency: 5.0
       publish_frequency: 2.0
 
-      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      plugins: ["static_layer", "obstacle_layer", "top_camera_layer", "inflation_layer"]
 
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: true
 
-      obstacle_layer:
-        combination_method: 1
+      # Les couches de capteurs (obstacle_layer, top_camera_layer) sont
+      # entierement decrites dans costmap_common_params.yaml.
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"

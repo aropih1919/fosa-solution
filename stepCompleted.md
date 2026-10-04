@@ -93,6 +93,39 @@ calculé depuis une mauvaise position et dirigé vers un mur.
 Ne pas utiliser **2D Goal Pose** pour la tâche officielle : `task_solution` lit le
 but officiel `goal_x/goal_y` depuis `task_params.yaml` et l'envoie à Nav2.
 
+## 3 bis. Vérifier les deux caméras de profondeur (avant le goal)
+
+Le launch convertit chaque nuage en `LaserScan` 2D (`pointcloud_to_laserscan`) ;
+chaque capteur a sa propre couche dans les costmaps (`obstacle_layer` = lidar,
+`top_camera_layer`, `bottom_camera_layer`), pour que le clearing d'une caméra
+n'efface jamais les obstacles du lidar. La caméra basse n'alimente que la
+costmap locale.
+
+```bash
+# Les noms de topics des nuages sont supposés : à confirmer.
+ros2 topic list -t | grep -E "points|camera_scan"
+ros2 topic hz --use-sim-time /top_camera_scan
+ros2 topic hz --use-sim-time /bottom_camera_scan
+ros2 topic echo --once /top_camera_depth/points --field header.frame_id
+```
+
+Si les nuages portent un autre nom, relancer avec
+`top_cloud_topic:=... bottom_cloud_topic:=...`.
+
+Contrôle dans RViz (Fixed Frame `map`) :
+
+1. Ajouter `LaserScan` sur `/top_camera_scan` et `/bottom_camera_scan`
+   (Style: Points, taille 0.05).
+2. Robot immobile **dans une zone dégagée** : aucun point ne doit apparaître sur
+   le sol. Des points fantômes sur sol libre = bruit de profondeur : monter
+   `min_height` du scan concerné dans `solution_bringup.launch.py` (0.30 → 0.40
+   pour la caméra haute, 0.25 → 0.35 pour la basse), ou retirer
+   `bottom_camera_layer` de `local_costmap_params.yaml`.
+3. Approcher une table : son plateau doit apparaître dans `/top_camera_scan`
+   à partir d'environ 0.4 m, et dans `/local_costmap/costmap`.
+4. Reculer : les tables vues doivent rester marquées dans
+   `/global_costmap/costmap`.
+
 ## 4. Terminaux 3A et 3B — Vérifier les prérequis avant le goal
 
 `ros2 topic hz` et `ros2 topic echo` sont des commandes bloquantes : la seconde ligne

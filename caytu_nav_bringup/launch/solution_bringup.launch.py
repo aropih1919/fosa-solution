@@ -76,9 +76,14 @@ def generate_launch_description():
         remappings=[("scan", "/scan"), ("scan_filtered", "/scan_filtered")],
     )
 
-    # Caméra haute (horizontale) : obstacles à hauteur de robot, jusqu'à 3 m.
-    # La hauteur est mesurée dans base_footprint (z=0 au sol) : min_height exclut
-    # le sol et le bruit de profondeur, max_height correspond à la hauteur du robot.
+    # Caméra haute (horizontale, ~1.01 m) : obstacles à hauteur de robot, jusqu'à 3 m.
+    # La hauteur est mesurée dans base_footprint (z=0 au sol).
+    # min_height = 0.30 : le bruit de profondeur de la simulation (stddev 0.10 m
+    # le long du rayon) fait remonter des points du sol de ~6 cm à 1.4 m ; avec
+    # 0.15 m, pointcloud_to_laserscan retenait ces points et créait un faux
+    # obstacle dans presque chaque direction. 0.30 m (~5 sigma) les élimine
+    # tout en gardant plateaux de table, assises de chaise et personnes ; les
+    # obstacles plus bas sont déjà couverts par le lidar.
     top_cam_to_scan = Node(
         package="pointcloud_to_laserscan",
         executable="pointcloud_to_laserscan_node",
@@ -90,7 +95,7 @@ def generate_launch_description():
                 "use_sim_time": use_sim_time,
                 "target_frame": "base_footprint",
                 "transform_tolerance": 0.3,
-                "min_height": 0.15,
+                "min_height": 0.30,
                 "max_height": 1.4,
                 "angle_min": -0.785,
                 "angle_max": 0.785,
@@ -104,8 +109,13 @@ def generate_launch_description():
         ],
     )
 
-    # Caméra basse (inclinée vers le sol) : obstacles proches, jusqu'à 1.5 m.
-    # Seuil min_height plus haut : cette caméra voit beaucoup de sol.
+    # Caméra basse (~0.58 m, inclinée de 60° vers le sol) : obstacles proches.
+    # Un obstacle vertical à la distance d n'est visible que jusqu'à la hauteur
+    # 0.58 - 0.425*d : au-delà de ~1 m cette caméra ne voit que le sol. Le sol
+    # bruité (jusqu'à ~9 cm à 60°) impose min_height >= 0.25 pour éviter les faux
+    # obstacles ; range_max est donc limité à 1.2 m. Si /bottom_camera_scan
+    # montre encore des points fantômes sur sol dégagé (RViz), monter
+    # min_height à 0.35, ou retirer bottom_camera_layer de la costmap locale.
     bottom_cam_to_scan = Node(
         package="pointcloud_to_laserscan",
         executable="pointcloud_to_laserscan_node",
@@ -117,14 +127,14 @@ def generate_launch_description():
                 "use_sim_time": use_sim_time,
                 "target_frame": "base_footprint",
                 "transform_tolerance": 0.3,
-                "min_height": 0.20,
+                "min_height": 0.25,
                 "max_height": 1.4,
                 "angle_min": -0.785,
                 "angle_max": 0.785,
                 "angle_increment": 0.0087,
                 "scan_time": 0.067,
                 "range_min": 0.3,
-                "range_max": 1.5,
+                "range_max": 1.2,
                 "use_inf": True,
                 "inf_epsilon": 1.0,
             }
