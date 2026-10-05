@@ -33,6 +33,45 @@ def yaw_from_quaternion(x, y, z, w):
     return math.atan2(siny, cosy)
 
 
+def normalize_angle(angle):
+    """Ramène un angle dans l'intervalle [-pi, pi]."""
+    return math.atan2(math.sin(angle), math.cos(angle))
+
+
+def pose_error(estimated, truth):
+    """Écart entre deux poses (x, y, yaw) : (distance en m, écart d'angle en rad)."""
+    xy_error = math.hypot(estimated[0] - truth[0], estimated[1] - truth[1])
+    yaw_error = abs(normalize_angle(estimated[2] - truth[2]))
+    return xy_error, yaw_error
+
+
+def extract_pose(msg, name_keywords=('sitoe', 'base_footprint')):
+    """Lit (x, y, yaw) dans différents types de messages de pose.
+
+    Types gérés : Pose, PoseStamped, Odometry, PoseWithCovarianceStamped et
+    TFMessage (on prend alors la transformée dont le nom d'enfant contient un des
+    mots de name_keywords). Retourne None si rien d'exploitable.
+    """
+    transforms = getattr(msg, 'transforms', None)
+    if transforms is not None:
+        for item in transforms:
+            child = (getattr(item, 'child_frame_id', '') or '').lower()
+            if any(keyword in child for keyword in name_keywords):
+                t = item.transform.translation
+                q = item.transform.rotation
+                return (t.x, t.y, yaw_from_quaternion(q.x, q.y, q.z, q.w))
+        return None
+
+    pose = msg
+    for _ in range(2):  # PoseStamped : 1 niveau ; Odometry et PoseWithCovariance : 2 niveaux
+        if hasattr(pose, 'pose'):
+            pose = pose.pose
+    if not hasattr(pose, 'position') or not hasattr(pose, 'orientation'):
+        return None
+    q = pose.orientation
+    return (pose.position.x, pose.position.y, yaw_from_quaternion(q.x, q.y, q.z, q.w))
+
+
 def distance_to_robot_body(goal_x, goal_y, robot_x, robot_y, robot_yaw):
     """Distance entre le centre du but et le point le plus proche du robot.
 
@@ -146,8 +185,12 @@ def summarize_runs(runs):
             'time_median_s': _median(_values(successes, 'time_sec')),
             'time_mean_s': _mean(_values(successes, 'time_sec')),
             'final_dist_mean_m': _mean(_values(items, 'final_center_distance')),
+            'progress_mean_m': _mean(_values(items, 'progress_m')),
+            'speed_mean_mps': _mean(_values(items, 'average_speed_mps')),
             'contacts_mean': _mean(_values(items, 'contacts_episodes')),
             'recoveries_mean': _mean(_values(items, 'recoveries')),
+            'cov_max_mean': _mean(_values(items, 'amcl_cov_max_xy')),
+            'loc_err_max_mean_m': _mean(_values(items, 'loc_error_max_xy')),
             'commits': ','.join(sorted({str(r.get('git_commit', '?')) for r in items})),
         })
     return rows
@@ -155,7 +198,8 @@ def summarize_runs(runs):
 
 SUMMARY_COLUMNS = [
     'label', 'runs', 'success', 'success_rate', 'time_median_s', 'time_mean_s',
-    'final_dist_mean_m', 'contacts_mean', 'recoveries_mean', 'commits',
+    'final_dist_mean_m', 'progress_mean_m', 'speed_mean_mps', 'contacts_mean',
+    'recoveries_mean', 'cov_max_mean', 'loc_err_max_mean_m', 'commits',
 ]
 
 

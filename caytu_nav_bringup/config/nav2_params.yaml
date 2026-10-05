@@ -59,11 +59,11 @@ planner_server:
     GridBased:
       plugin: "nav2_navfn_planner::NavfnPlanner"
 
-      tolerance: 0.5
+      tolerance: 0.1 #essai 0.5
 
       use_astar: false
 
-      allow_unknown: true
+      allow_unknown: false #essai 
 
       use_final_approach_orientation: true
 
@@ -162,9 +162,9 @@ global_costmap:
 
         cost_scaling_factor: 3.0
 
-        inflation_radius: 0.30
+        inflation_radius: 0.20 #essai
 
-        inflate_unknown: false
+        inflate_unknown: 0.2 #essai
 
         inflate_around_unknown: false
 
@@ -219,9 +219,9 @@ controller_server:
     goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
 
-      xy_goal_tolerance: 0.20
+      xy_goal_tolerance: 0.10 #essai 0.20
 
-      yaw_goal_tolerance: 0.30
+      yaw_goal_tolerance: 0.10 #essai 0.30
 
       stateful: true
 
@@ -241,7 +241,7 @@ controller_server:
       max_vel_theta: 1.0
 
       min_speed_xy: 0.0
-      max_speed_xy: 0.40
+      max_speed_xy: 0.40 #essai
 
       min_speed_theta: 0.0
 
@@ -365,9 +365,9 @@ local_costmap:
 
         cost_scaling_factor: 3.0
 
-        inflation_radius: 0.25
+        inflation_radius: 0.10 #essai
 
-        inflate_unknown: false
+        inflate_unknown: 0.20 #essai
 
         inflate_around_unknown: false
 

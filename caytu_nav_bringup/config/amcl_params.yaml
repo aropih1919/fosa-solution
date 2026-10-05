@@ -19,14 +19,14 @@ amcl:
     # Gazebo fournit l'odométrie directement depuis DiffDrive (30 Hz, rayon
     # 0.08565 m, entraxe 0.3409 m). Les alpha=0.2 injectaient donc un bruit
     # excessif pour cette simulation et pouvaient faire dériver AMCL en route.
-    alpha1: 0.05  # bruit rotation dû à la rotation
-    alpha2: 0.05  # bruit rotation dû à la translation
-    alpha3: 0.05  # bruit translation dû à la translation
-    alpha4: 0.05  # bruit translation dû à la rotation
+    alpha1: 0.10  # bruit rotation dû à la rotation
+    alpha2: 0.10  # bruit rotation dû à la translation
+    alpha3: 0.10  # bruit translation dû à la translation
+    alpha4: 0.10  # bruit translation dû à la rotation
 
     # Le stade contient des visiteurs et du mobilier non nécessairement présents
     # dans la carte statique. Beam skipping limite leur influence sur AMCL.
-    do_beamskip: true
+    do_beamskip: false #essai
     beam_skip_distance: 0.5
     beam_skip_threshold: 0.3
     beam_skip_error_threshold: 0.9

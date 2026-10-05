@@ -2,6 +2,7 @@
 """Tests de bench_core.py. Lancer : python3 tools/test_bench_core.py"""
 
 import math
+from types import SimpleNamespace as NS
 
 import bench_core as core
 
@@ -66,7 +67,8 @@ def test_episodes_de_contact():
 def test_synthese():
     runs = [
         {'label': 'a', 'result': 'SUCCESS', 'time_sec': 100.0, 'final_center_distance': 0.3,
-         'contacts_episodes': 0, 'recoveries': 0, 'git_commit': 'abc'},
+         'contacts_episodes': 0, 'recoveries': 0, 'git_commit': 'abc',
+         'progress_m': 9.0, 'average_speed_mps': 0.2, 'amcl_cov_max_xy': 0.3, 'loc_error_max_xy': 0.1},
         {'label': 'a', 'result': 'TIMEOUT', 'time_sec': 600.0, 'final_center_distance': 4.0,
          'contacts_episodes': 2, 'recoveries': 4, 'git_commit': 'abc'},
         {'label': 'b', 'result': 'SUCCESS', 'time_sec': 80.0, 'final_center_distance': 0.2,
@@ -81,7 +83,38 @@ def test_synthese():
     assert row_a['final_dist_mean_m'] == 2.15
     assert row_a['contacts_mean'] == 1.0
     assert rows[1]['contacts_mean'] is None          # contacts non mesurés
+    assert row_a['progress_mean_m'] == 9.0 and row_a['cov_max_mean'] == 0.3
     assert 'label' in core.format_table(rows)
+
+
+def test_pose_error_et_angles():
+    xy, yaw = core.pose_error((1.0, 1.0, 3.0), (1.0, 2.0, -3.0))
+    assert close(xy, 1.0)
+    assert close(yaw, 2 * math.pi - 6.0)          # 3.0 et -3.0 sont proches sur le cercle
+    assert close(core.normalize_angle(2 * math.pi + 0.5), 0.5)
+
+
+def _quaternion(yaw):
+    return NS(x=0.0, y=0.0, z=math.sin(yaw / 2), w=math.cos(yaw / 2))
+
+
+def test_extract_pose_plusieurs_types():
+    q = _quaternion(0.5)
+    position = NS(x=1.0, y=2.0, z=0.0)
+    pose = NS(position=position, orientation=q)
+
+    # Pose seule
+    assert core.extract_pose(pose) == (1.0, 2.0, core.yaw_from_quaternion(q.x, q.y, q.z, q.w))
+    # PoseStamped
+    assert core.extract_pose(NS(header=None, pose=pose))[:2] == (1.0, 2.0)
+    # Odometry / PoseWithCovarianceStamped (deux niveaux)
+    assert core.extract_pose(NS(pose=NS(pose=pose)))[:2] == (1.0, 2.0)
+    # TFMessage : on prend la transformée du robot, pas les autres
+    other = NS(child_frame_id='cafe_table', transform=NS(translation=NS(x=9, y=9, z=0), rotation=q))
+    robot = NS(child_frame_id='sitoe_robot', transform=NS(translation=position, rotation=q))
+    assert core.extract_pose(NS(transforms=[other, robot]))[:2] == (1.0, 2.0)
+    assert core.extract_pose(NS(transforms=[other])) is None
+    assert core.extract_pose(NS(truc=1)) is None
 
 
 if __name__ == '__main__':
