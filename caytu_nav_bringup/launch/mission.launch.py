@@ -12,7 +12,7 @@
 #   perception:=false      ne pas lancer la perception camera
 #   monitor:=false         ne pas lancer nav_monitor
 #   set_initial_pose:=false  ne pas initialiser AMCL (faire 2D Pose Estimate a la main)
-#   auto_goal:=true        envoyer le goal automatiquement 60 s apres le demarrage
+#   Goal officiel envoye automatiquement a +60 s (auto_goal:=false pour desactiver)
 #   rviz seul : task.launch.py lance toujours RViz (fourni par parc_robot_bringup).
 #
 # Ordre interne : gazebo+bridges -> filtre -> map/amcl (autostart) ->
@@ -191,7 +191,7 @@ def generate_launch_description():
             DeclareLaunchArgument("perception", default_value="true"),
             DeclareLaunchArgument("monitor", default_value="true"),
             DeclareLaunchArgument("set_initial_pose", default_value="true"),
-            DeclareLaunchArgument("auto_goal", default_value="false"),
+            DeclareLaunchArgument("auto_goal", default_value="true"),
             # Spawn de task_params.yaml : x=-0.200546, y=-7.485170, yaw=1.571.
             DeclareLaunchArgument("initial_x", default_value="-0.200546"),
             DeclareLaunchArgument("initial_y", default_value="-7.485170"),
