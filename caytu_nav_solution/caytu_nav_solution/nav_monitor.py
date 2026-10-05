@@ -228,7 +228,7 @@ class NavMonitor(Node):
         elif status == 6:
             self._goal_active = False
             self._log('red', '  ❌ Navigation ABORTED — échec planner ou controller après recoveries')
-            self._log('dim', '     → Causes fréquentes: inflation_radius trop grand (0.45), scan bloqué, goal dans obstacle')
+            self._log('dim', '     → Causes fréquentes: inflation_radius trop grand (0.25), scan bloqué, goal dans obstacle')
         elif status == 5:
             self._goal_active = False
             self._log('yellow', '  ⏹ Navigation CANCELED (timeout 600s ou annulation utilisateur)')
@@ -284,7 +284,7 @@ class NavMonitor(Node):
                 self._blocked_since = now
             elif now - self._blocked_since > 4.0 and now - self._last_cmd_log > 3.0:
                 self._log('red', '  ⏸️  Robot à l\'arrêt depuis 4s alors que goal actif — progress_checker va déclarer échec')
-                self._log('dim', '     → Causes: DWB bloqué par inflation 0.45, obstacle fantôme, ou vitesse trop faible')
+                self._log('dim', '     → Causes: DWB bloqué par inflation 0.25, obstacle fantôme, ou vitesse trop faible')
                 self._last_cmd_log = now
         else:
             self._blocked_since = None

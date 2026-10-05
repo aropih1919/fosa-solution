@@ -70,10 +70,10 @@ def generate_launch_description():
         ],
 
         remappings=[
-            # Surcouche locale : consigne brute, collision_monitor filtre vers le robot.
+            # Consigne directe vers le controleur Gazebo (surcouche retiree).
             (
                 "cmd_vel",
-                "/surcouche/cmd_vel_raw",
+                "/robot_base_controller/cmd_vel_unstamped",
             ),
         ],
     )
@@ -113,10 +113,10 @@ def generate_launch_description():
         ],
 
         remappings=[
-            # Surcouche locale : consigne brute, collision_monitor filtre vers le robot.
+            # Consigne directe vers le controleur Gazebo (surcouche retiree).
             (
                 "cmd_vel",
-                "/surcouche/cmd_vel_raw",
+                "/robot_base_controller/cmd_vel_unstamped",
             ),
         ],
     )
