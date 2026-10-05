@@ -10,7 +10,7 @@ bt_navigator:
 
     global_frame: map
     robot_base_frame: base_footprint
-    odom_topic: /odom
+    odom_topic: /odometry/filtered
 
     transform_tolerance: 0.3
 
@@ -192,7 +192,7 @@ controller_server:
 
     failure_tolerance: 0.3
 
-    odom_topic: /odom
+    odom_topic: /odometry/filtered
 
     enable_stamped_cmd_vel: false
 

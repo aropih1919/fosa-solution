@@ -12,7 +12,7 @@ controller_server:
     # lorsqu'un seul cycle ne trouve pas de trajectoire. Laisser 5 s au
     # contrôleur pour retrouver une commande après un scan ou obstacle transitoire.
     failure_tolerance: 5.0
-    odom_topic: /odom
+    odom_topic: /odometry/filtered
     enable_stamped_cmd_vel: false
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["goal_checker"]

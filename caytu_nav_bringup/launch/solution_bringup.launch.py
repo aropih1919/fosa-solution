@@ -4,6 +4,8 @@ Ce launch remplace le démarrage manuel en plusieurs terminaux : il garantit que
 filtre LiDAR, la carte et AMCL existent avant l'activation de la pile Nav2.
 Il convertit aussi les nuages de points des deux caméras de profondeur en
 LaserScan 2D, utilisés comme sources d'obstacles supplémentaires par Nav2.
+
+Ajout : fusion IMU + odométrie roues via robot_localization (ekf_filter_node).
 """
 
 import os
@@ -74,6 +76,20 @@ def generate_launch_description():
         ],
         # Le robot publie /scan ; Nav2 et AMCL consomment exclusivement le scan filtré.
         remappings=[("scan", "/scan"), ("scan_filtered", "/scan_filtered")],
+    )
+
+    # Fusion IMU (/imu) + odométrie roues (/odom) → /odometry/filtered
+    # publish_tf: false pour éviter le conflit avec la TF odom→base_footprint
+    # déjà publiée par le plugin DiffDrive de Gazebo.
+    ekf_node = Node(
+        package="robot_localization",
+        executable="ekf_node",
+        name="ekf_filter_node",
+        output="screen",
+        parameters=[
+            os.path.join(bringup_dir, "config", "ekf_imu.yaml"),
+            {"use_sim_time": use_sim_time},
+        ],
     )
 
     # Caméra haute (horizontale, ~1.01 m) : obstacles à hauteur de robot, jusqu'à 3 m.
@@ -208,6 +224,7 @@ def generate_launch_description():
             declare_top_cloud,
             declare_bottom_cloud,
             laser_filter,
+            ekf_node,              # ← fusion IMU + odom
             top_cam_to_scan,
             bottom_cam_to_scan,
             map_server,
