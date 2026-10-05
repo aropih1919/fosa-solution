@@ -1,37 +1,40 @@
-# FOSA - NAV2 PARAMETERS
+# FOSA — Paramètres Nav2 (ROS 2 Jazzy, Nav2 1.3.x)
+#
+# Source unique pour bt_navigator, planner, costmaps, behaviors et réglages
+# communs du controller_server. Le contrôleur lui-même (plugin FollowPath) est
+# dans controller_rpp.yaml (défaut) ou controller_dwb.yaml, chargé après ce
+# fichier par navigation.launch.py.
+#
+# REPÈRES
+#   map   = repère du monde Gazebo (publié par odom_imu_localizer à partir du
+#           spawn de task_params.yaml). Le but de task_params.yaml s'utilise
+#           donc tel quel.
+#   odom  = odométrie du plugin DiffDrive (origine au spawn).
+#
+# CAPTEURS (une couche par capteur, combinées en maximum : une couche qui voit
+# « libre » n'efface jamais l'obstacle vu par une autre)
+#   lidar_layer          /scan_clean (marquage) + /scan_clear (effacement)
+#   top_camera_layer     /top_camera_scan     plateaux de table, chaises, personnes
+#   bottom_camera_layer  /bottom_camera_scan  obstacles bas et proches (local)
 
-
-# BT NAVIGATOR - FANEVA
-
+# ----------------------------------------------------------------------------
 bt_navigator:
   ros__parameters:
-
     use_sim_time: true
-
     global_frame: map
     robot_base_frame: base_footprint
-    odom_topic: /odometry/filtered
-
-    transform_tolerance: 0.3
-
-    # Le launch injecte ce chemin depuis le partage du package.  Ne jamais mettre
-    # ici un chemin /home/<utilisateur> : il casserait après installation/déploiement.
-
+    odom_topic: /odom
+    transform_tolerance: 0.5
+    # default_nav_to_pose_bt_xml est injecté par le launch (chemin du package).
     always_reload_bt_xml: false
-
-    navigators:
-      - navigate_to_pose
-
+    navigators: ["navigate_to_pose"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
-
       goal_blackboard_id: goal
       path_blackboard_id: path
-
     bt_loop_duration: 10
     default_server_timeout: 20
     default_cancel_timeout: 20
-
     error_code_names:
       - compute_path_error_code
       - follow_path_error_code
@@ -39,384 +42,285 @@ bt_navigator:
       - spin_error_code
       - backup_error_code
 
-
-# PLANNER SERVER
-#
-# CONFIGURATION DE REPLI
-# navigation.launch.py charge ensuite planner_server_params.yaml, qui est la
-# source de verite pour le planner de Johny.
-
+# ----------------------------------------------------------------------------
 planner_server:
   ros__parameters:
-
     use_sim_time: true
-
-    expected_planner_frequency: 5.0
-
-    planner_plugins:
-      - GridBased
-
+    expected_planner_frequency: 2.0
+    costmap_update_timeout: 1.0
+    planner_plugins: ["GridBased"]
     GridBased:
-      plugin: "nav2_navfn_planner::NavfnPlanner"
-
-      tolerance: 0.5
-
-      use_astar: false
-
+      plugin: "nav2_smac_planner::SmacPlanner2D"
+      tolerance: 0.25
+      downsample_costmap: false
+      downsampling_factor: 1
       allow_unknown: true
-
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      terminal_checking_interval: 5000
+      max_planning_time: 2.0
+      # > 1 : le chemin s'écarte des obstacles au lieu de les longer. Valeur
+      # retenue avec l'inflation globale (0.90 m / 3.0) après simulation des
+      # capteurs dans le monde officiel : marge réelle minimale ~0.3 m.
+      cost_travel_multiplier: 3.0
       use_final_approach_orientation: true
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+        do_refinement: true
+        refinement_num: 2
 
-
-# GLOBAL COSTMAP
-#
-# Basée sur les paramètres actuellement fournis par Johny.
-
+# ----------------------------------------------------------------------------
 global_costmap:
   global_costmap:
     ros__parameters:
-
       use_sim_time: true
-
       global_frame: map
       robot_base_frame: base_footprint
-
       resolution: 0.05
-
-      rolling_window: false
-
+      rolling_window: false          # dimensions = celles de la carte statique
       track_unknown_space: false
-
       always_send_full_costmap: true
-
       update_frequency: 5.0
       publish_frequency: 2.0
-
-      transform_tolerance: 0.3
-
-      # Valeur de repli cohérente avec le footprint calculé depuis les
-      # collisions du robot fourni et chargé aussi dans costmap_common.
+      transform_tolerance: 0.5
+      # Enveloppe au sol du robot (collisions du URDF : x=[-0.288, 0.198],
+      # y=[-0.222, 0.222]) avec 2 à 3 cm de marge.
       footprint: "[ [0.22, 0.25], [0.22, -0.25], [-0.31, -0.25], [-0.31, 0.25] ]"
-
       footprint_padding: 0.02
+      plugins: ["static_layer", "lidar_layer", "top_camera_layer", "inflation_layer"]
 
-      plugins:
-        - static_layer
-        - obstacle_layer
-        - inflation_layer
-
-
-      # STATIC LAYER
-
+      # Murs du café, générés depuis le monde officiel dans le repère Gazebo.
+      # task_solution.py remplace cette carte par une carte vide si le lidar
+      # montre que le monde chargé n'est pas le café.
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
-
         map_subscribe_transient_local: true
+        subscribe_to_updates: false
 
-
-      # OBSTACLE LAYER
-
-      obstacle_layer:
+      lidar_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
-
         enabled: true
-
-        observation_sources: scan
-
-        scan:
-          topic: /scan_filtered
-
-          sensor_frame: lidar_link
-
+        combination_method: 1
+        observation_sources: lidar_mark lidar_clear
+        lidar_mark:
+          topic: /scan_clean
           data_type: "LaserScan"
-
           marking: true
-          clearing: true
-
+          clearing: false
           inf_is_valid: false
-
-          obstacle_min_range: 0.15
-          obstacle_max_range: 10.0
-
-          raytrace_min_range: 0.15
-          raytrace_max_range: 12.0
-
+          # 0.35 m : ignore tout retour situé dans le volume du robot.
+          obstacle_min_range: 0.35
+          obstacle_max_range: 5.0
+          min_obstacle_height: -0.3
           max_obstacle_height: 2.0
-          min_obstacle_height: 0.0
-
           observation_persistence: 0.0
-
+          expected_update_rate: 0.0
+        lidar_clear:
+          topic: /scan_clear
+          data_type: "LaserScan"
+          marking: false
+          clearing: true
+          inf_is_valid: false
+          raytrace_min_range: 0.0
+          raytrace_max_range: 6.0
+          min_obstacle_height: -0.3
+          max_obstacle_height: 2.0
+          observation_persistence: 0.0
           expected_update_rate: 0.0
 
+      # Présente aussi dans la globale : les tables vues une fois y restent
+      # marquées, donc le planificateur les contourne à l'avance.
+      top_camera_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
         combination_method: 1
-
-        track_unknown_space: false
-
-
-      # INFLATION LAYER
+        observation_sources: top_cam
+        top_cam:
+          topic: /top_camera_scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          # Un rayon sans obstacle (inf) efface jusqu'à raytrace_max_range.
+          # Nav2 le convertit en un point à range_max (3.0 m) : obstacle_max_range
+          # DOIT rester inférieur, sinon ce point serait marqué comme obstacle.
+          inf_is_valid: true
+          obstacle_min_range: 0.3
+          obstacle_max_range: 2.5
+          raytrace_min_range: 0.0
+          raytrace_max_range: 3.0
+          min_obstacle_height: -0.3
+          max_obstacle_height: 2.0
+          observation_persistence: 0.0
+          expected_update_rate: 0.0
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-
         enabled: true
-
+        # Le rayon inscrit du robot vaut 0.24 m ; l'inflation doit le dépasser
+        # nettement pour créer une pente de coût qui éloigne le chemin.
+        inflation_radius: 0.90
         cost_scaling_factor: 3.0
-
-        inflation_radius: 0.30
-
         inflate_unknown: false
-
         inflate_around_unknown: false
 
-
-# CONTROLLER SERVER
-#
-# CONFIGURATION DE REPLI
-# navigation.launch.py charge ensuite controller_server_params.yaml, qui est
-# la source de verite pour le controller de Johny.
-
-controller_server:
-  ros__parameters:
-
-    use_sim_time: true
-
-    controller_frequency: 20.0
-
-    costmap_update_timeout: 0.3
-
-    min_x_velocity_threshold: 0.001
-
-    min_y_velocity_threshold: 0.0
-
-    min_theta_velocity_threshold: 0.001
-
-    failure_tolerance: 0.3
-
-    odom_topic: /odometry/filtered
-
-    enable_stamped_cmd_vel: false
-
-    controller_plugins:
-      - FollowPath
-
-    progress_checker_plugins:
-      - progress_checker
-
-    goal_checker_plugins:
-      - goal_checker
-
-    # PROGRESS CHECKE
-
-    progress_checker:
-      plugin: "nav2_controller::SimpleProgressChecker"
-
-      required_movement_radius: 0.20
-
-      movement_time_allowance: 10.0
-
-    # GOAL CHECKE
-
-    goal_checker:
-      plugin: "nav2_controller::SimpleGoalChecker"
-
-      xy_goal_tolerance: 0.20
-
-      yaw_goal_tolerance: 0.30
-
-      stateful: true
-
-    # DWB CONTROLLE
-
-    FollowPath:
-      plugin: "dwb_core::DWBLocalPlanner"
-
-      debug_trajectory_details: false
-
-      min_vel_x: 0.0
-      max_vel_x: 0.40
-
-      min_vel_y: 0.0
-      max_vel_y: 0.0
-
-      max_vel_theta: 1.0
-
-      min_speed_xy: 0.0
-      max_speed_xy: 0.40
-
-      min_speed_theta: 0.0
-
-      acc_lim_x: 1.0
-      decel_lim_x: -1.0
-
-      acc_lim_y: 0.0
-      decel_lim_y: 0.0
-
-      acc_lim_theta: 2.0
-      decel_lim_theta: -2.0
-
-      vx_samples: 20
-      vy_samples: 1
-      vtheta_samples: 20
-
-      sim_time: 1.7
-
-      linear_granularity: 0.05
-      angular_granularity: 0.025
-
-      transform_tolerance: 0.2
-
-      xy_goal_tolerance: 0.20
-
-      trans_stopped_velocity: 0.05
-      short_circuit_trajectory_evaluation: true
-
-      stateful: true
-
-      critics:
-        - RotateToGoal
-        - Oscillation
-        - BaseObstacle
-        - GoalAlign
-        - PathAlign
-        - PathDist
-        - GoalDist
-
-
-# LOCAL COSTMAP
-#
-# Basée sur les paramètres actuels de Johny.
-
+# ----------------------------------------------------------------------------
 local_costmap:
   local_costmap:
     ros__parameters:
-
       use_sim_time: true
-
       global_frame: odom
       robot_base_frame: base_footprint
-
       rolling_window: true
-
-      width: 5
-      height: 5
-
+      width: 6
+      height: 6
       resolution: 0.05
-
+      track_unknown_space: false
+      always_send_full_costmap: true
       update_frequency: 10.0
-      publish_frequency: 10.0
-
-      transform_tolerance: 0.3
-
-      # Valeur de repli cohérente avec la costmap globale.
+      publish_frequency: 5.0
+      transform_tolerance: 0.5
       footprint: "[ [0.22, 0.25], [0.22, -0.25], [-0.31, -0.25], [-0.31, 0.25] ]"
-
       footprint_padding: 0.02
+      plugins: ["lidar_layer", "top_camera_layer", "bottom_camera_layer", "inflation_layer"]
 
-      plugins:
-        - obstacle_layer
-        - inflation_layer
-
-
-      # OBSTACLE LAYER
-
-      obstacle_layer:
+      lidar_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
-
         enabled: true
-
-        observation_sources: scan
-
-        scan:
-          topic: /scan_filtered
-
-          sensor_frame: lidar_link
-
+        combination_method: 1
+        observation_sources: lidar_mark lidar_clear
+        lidar_mark:
+          topic: /scan_clean
           data_type: "LaserScan"
-
           marking: true
-          clearing: true
-
+          clearing: false
           inf_is_valid: false
-
-          obstacle_min_range: 0.15
-          obstacle_max_range: 8.0
-
-          raytrace_min_range: 0.15
-          raytrace_max_range: 9.0
-
+          obstacle_min_range: 0.35
+          obstacle_max_range: 3.5
+          min_obstacle_height: -0.3
           max_obstacle_height: 2.0
-          min_obstacle_height: 0.0
-
           observation_persistence: 0.0
-
+          expected_update_rate: 0.0
+        lidar_clear:
+          topic: /scan_clear
+          data_type: "LaserScan"
+          marking: false
+          clearing: true
+          inf_is_valid: false
+          raytrace_min_range: 0.0
+          raytrace_max_range: 4.0
+          min_obstacle_height: -0.3
+          max_obstacle_height: 2.0
+          observation_persistence: 0.0
           expected_update_rate: 0.0
 
+      top_camera_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
         combination_method: 1
+        observation_sources: top_cam
+        top_cam:
+          topic: /top_camera_scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          inf_is_valid: true
+          obstacle_min_range: 0.3
+          obstacle_max_range: 2.5
+          raytrace_min_range: 0.0
+          raytrace_max_range: 3.0
+          min_obstacle_height: -0.3
+          max_obstacle_height: 2.0
+          observation_persistence: 0.0
+          expected_update_rate: 0.0
 
-        track_unknown_space: false
-
-
-      # INFLATION LAYER
+      # Caméra inclinée de 60° vers le sol : obstacles bas à moins d'un mètre.
+      bottom_camera_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        combination_method: 1
+        observation_sources: bottom_cam
+        bottom_cam:
+          topic: /bottom_camera_scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          inf_is_valid: true
+          obstacle_min_range: 0.3
+          obstacle_max_range: 1.0      # < range_max du scan (1.2 m)
+          raytrace_min_range: 0.0
+          raytrace_max_range: 1.2
+          min_obstacle_height: -0.3
+          max_obstacle_height: 2.0
+          observation_persistence: 0.0
+          expected_update_rate: 0.0
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-
         enabled: true
-
-        cost_scaling_factor: 3.0
-
-        inflation_radius: 0.25
-
+        inflation_radius: 0.55
+        cost_scaling_factor: 4.0
         inflate_unknown: false
-
         inflate_around_unknown: false
 
+# ----------------------------------------------------------------------------
+# Réglages communs du controller_server. Le plugin FollowPath est défini dans
+# controller_rpp.yaml ou controller_dwb.yaml.
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    controller_frequency: 20.0
+    costmap_update_timeout: 0.5
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 1.0
+    odom_topic: /odom
+    # Le robot officiel attend un Twist non horodaté.
+    enable_stamped_cmd_vel: false
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
 
-# BEHAVIOR SERVER
-#
-# Utilisé par :
-#   Spin
-#   BackUp
-#   Wait
-#
-# Les actions sont nécessaires à notre Behavior Tree.
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.25
+      movement_time_allowance: 15.0
 
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      # Critère PARC n° 2 : distance finale du centre du robot au centre du
+      # but. On vise donc le centre du cercle (rayon 0.6 m), pas son bord.
+      xy_goal_tolerance: 0.10
+      # Aucune orientation finale n'est demandée par la tâche.
+      yaw_goal_tolerance: 3.2
+      stateful: true
+
+# ----------------------------------------------------------------------------
 behavior_server:
   ros__parameters:
-
     use_sim_time: true
-
+    local_costmap_topic: local_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_costmap_topic: global_costmap/costmap_raw
+    global_footprint_topic: global_costmap/published_footprint
     cycle_frequency: 10.0
-
-    global_frame: map
-    robot_base_frame: base_footprint
-
-    behavior_plugins:
-      - spin
-      - backup
-      - wait
-
+    behavior_plugins: ["spin", "backup", "wait"]
     spin:
       plugin: "nav2_behaviors::Spin"
-
     backup:
       plugin: "nav2_behaviors::BackUp"
-
     wait:
       plugin: "nav2_behaviors::Wait"
-
-
-# LIFECYCLE MANAGER
-
-lifecycle_manager_navigation:
-  ros__parameters:
-
-    use_sim_time: true
-
-    autostart: true
-
-    node_names:
-      - controller_server
-      - planner_server
-      - behavior_server
-      - bt_navigator
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.5
+    simulate_ahead_time: 2.0
+    # Le plugin DiffDrive officiel limite la rotation à 1 rad/s.
+    max_rotational_vel: 0.8
+    min_rotational_vel: 0.3
+    rotational_acc_lim: 1.6
+    enable_stamped_cmd_vel: false

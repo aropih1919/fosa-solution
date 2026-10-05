@@ -32,8 +32,8 @@
             default_planner="GridBased"
             topic_name="planner_selector"/>
 
-        <!-- Replanification à 1 Hz -->
-        <RateController hz="1.0">
+        <!-- Replanification à 2 Hz : le contrôleur suit le chemin, l'évitement vient de la replanification -->
+        <RateController hz="2.0">
 
           <RecoveryNode
               number_of_retries="1"
