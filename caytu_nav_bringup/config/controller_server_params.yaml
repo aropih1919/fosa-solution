@@ -46,8 +46,8 @@ controller_server:
       decel_lim_theta: -3.0
       vx_samples: 20
       vy_samples: 1
-      vtheta_samples: 24
-      sim_time: 1.4
+      vtheta_samples: 32  # options de virage plus fines
+      sim_time: 1.0  # horizon court, moins frileux en encombre
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.3

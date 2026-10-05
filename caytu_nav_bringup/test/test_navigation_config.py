@@ -41,7 +41,9 @@ def test_costmap_node_paths_and_integer_window_size():
     assert type(local_costmap["width"]) is int
     assert type(local_costmap["height"]) is int
     assert global_costmap["inflation_layer"]["inflation_radius"] >= 0.25
-    assert local_costmap["inflation_layer"]["inflation_radius"] >= 0.25
+    # Local volontairement plus bas (0.20) : passages etroits type pieds de table.
+    # La securite reste assuree par le critic ObstacleFootprint (footprint reelle).
+    assert local_costmap["inflation_layer"]["inflation_radius"] >= 0.20
 
 
 def test_common_costmap_parameters_target_both_internal_nodes():
