@@ -46,7 +46,7 @@ controller_server:
       decel_lim_theta: -3.0
       vx_samples: 20
       vy_samples: 1
-      vtheta_samples: 32  # options de virage plus fines
+      vtheta_samples: 20  # 32 trop lourd ici (RT 9 %)
       sim_time: 1.0  # horizon court, moins frileux en encombre
       linear_granularity: 0.05
       angular_granularity: 0.025
@@ -63,7 +63,7 @@ controller_server:
         sum_scores: false
       PathAlign:
         scale: 32.0
-        forward_point_distance: 0.1
+        forward_point_distance: 0.3  # regarde plus loin sur la courbe
       GoalAlign:
         scale: 24.0
         forward_point_distance: 0.1
@@ -74,8 +74,8 @@ controller_server:
       PreferForward:
         scale: 8.0
       RotateToGoal:
-        scale: 32.0
-        slowing_factor: 5.0
+        scale: 16.0  # 32 verrouillait tout en ligne droite (0.12/0.00)
+        slowing_factor: 2.0  # 5.0 bridait trop la vitesse en virage
         lookahead_time: -1.0
       Oscillation:
         scale: 1.0
