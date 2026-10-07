@@ -26,6 +26,7 @@ def _nav2_nodes(context):
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
     map_yaml = LaunchConfiguration("map").perform(context)
     behavior_tree = LaunchConfiguration("behavior_tree").perform(context)
+    use_collision = LaunchConfiguration("collision_monitor").perform(context).lower() == "true"
 
     params_file = os.path.join(bringup_dir, "config", "nav2_params.yaml")
     # Chemin résolu dans le package installé : aucun chemin personnel en dur.
@@ -34,8 +35,10 @@ def _nav2_nodes(context):
     if not os.path.isfile(bt_xml_file):
         raise RuntimeError(f"Behavior tree inconnu : {behavior_tree} ({bt_xml_file} absent)")
     sim_time = {"use_sim_time": use_sim_time}
+    lifecycle = LIFECYCLE_NODES + ["collision_monitor"] if use_collision else LIFECYCLE_NODES
+    cmd_topic = "/cmd_vel_nav" if use_collision else CMD_VEL_TOPIC
 
-    return [
+    nodes = [
         Node(
             package="nav2_map_server",
             executable="map_server",
@@ -49,7 +52,7 @@ def _nav2_nodes(context):
             name="controller_server",
             output="screen",
             parameters=[params_file, sim_time],
-            remappings=[("cmd_vel", CMD_VEL_TOPIC)],
+            remappings=[("cmd_vel", cmd_topic)],
         ),
         Node(
             package="nav2_planner",
@@ -64,7 +67,7 @@ def _nav2_nodes(context):
             name="behavior_server",
             output="screen",
             parameters=[params_file, sim_time],
-            remappings=[("cmd_vel", CMD_VEL_TOPIC)],
+            remappings=[("cmd_vel", cmd_topic)],
         ),
         Node(
             package="nav2_bt_navigator",
@@ -73,6 +76,18 @@ def _nav2_nodes(context):
             output="screen",
             parameters=[params_file, sim_time, {"default_nav_to_pose_bt_xml": bt_xml_file}],
         ),
+    ]
+    if use_collision:
+        nodes.append(
+            Node(
+                package="nav2_collision_monitor",
+                executable="collision_monitor",
+                name="collision_monitor",
+                output="screen",
+                parameters=[params_file, sim_time],
+            )
+        )
+    nodes.append(
         Node(
             package="nav2_lifecycle_manager",
             executable="lifecycle_manager",
@@ -80,7 +95,7 @@ def _nav2_nodes(context):
             output="screen",
             parameters=[sim_time, {
                 "autostart": True,
-                "node_names": LIFECYCLE_NODES,
+                "node_names": lifecycle,
                 # La simulation tourne bien plus lentement que le temps réel :
                 # on laisse aux nœuds le temps de répondre avant de les
                 # déclarer morts.
@@ -89,7 +104,8 @@ def _nav2_nodes(context):
                 "bond_respawn_max_duration": 20.0,
             }],
         ),
-    ]
+    )
+    return nodes
 
 
 def generate_launch_description():
@@ -105,5 +121,8 @@ def generate_launch_description():
             "behavior_tree", default_value="if_invalid", choices=["if_invalid", "periodic"],
             description="Replanification : seulement si le chemin devient invalide "
                         "(défaut) ou périodique à 2 Hz."),
+        DeclareLaunchArgument(
+            "collision_monitor", default_value="false", choices=["true", "false"],
+            description="Couche de securite liee a la vitesse (defaut desactive)."),
         OpaqueFunction(function=_nav2_nodes),
     ])

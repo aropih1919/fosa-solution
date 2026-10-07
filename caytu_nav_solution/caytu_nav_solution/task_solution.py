@@ -90,6 +90,7 @@ class TaskSolution(Node):
         self.declare_parameter('write_report', True)
         self.declare_parameter('report_dir', '~/.ros/fosa_runs')
         self.declare_parameter('map_correction', 'auto')
+        self.declare_parameter('collision_monitor', False)
 
         self._task: TaskParams = load_task_params(
             self.get_parameter('task_params_file').value or None)
@@ -103,7 +104,7 @@ class TaskSolution(Node):
         self._metrics = RunMetrics()
         self._metrics.behavior_tree = str(self.get_parameter('behavior_tree').value)
         self._metrics.map_correction = 'auto'
-        self._metrics.collision_monitor = 'false'
+        self._metrics.collision_monitor = str(bool(self.get_parameter('collision_monitor').value)).lower()
         self._metrics.contacts_available = Contacts is not None
         self._last_report_t = 0.0
         self._wall_start = time.monotonic()
@@ -279,6 +280,7 @@ class TaskSolution(Node):
         mode = str(self.get_parameter('map_correction').value).lower()
         enable_corr = mode == 'auto' and cafe_valid
         self._metrics.map_correction = 'auto' if enable_corr else 'never'
+        use_cm = bool(self.get_parameter('collision_monitor').value)
         command = [
             'ros2', 'launch',
             self.get_parameter('bringup_package').value,
@@ -287,6 +289,7 @@ class TaskSolution(Node):
             f'map:={map_yaml}',
             f'behavior_tree:={self.get_parameter("behavior_tree").value}',
             f'map_correction:={"true" if enable_corr else "false"}',
+            f'collision_monitor:={"true" if use_cm else "false"}',
             f'task_params_file:={self._task.path}',
         ]
         self.get_logger().info('Démarrage de la solution : ' + ' '.join(command))

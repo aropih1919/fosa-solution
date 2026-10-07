@@ -173,6 +173,16 @@ def test_planner_is_smac_2d_without_hybrid_parameters():
         assert hybrid_only not in planner
 
 
+def test_collision_monitor_uses_robot_cmd_and_declared_sources():
+    cm = nav2()["collision_monitor"]["ros__parameters"]
+    assert cm["cmd_vel_out_topic"] == "/robot_base_controller/cmd_vel_unstamped"
+    assert cm["polygons"] == ["FootprintApproach"]
+    assert cm["FootprintApproach"]["action_type"] == "approach"
+    for source in cm["observation_sources"]:
+        assert source in cm, f"source {source} non definie"
+        assert cm[source]["type"] == "scan"
+
+
 def _read_pgm(path):
     data = path.read_bytes()
     tokens, pos = [], 0

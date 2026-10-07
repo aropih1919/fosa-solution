@@ -384,3 +384,42 @@ behavior_server:
     min_rotational_vel: 0.3
     rotational_acc_lim: 1.6
     enable_stamped_cmd_vel: false
+
+# ----------------------------------------------------------------------------
+collision_monitor:
+  ros__parameters:
+    use_sim_time: true
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    cmd_vel_in_topic: /cmd_vel_nav
+    cmd_vel_out_topic: /robot_base_controller/cmd_vel_unstamped
+    state_topic: /collision_monitor_state
+    transform_tolerance: 0.5
+    source_timeout: 2.0
+    base_shift_correction: true
+    stop_pub_timeout: 2.0
+    # Une seule zone, qui s'allonge avec la vitesse : le robot ralentit pour
+    # garder au moins 1 s avant un contact avec son propre contour.
+    polygons: ["FootprintApproach"]
+    FootprintApproach:
+      type: "polygon"
+      action_type: "approach"
+      footprint_topic: /local_costmap/published_footprint
+      time_before_collision: 1.0
+      simulation_time_step: 0.1
+      min_points: 6
+      visualize: false
+      enabled: true
+    observation_sources: ["lidar", "top_cam", "bottom_cam"]
+    lidar:
+      type: "scan"
+      topic: /scan_clean
+      enabled: true
+    top_cam:
+      type: "scan"
+      topic: /top_camera_scan
+      enabled: true
+    bottom_cam:
+      type: "scan"
+      topic: /bottom_camera_scan
+      enabled: true

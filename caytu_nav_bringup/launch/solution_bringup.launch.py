@@ -59,6 +59,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "map_correction", default_value="false", choices=["true", "false"],
             description="Recalage sur les murs (defaut desactive)."),
+        DeclareLaunchArgument(
+            "collision_monitor", default_value="false", choices=["true", "false"],
+            description="Couche de securite liee a la vitesse (defaut desactive)."),
     ]
 
     # 1. Le lidar est sous le châssis : quatre secteurs fixes voient les roues
@@ -179,6 +182,7 @@ def generate_launch_description():
             "use_sim_time": LaunchConfiguration("use_sim_time"),
             "map": LaunchConfiguration("map"),
             "behavior_tree": LaunchConfiguration("behavior_tree"),
+            "collision_monitor": LaunchConfiguration("collision_monitor"),
         }.items(),
     )
 
