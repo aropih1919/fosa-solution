@@ -14,17 +14,18 @@ import math
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
-from geometry_msgs.msg import PoseStamped, TransformStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, LaserScan
 from tf2_ros import TransformBroadcaster
 
 from caytu_nav_solution.nav_math import (
-    OdomImuFusion, Pose2D, normalize_angle, quaternion_from_yaw, yaw_from_quaternion)
+    OdomImuFusion, Pose2D, build_distance_field, estimate_translation_correction,
+    load_pgm_map, normalize_angle, quaternion_from_yaw, yaw_from_quaternion)
 from caytu_nav_solution.task_params import load_task_params
 
 
@@ -45,6 +46,8 @@ class OdomImuLocalizer(Node):
         # La TF est post-datée comme le fait AMCL, pour rester utilisable entre
         # deux messages d'odométrie.
         self.declare_parameter('transform_tolerance', 0.2)
+        self.declare_parameter('enable_map_correction', False)
+        self.declare_parameter('map_yaml', '')
 
         task = load_task_params(self.get_parameter('task_params_file').value or None)
         self._fusion = OdomImuFusion(task.spawn)
@@ -61,9 +64,16 @@ class OdomImuLocalizer(Node):
         self._last_gyro_stamp = None
         self._got_odom = False
         self._imu_mode_logged = None
+        self._last_odom_w = 0.0
+        self._field = None
+        self._grid = None
+        self._last_corr_try = 0.0
+        self._cum_x = 0.0
+        self._cum_y = 0.0
 
         self._broadcaster = TransformBroadcaster(self)
         self._pose_pub = self.create_publisher(PoseStamped, '/localization_pose', 10)
+        self._corr_pub = self.create_publisher(Vector3Stamped, '/localization_correction', 10)
         self.create_subscription(
             Odometry, self.get_parameter('odom_topic').value, self._on_odom,
             qos_profile_sensor_data)
@@ -73,6 +83,12 @@ class OdomImuLocalizer(Node):
         # Tant que l'odométrie n'est pas arrivée, Nav2 a quand même besoin de
         # map -> odom pour démarrer ses costmaps.
         self._startup_timer = self.create_timer(0.1, self._publish_startup_transform)
+
+        if bool(self.get_parameter('enable_map_correction').value):
+            self._load_distance_field(str(self.get_parameter('map_yaml').value))
+            if self._field is not None:
+                self.create_subscription(
+                    LaserScan, '/scan_clean', self._on_scan, qos_profile_sensor_data)
 
         self.get_logger().info(
             f'Localisation roues + IMU : spawn lu dans {task.path} '
@@ -111,6 +127,7 @@ class OdomImuLocalizer(Node):
             p.position.x, p.position.y,
             yaw_from_quaternion(p.orientation.x, p.orientation.y,
                                 p.orientation.z, p.orientation.w))
+        self._last_odom_w = float(msg.twist.twist.angular.z)
 
         imu_yaw = None
         if self._use_imu and self._imu_yaw is not None and self._imu_stamp is not None:
@@ -140,6 +157,62 @@ class OdomImuLocalizer(Node):
         out.pose.orientation.x, out.pose.orientation.y = qx, qy
         out.pose.orientation.z, out.pose.orientation.w = qz, qw
         self._pose_pub.publish(out)
+
+    # ------------------------------------------------------- recalage murs
+    def _load_distance_field(self, map_yaml: str) -> None:
+        """Charge la carte et construit le champ une fois au demarrage."""
+        import os
+
+        import yaml
+        if not map_yaml:
+            self.get_logger().warn('Recalage demande sans carte : desactive.')
+            return
+        try:
+            with open(map_yaml, encoding='utf-8') as stream:
+                meta = yaml.safe_load(stream)
+            image = meta['image']
+            if not os.path.isabs(image):
+                image = os.path.join(os.path.dirname(map_yaml), image)
+            with open(image, 'rb') as stream:
+                self._grid = load_pgm_map(
+                    stream.read(), float(meta['resolution']),
+                    float(meta['origin'][0]), float(meta['origin'][1]))
+            self._field = build_distance_field(self._grid, max_dist=0.5)
+        except Exception as error:
+            self.get_logger().warn(f'Carte illisible pour recalage ({error}).')
+            self._field = None
+
+    def _on_scan(self, msg: LaserScan) -> None:
+        if self._field is None or self._grid is None:
+            return
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now - self._last_corr_try < 1.0:
+            return
+        self._last_corr_try = now
+        if abs(self._last_odom_w) >= 0.3:
+            return
+        pose = self._fusion.pose
+        if pose is None:
+            return
+        lidar = pose.compose(Pose2D(-0.021, 0.0, 0.0))
+        corr = estimate_translation_correction(
+            self._field, self._grid, lidar, msg.angle_min,
+            msg.angle_increment, msg.ranges)
+        if corr is None:
+            return
+        dx, dy, quality = corr[0] * 0.3, corr[1] * 0.3, corr[2]
+        dx = max(-0.05, min(0.05, dx))
+        dy = max(-0.05, min(0.05, dy))
+        if math.hypot(self._cum_x + dx, self._cum_y + dy) > 0.50:
+            return
+        self._fusion.apply_correction(dx, dy)
+        self._cum_x += dx
+        self._cum_y += dy
+        out = Vector3Stamped()
+        out.header.stamp = self.get_clock().now().to_msg()
+        out.header.frame_id = 'map'
+        out.vector.x, out.vector.y, out.vector.z = self._cum_x, self._cum_y, quality
+        self._corr_pub.publish(out)
 
     # ------------------------------------------------------------------- TF
     def _publish_startup_transform(self):

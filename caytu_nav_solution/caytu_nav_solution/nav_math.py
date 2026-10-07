@@ -11,7 +11,19 @@ import math
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
+import numpy as np
+
 GRAVITY = 9.80665
+
+# Recalage sur les murs : seuils valides dans le cafe (ne pas modifier sans le signaler).
+_CORR_R_MIN = 0.45
+_CORR_R_MAX = 8.0
+_CORR_WALL_MAX_D = 0.30
+_CORR_MIN_POINTS = 40
+_CORR_IMPROVE_RATIO = 0.15
+_CORR_IMPROVE_MIN = 0.005
+_CORR_AXIS_MIN = 0.003
+_AGREEMENT_MAX_D = 0.20
 
 
 # --------------------------------------------------------------------------- #
@@ -158,6 +170,11 @@ class OdomImuFusion:
         self._last_odom = odom
         return self._pose.compose(odom.inverse())
 
+    def apply_correction(self, dx: float, dy: float) -> None:
+        """Ajoute (dx, dy) a la pose estimee, sans toucher au cap."""
+        if self._pose is not None:
+            self._pose = Pose2D(self._pose.x + dx, self._pose.y + dy, self._pose.yaw)
+
 
 # --------------------------------------------------------------------------- #
 # Inclinaison du robot et intersection du plan lidar avec le sol
@@ -244,17 +261,6 @@ class GridMap:
     origin_y: float
     occupied: List[bytearray]     # occupied[row][col] = 1 si cellule occupée
 
-    def is_occupied_near(self, x: float, y: float, radius_cells: int) -> bool:
-        col = int(math.floor((x - self.origin_x) / self.resolution))
-        row = int(math.floor((y - self.origin_y) / self.resolution))
-        for r in range(row - radius_cells, row + radius_cells + 1):
-            if 0 <= r < self.height:
-                line = self.occupied[r]
-                for c in range(max(0, col - radius_cells), min(self.width, col + radius_cells + 1)):
-                    if line[c]:
-                        return True
-        return False
-
 
 def _read_pgm_tokens(data: bytes, count: int) -> Tuple[List[bytes], int]:
     """Lit `count` jetons d'en-tête PGM en sautant blancs et commentaires."""
@@ -294,21 +300,94 @@ def load_pgm_map(pgm_bytes: bytes, resolution: float, origin_x: float, origin_y:
 
 def scan_map_agreement(grid: GridMap, sensor: Pose2D, angle_min: float,
                        angle_increment: float, ranges: Sequence[float],
-                       min_range: float = 0.45, max_range: float = 11.5,
-                       tolerance_cells: int = 4) -> Tuple[float, int]:
-    """Part des retours du scan qui tombent sur un mur de la carte.
+                       min_range: float = 0.45, max_range: float = 11.5) -> Tuple[float, int]:
+    """Part des retours du scan a 0.20 m ou moins d'un mur (champ de distance)."""
+    field = build_distance_field(grid, max_dist=0.5)
+    r = np.asarray(ranges, dtype=np.float64)
+    ok = np.isfinite(r) & (r >= min_range) & (r <= max_range)
+    idx = np.nonzero(ok)[0]
+    if idx.size == 0:
+        return 0.0, 0
+    angles = sensor.yaw + angle_min + idx * angle_increment
+    px = sensor.x + r[idx] * np.cos(angles)
+    py = sensor.y + r[idx] * np.sin(angles)
+    dists = field_lookup(field, grid, px, py)
+    hits = int(np.count_nonzero(dists <= _AGREEMENT_MAX_D))
+    return hits / idx.size, int(idx.size)
 
-    sensor : pose du lidar dans le repère de la carte.
-    Retourne (fraction en accord, nombre de retours utilisés). Les retours trop
-    proches (le robot lui-même) ou hors portée sont ignorés.
+
+def build_distance_field(grid: GridMap, max_dist: float = 0.5) -> np.ndarray:
+    """Champ de distance aux murs, calcule une seule fois au demarrage.
+
+    Retourne un tableau float32 H x W. Aucune boucle sur les cellules :
+    une passe vectorisee par decalage (di, dj) dans le disque de rayon R.
     """
-    used = hits = 0
-    for i, r in enumerate(ranges):
-        if not math.isfinite(r) or r < min_range or r > max_range:
-            continue
-        a = sensor.yaw + angle_min + i * angle_increment
-        used += 1
-        if grid.is_occupied_near(sensor.x + r * math.cos(a), sensor.y + r * math.sin(a),
-                                 tolerance_cells):
-            hits += 1
-    return (hits / used if used else 0.0), used
+    occ = np.asarray(grid.occupied, dtype=bool)
+    height, width = occ.shape
+    field = np.full((height, width), max_dist, dtype=np.float32)
+    radius = int(round(max_dist / grid.resolution))
+    res = grid.resolution
+    for di in range(-radius, radius + 1):
+        for dj in range(-radius, radius + 1):
+            if di * di + dj * dj > radius * radius:
+                continue
+            dist = res * math.hypot(di, dj)
+            r0s, r1s = max(0, -di), height - max(0, di)
+            c0s, c1s = max(0, -dj), width - max(0, dj)
+            r0d, r1d = max(0, di), height - max(0, -di)
+            c0d, c1d = max(0, dj), width - max(0, -dj)
+            if r0s >= r1s or c0s >= c1s:
+                continue
+            src = occ[r0s:r1s, c0s:c1s]
+            dst = field[r0d:r1d, c0d:c1d]
+            np.minimum(dst, np.where(src, dist, max_dist), out=dst)
+    return field
+
+
+def field_lookup(field: np.ndarray, grid: GridMap, xs, ys) -> np.ndarray:
+    """Distance au mur pour chaque point, O(1) par point vectorise."""
+    xs_arr = np.asarray(xs, dtype=np.float64)
+    ys_arr = np.asarray(ys, dtype=np.float64)
+    cols = np.floor((xs_arr - grid.origin_x) / grid.resolution).astype(np.int64)
+    rows = np.floor((ys_arr - grid.origin_y) / grid.resolution).astype(np.int64)
+    fallback = float(np.max(field))
+    out = np.full(np.shape(xs_arr), fallback, dtype=np.float64)
+    valid = (cols >= 0) & (cols < grid.width) & (rows >= 0) & (rows < grid.height)
+    if np.any(valid):
+        out[valid] = field[rows[valid], cols[valid]]
+    return out
+
+
+def estimate_translation_correction(field: np.ndarray, grid: GridMap,
+                                    lidar_pose: Pose2D, angle_min: float,
+                                    angle_increment: float,
+                                    ranges: Sequence[float]) -> Optional[Tuple[float, float, float]]:
+    """Estime (dx, dy, qualite) en comparant le scan aux murs (O(81 x M))."""
+    r = np.asarray(ranges, dtype=np.float64)
+    ok = np.isfinite(r) & (r >= _CORR_R_MIN) & (r <= _CORR_R_MAX)
+    idx = np.nonzero(ok)[0]
+    if idx.size == 0:
+        return None
+    angles = lidar_pose.yaw + angle_min + idx * angle_increment
+    px = lidar_pose.x + r[idx] * np.cos(angles)
+    py = lidar_pose.y + r[idx] * np.sin(angles)
+    near = field_lookup(field, grid, px, py) <= _CORR_WALL_MAX_D
+    px, py = px[near], py[near]
+    if px.size < _CORR_MIN_POINTS:
+        return None
+    shifts = np.linspace(-0.10, 0.10, 9)
+    px3 = px[None, None, :] + shifts[:, None, None] + np.zeros((1, 9, 1))
+    py3 = py[None, None, :] + np.zeros((9, 1, 1)) + shifts[None, :, None]
+    scores = field_lookup(field, grid, px3, py3).mean(axis=2)
+    flat = int(np.argmin(scores))
+    i, j = flat // 9, flat % 9
+    if i == 0 or i == 8 or j == 0 or j == 8:
+        return None
+    center, best = float(scores[4, 4]), float(scores[i, j])
+    if center - best < max(_CORR_IMPROVE_RATIO * center, _CORR_IMPROVE_MIN):
+        return None
+    dx = float(shifts[i]) if min(float(scores[i - 1, j]), float(scores[i + 1, j])) - best >= _CORR_AXIS_MIN else 0.0
+    dy = float(shifts[j]) if min(float(scores[i, j - 1]), float(scores[i, j + 1])) - best >= _CORR_AXIS_MIN else 0.0
+    if dx == 0.0 and dy == 0.0:
+        return None
+    return dx, dy, 1.0 - best / 0.5

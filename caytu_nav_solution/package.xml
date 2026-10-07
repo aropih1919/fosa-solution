@@ -4,7 +4,7 @@
   <name>caytu_nav_solution</name>
   <version>0.2.0</version>
   <description>Point d'entrée officiel PARC 2026 (task_solution.py), localisation roues + IMU et filtrage du lidar — CAYTU Sito-É, équipe Fosa</description>
-  <!-- Adresse à remplacer par le contact de l'équipe. -->
+  
   <maintainer email="equipe.fosa@example.com">Équipe Fosa</maintainer>
   <license>MIT</license>
 
@@ -21,6 +21,7 @@
   <exec_depend>ament_index_python</exec_depend>
   <!-- Lecture de task_params.yaml et du YAML de carte. -->
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <!-- task_solution.py lit task_params.yaml dans le package officiel... -->
   <exec_depend>parc_robot_bringup</exec_depend>
   <!-- ...puis démarre toute la pile avec `ros2 launch caytu_nav_bringup ...`. -->

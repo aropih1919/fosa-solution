@@ -5,7 +5,8 @@ import random
 import pytest
 
 from caytu_nav_solution.nav_math import (
-    GRAVITY, OdomImuFusion, Pose2D, floor_ranges, lidar_height, load_pgm_map,
+    GRAVITY, OdomImuFusion, Pose2D, build_distance_field, estimate_translation_correction,
+    field_lookup, floor_ranges, lidar_height, load_pgm_map,
     normalize_angle, quaternion_from_rpy, quaternion_from_yaw, scan_map_agreement,
     split_floor_returns, tilt_from_accel, yaw_from_quaternion)
 
@@ -160,8 +161,9 @@ def _square_room_pgm(size=40):
 def test_pgm_loading_and_scan_agreement():
     grid = load_pgm_map(_square_room_pgm(), 0.05, -1.0, -1.0)
     assert grid.width == 40 and grid.height == 40
-    assert grid.is_occupied_near(-0.99, 0.0, 0)        # mur ouest
-    assert not grid.is_occupied_near(0.0, 0.0, 2)      # centre libre
+    field = build_distance_field(grid)
+    assert float(field_lookup(field, grid, [-0.99], [0.0])[0]) <= 0.01
+    assert float(field_lookup(field, grid, [0.0], [0.0])[0]) > 0.40
 
     n = 180
     angle_min, inc = -math.pi, 2 * math.pi / n
@@ -178,3 +180,81 @@ def test_pgm_loading_and_scan_agreement():
 def test_pgm_rejects_other_formats():
     with pytest.raises(ValueError):
         load_pgm_map(b'P2\n2 2\n255\n0 0 0 0\n', 0.05, 0.0, 0.0)
+
+
+def _rect_room(width_m=8.0, height_m=6.0, res=0.05, corridor=False):
+    """Salle rectangulaire synthetique, murs d'une cellule."""
+    w, h = int(width_m / res), int(height_m / res)
+    ox, oy = -width_m / 2.0, -height_m / 2.0
+    rows = []
+    for r in range(h):
+        line = bytearray(w)
+        for c in range(w):
+            if corridor:
+                wall = r in (0, h - 1)
+            else:
+                wall = r in (0, h - 1) or c in (0, w - 1)
+            line[c] = 1 if wall else 0
+        rows.append(line)
+    from caytu_nav_solution.nav_math import GridMap
+    return GridMap(w, h, res, ox, oy, rows)
+
+
+def _room_ranges(room_w=8.0, room_h=6.0, n=360, res=0.05):
+    angle_min, inc = -math.pi, 2 * math.pi / n
+    hx, hy = room_w / 2.0 - res / 2.0, room_h / 2.0 - res / 2.0
+    ranges = []
+    for i in range(n):
+        a = angle_min + i * inc
+        ca, sa = abs(math.cos(a)), abs(math.sin(a))
+        ranges.append(min(hx / max(ca, 1e-9), hy / max(sa, 1e-9)))
+    return angle_min, inc, ranges
+
+
+def test_distance_field_values():
+    grid = _rect_room()
+    field = build_distance_field(grid)
+    assert float(field_lookup(field, grid, [-3.975], [0.0])[0]) == 0.0
+    assert abs(float(field_lookup(field, grid, [-3.925], [0.0])[0]) - 0.05) < 0.02
+    assert float(field_lookup(field, grid, [0.0], [0.0])[0]) == 0.5
+
+
+def test_correction_recovers_offset():
+    grid = _rect_room(res=0.025)
+    field = build_distance_field(grid)
+    angle_min, inc, ranges = _room_ranges(res=0.025)
+    est = estimate_translation_correction(
+        field, grid, Pose2D(0.08, -0.05, 0.0), angle_min, inc, ranges)
+    assert est is not None
+    assert abs(est[0] + 0.08) < 0.03 and abs(est[1] - 0.05) < 0.03
+
+
+def test_correction_with_partial_occlusions():
+    grid = _rect_room(res=0.025)
+    field = build_distance_field(grid)
+    angle_min, inc, ranges = _room_ranges(res=0.025)
+    rng = random.Random(7)
+    short = [r * 0.5 if rng.random() < 0.30 else r for r in ranges]
+    est = estimate_translation_correction(
+        field, grid, Pose2D(0.08, -0.05, 0.0), angle_min, inc, short)
+    assert est is not None
+    assert abs(est[0] + 0.08) < 0.03 and abs(est[1] - 0.05) < 0.03
+
+
+def test_corridor_constrains_only_y():
+    grid = _rect_room(res=0.025, corridor=True)
+    field = build_distance_field(grid)
+    angle_min, inc, ranges = _room_ranges(res=0.025)
+    est = estimate_translation_correction(
+        field, grid, Pose2D(0.08, -0.05, 0.0), angle_min, inc, ranges)
+    assert est is not None
+    assert est[0] == 0.0
+
+
+def test_other_room_returns_none():
+    grid = _rect_room(8.0, 6.0)
+    field = build_distance_field(grid)
+    _, _, other = _room_ranges(room_w=3.0, room_h=3.0)
+    angle_min, inc, _ = _room_ranges()
+    assert estimate_translation_correction(
+        field, grid, Pose2D(0.0, 0.0, 0.0), angle_min, inc, other) is None

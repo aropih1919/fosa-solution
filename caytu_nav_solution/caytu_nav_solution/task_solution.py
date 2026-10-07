@@ -89,6 +89,7 @@ class TaskSolution(Node):
         self.declare_parameter('cmd_vel_topic', '/robot_base_controller/cmd_vel_unstamped')
         self.declare_parameter('write_report', True)
         self.declare_parameter('report_dir', '~/.ros/fosa_runs')
+        self.declare_parameter('map_correction', 'auto')
 
         self._task: TaskParams = load_task_params(
             self.get_parameter('task_params_file').value or None)
@@ -191,8 +192,8 @@ class TaskSolution(Node):
         return self._bringup is None or self._bringup.poll() is None
 
     # ------------------------------------------------------------------ carte
-    def _choose_map(self) -> str:
-        """Retourne le YAML de carte à donner à Nav2 (murs réels ou carte vide)."""
+    def _choose_map(self) -> tuple:
+        """Retourne (YAML Nav2, carte du cafe validee)."""
         mode = str(self.get_parameter('static_map').value).lower()
         map_yaml = self.get_parameter('map_yaml').value
         if not map_yaml:
@@ -203,10 +204,10 @@ class TaskSolution(Node):
 
         if mode == 'never':
             self.get_logger().info('Carte des murs désactivée (static_map=never).')
-            return self._write_blank_map()
+            return self._write_blank_map(), False
         if mode == 'always':
             self.get_logger().info('Carte des murs imposée (static_map=always).')
-            return map_yaml
+            return map_yaml, True
 
         # Mode auto : la carte décrit le café officiel. Si le monde chargé est
         # différent, elle gênerait le planificateur ; on le vérifie en comparant
@@ -222,7 +223,7 @@ class TaskSolution(Node):
                                     float(meta['origin'][0]), float(meta['origin'][1]))
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
             self.get_logger().warn(f'Carte illisible ({error}) : navigation sans carte.')
-            return self._write_blank_map()
+            return self._write_blank_map(), False
 
         deadline = time.monotonic() + float(self.get_parameter('map_check_timeout_sec').value)
         while rclpy.ok() and self._last_scan is None and time.monotonic() < deadline:
@@ -231,7 +232,7 @@ class TaskSolution(Node):
         if scan is None:
             self.get_logger().warn(
                 'Pas de scan reçu pour vérifier la carte : carte du café conservée.')
-            return map_yaml
+            return map_yaml, True
 
         lidar = self._task.spawn.compose(Pose2D(LIDAR_OFFSET_X, 0.0, 0.0))
         agreement, used = scan_map_agreement(
@@ -242,11 +243,11 @@ class TaskSolution(Node):
                 f'Seulement {agreement * 100:.0f} % des {used} retours lidar tombent sur un '
                 'mur de la carte : le monde ne semble pas être le café officiel, '
                 'navigation sans carte statique.')
-            return self._write_blank_map()
+            return self._write_blank_map(), False
         self.get_logger().info(
             f'Carte du café validée : {agreement * 100:.0f} % des {used} retours lidar '
             'coïncident avec ses murs.')
-        return map_yaml
+        return map_yaml, True
 
     def _write_blank_map(self) -> str:
         """Écrit une carte entièrement libre couvrant largement départ et but."""
@@ -270,11 +271,14 @@ class TaskSolution(Node):
         return yaml_path
 
     # ---------------------------------------------------------------- bringup
-    def _start_bringup(self, map_yaml: str):
+    def _start_bringup(self, map_yaml: str, cafe_valid: bool):
         if not self.get_parameter('launch_bringup').value:
             self.get_logger().info('launch_bringup=false : le bringup doit déjà tourner.')
             return
         use_sim_time = self.get_parameter('use_sim_time').value
+        mode = str(self.get_parameter('map_correction').value).lower()
+        enable_corr = mode == 'auto' and cafe_valid
+        self._metrics.map_correction = 'auto' if enable_corr else 'never'
         command = [
             'ros2', 'launch',
             self.get_parameter('bringup_package').value,
@@ -282,6 +286,7 @@ class TaskSolution(Node):
             f'use_sim_time:={"true" if use_sim_time else "false"}',
             f'map:={map_yaml}',
             f'behavior_tree:={self.get_parameter("behavior_tree").value}',
+            f'map_correction:={"true" if enable_corr else "false"}',
             f'task_params_file:={self._task.path}',
         ]
         self.get_logger().info('Démarrage de la solution : ' + ' '.join(command))
@@ -485,11 +490,11 @@ class TaskSolution(Node):
     def run(self) -> int:
         self._wait_for_clock()
         self._metrics.start(self._elapsed(), time.monotonic() - self._wall_start)
-        map_yaml = self._choose_map()
+        map_yaml, cafe_valid = self._choose_map()
         self._map_used = map_yaml
         self._metrics.map_used = map_yaml
         self.destroy_subscription(self._scan_sub)      # le scan ne sert plus ici
-        self._start_bringup(map_yaml)
+        self._start_bringup(map_yaml, cafe_valid)
         if not self._wait_for_nav2():
             return EXIT_FAILURE
 

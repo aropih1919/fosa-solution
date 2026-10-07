@@ -56,6 +56,9 @@ def generate_launch_description():
             "floor_line_distance", default_value="0.0",
             description="Forçage : distance (m) de la ligne de sol lue droit "
                         "devant dans /scan. 0.0 = calcul automatique par l'IMU."),
+        DeclareLaunchArgument(
+            "map_correction", default_value="false", choices=["true", "false"],
+            description="Recalage sur les murs (defaut desactive)."),
     ]
 
     # 1. Le lidar est sous le châssis : quatre secteurs fixes voient les roues
@@ -160,6 +163,10 @@ def generate_launch_description():
             # value_type=str : une valeur vide doit rester une chaîne vide.
             "task_params_file": ParameterValue(
                 LaunchConfiguration("task_params_file"), value_type=str),
+            "enable_map_correction": ParameterValue(
+                LaunchConfiguration("map_correction"), value_type=bool),
+            "map_yaml": ParameterValue(
+                LaunchConfiguration("map"), value_type=str),
         }],
     )
 
