@@ -165,12 +165,14 @@ def test_controller_is_consistent_with_the_robot_and_the_scoring():
     assert rpp["rotate_to_heading_min_angle"] >= 0.78
 
 
-def test_planner_is_smac_2d_without_hybrid_parameters():
-    planner = nav2()["planner_server"]["ros__parameters"]["GridBased"]
-    assert planner["plugin"] == "nav2_smac_planner::SmacPlanner2D"
-    for hybrid_only in ("motion_model_for_search", "angle_quantization_bins",
-                        "analytic_expansion_ratio", "minimum_turning_radius"):
-        assert hybrid_only not in planner
+def test_planner_uses_hybrid_with_2d_fallback():
+    plugins = nav2()["planner_server"]["ros__parameters"]["planner_plugins"]
+    assert plugins == ["GridBased", "GridBased2D"]
+    hybrid = nav2()["planner_server"]["ros__parameters"]["GridBased"]
+    assert hybrid["plugin"] == "nav2_smac_planner::SmacPlannerHybrid"
+    assert hybrid["motion_model_for_search"] == "DUBIN"
+    fallback = nav2()["planner_server"]["ros__parameters"]["GridBased2D"]
+    assert fallback["plugin"] == "nav2_smac_planner::SmacPlanner2D"
 
 
 def test_collision_monitor_uses_robot_cmd_and_declared_sources():

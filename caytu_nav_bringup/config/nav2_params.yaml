@@ -46,8 +46,8 @@ planner_server:
     use_sim_time: true
     expected_planner_frequency: 2.0
     costmap_update_timeout: 1.0
-    planner_plugins: ["GridBased"]
-    GridBased:
+    planner_plugins: ["GridBased", "GridBased2D"]
+    GridBased2D:
       plugin: "nav2_smac_planner::SmacPlanner2D"
       tolerance: 0.25
       downsample_costmap: false
@@ -62,6 +62,35 @@ planner_server:
       # capteurs dans le monde officiel : marge réelle minimale ~0.3 m.
       cost_travel_multiplier: 3.0
       use_final_approach_orientation: true
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+        do_refinement: true
+        refinement_num: 2
+    GridBased:
+      plugin: "nav2_smac_planner::SmacPlannerHybrid"
+      tolerance: 0.25
+      downsample_costmap: false
+      downsampling_factor: 1
+      allow_unknown: true
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      max_planning_time: 2.0
+      # Base différentielle qui ne recule pas : arcs avant uniquement.
+      motion_model_for_search: "DUBIN"
+      angle_quantization_bins: 72
+      analytic_expansion_ratio: 3.5
+      analytic_expansion_max_length: 3.0
+      minimum_turning_radius: 0.20
+      non_straight_penalty: 1.2
+      change_penalty: 0.0
+      cost_penalty: 2.0
+      retrospective_penalty: 0.015
+      lookup_table_size: 20.0
+      cache_obstacle_heuristic: false
+      smooth_path: true
       smoother:
         max_iterations: 1000
         w_smooth: 0.3
