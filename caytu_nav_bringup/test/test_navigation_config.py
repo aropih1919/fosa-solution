@@ -161,6 +161,8 @@ def test_controller_is_consistent_with_the_robot_and_the_scoring():
     assert not (rpp["use_rotate_to_heading"] and rpp["allow_reversing"])
     assert rpp["rotate_to_heading_angular_vel"] <= 1.0      # limite du plugin DiffDrive
     assert rpp["use_collision_detection"] is True
+    # Moins de pivots : rotation sur place seulement au-delà de ~45 degrés.
+    assert rpp["rotate_to_heading_min_angle"] >= 0.78
 
 
 def test_planner_is_smac_2d_without_hybrid_parameters():
