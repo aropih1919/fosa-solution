@@ -6,7 +6,7 @@ import pytest
 
 from caytu_nav_solution.nav_math import (
     GRAVITY, OdomImuFusion, Pose2D, build_distance_field, estimate_translation_correction,
-    field_lookup, floor_ranges, lidar_height, load_pgm_map,
+    field_lookup, floor_ranges, lidar_height, load_pgm_map, nearest_free_cell,
     normalize_angle, quaternion_from_rpy, quaternion_from_yaw, scan_map_agreement,
     split_floor_returns, tilt_from_accel, yaw_from_quaternion)
 
@@ -258,3 +258,57 @@ def test_other_room_returns_none():
     angle_min, inc, _ = _room_ranges()
     assert estimate_translation_correction(
         field, grid, Pose2D(0.0, 0.0, 0.0), angle_min, inc, other) is None
+
+
+def _fallback_grid(blocked_radius=0.0, blocked_cost=100, ring_cost=None):
+    w = h = 40
+    res = 0.05
+    vals = [0] * (w * h)
+    for r in range(h):
+        for c in range(w):
+            x = (c + 0.5) * res
+            y = (r + 0.5) * res
+            d = math.hypot(x - 1.0, y - 1.0)
+            if d <= blocked_radius:
+                vals[r * w + c] = blocked_cost
+            elif ring_cost is not None and d <= 0.50:
+                vals[r * w + c] = ring_cost
+    return vals, w, h, res
+
+
+def test_free_goal_returns_goal_cell():
+    vals, w, h, res = _fallback_grid()
+    cell = nearest_free_cell(vals, w, h, res, 0.0, 0.0, 1.0, 1.0, 1.0, 70)
+    assert cell is not None and cell[2] < 0.05
+
+
+def test_blocked_goal_returns_ring_cell():
+    vals, w, h, res = _fallback_grid(blocked_radius=0.30)
+    cell = nearest_free_cell(vals, w, h, res, 0.0, 0.0, 1.0, 1.0, 1.0, 70)
+    assert cell is not None and 0.30 <= cell[2] <= 0.40
+    c = int(math.floor((cell[0] - 0.0) / res))
+    r = int(math.floor((cell[1] - 0.0) / res))
+    assert vals[r * w + c] == 0
+
+
+def test_cost_above_threshold_is_refused():
+    vals, w, h, res = _fallback_grid(blocked_radius=0.30, ring_cost=80)
+    cell = nearest_free_cell(vals, w, h, res, 0.0, 0.0, 1.0, 1.0, 1.0, 70)
+    assert cell is not None and cell[2] >= 0.50
+
+
+def test_excluded_point_is_skipped():
+    vals, w, h, res = _fallback_grid(blocked_radius=0.30)
+    first = nearest_free_cell(vals, w, h, res, 0.0, 0.0, 1.0, 1.0, 1.0, 70)
+    second = nearest_free_cell(vals, w, h, res, 0.0, 0.0, 1.0, 1.0, 1.0, 70,
+                               excluded=[(first[0], first[1])])
+    assert math.hypot(second[0] - first[0], second[1] - first[1]) > 0.15
+
+
+def test_all_blocked_returns_none():
+    assert nearest_free_cell([100] * 1600, 40, 40, 0.05, 0.0, 0.0, 1.0, 1.0, 1.0, 70) is None
+
+
+def test_goal_outside_grid():
+    vals, _, _, _ = _fallback_grid()
+    assert nearest_free_cell(vals, 40, 40, 0.05, 0.0, 0.0, 5.0, 5.0, 1.0, 70) is None

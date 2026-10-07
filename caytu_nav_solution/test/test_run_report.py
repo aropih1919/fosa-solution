@@ -38,3 +38,12 @@ def test_to_dict_is_json_serializable():
     data = m.to_dict()
     json.dumps(data)
     assert data["attempts"] == 1 and data["rejections"] == 1
+
+
+def test_fallback_defaults_and_serialization():
+    m = RunMetrics()
+    data = m.to_dict()
+    assert data["fallback_used"] is False and data["fallback_offset_m"] is None
+    m.fallback_used = True
+    m.fallback_offset_m = 0.42
+    json.dumps(m.to_dict())

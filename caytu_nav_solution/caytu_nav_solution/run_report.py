@@ -37,6 +37,8 @@ class RunMetrics:
         self.behavior_tree = ""
         self.map_correction = ""
         self.collision_monitor = ""
+        self.fallback_used = False
+        self.fallback_offset_m: Optional[float] = None
         self._result = "unknown"
         self._sim_duration = 0.0
         self._wall_duration = 0.0
@@ -121,17 +123,23 @@ class RunMetrics:
             "behavior_tree": self.behavior_tree,
             "map_correction": self.map_correction,
             "collision_monitor": self.collision_monitor,
+            "fallback_used": self.fallback_used,
+            "fallback_offset_m": self.fallback_offset_m,
         }
         json.dumps(data)
         return data
 
     def to_text(self) -> str:
         """Resume de 6 lignes pour le journal."""
+        if self.fallback_used:
+            fallback_txt = f" repli: oui ({self.fallback_offset_m} m)"
+        else:
+            fallback_txt = " repli: non"
         lines = [
             f"resultat: {self._result}",
             f"duree sim: {self._sim_duration:.1f} s / mur: {self._wall_duration:.1f} s",
             f"chemin: {self.path_length:.2f} m / but final: {self._final_distance}",
-            f"tentatives: {self.attempts} rejets: {self.rejections}",
+            f"tentatives: {self.attempts} rejets: {self.rejections}{fallback_txt}",
             f"vitesse max: {self.max_speed:.2f} m/s / arret: {self.stopped_time:.1f} s",
             f"contacts: {self.contacts}",
         ]

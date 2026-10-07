@@ -28,19 +28,21 @@ import rclpy
 import yaml
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, Twist
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
+from nav_msgs.msg import OccupancyGrid
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from caytu_nav_solution.nav_math import (
-    Pose2D, load_pgm_map, quaternion_from_yaw, scan_map_agreement, yaw_from_quaternion)
+    Pose2D, load_pgm_map, nearest_free_cell, quaternion_from_yaw, scan_map_agreement,
+    yaw_from_quaternion)
 from caytu_nav_solution.run_report import RunMetrics
 from caytu_nav_solution.task_params import TaskParams, load_task_params
 
@@ -91,6 +93,17 @@ class TaskSolution(Node):
         self.declare_parameter('report_dir', '~/.ros/fosa_runs')
         self.declare_parameter('map_correction', 'auto')
         self.declare_parameter('collision_monitor', False)
+        self.declare_parameter('goal_fallback', True)
+        self.declare_parameter('goal_circle_radius', 0.60)
+        self.declare_parameter('fallback_after_stalls', 2)
+        self.declare_parameter('fallback_progress_min', 0.25)
+        self.declare_parameter('fallback_max_radius', 1.50)
+        # 70 correspond à un centre de robot à 0,35 m au moins d'un obstacle avec l'inflation globale (0,90 m / 3,0).
+        self.declare_parameter('fallback_max_cost', 70)
+        self.declare_parameter('fallback_max_checks', 6)
+        self.declare_parameter('fallback_hold_sec', 10.0)
+        self.declare_parameter('planner_id', 'GridBased')
+        self.declare_parameter('costmap_topic', '/global_costmap/costmap')
 
         self._task: TaskParams = load_task_params(
             self.get_parameter('task_params_file').value or None)
@@ -113,6 +126,13 @@ class TaskSolution(Node):
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=False)
         self._nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self._target = (self._task.goal_x, self._task.goal_y)   # cible envoyée à Nav2
+        self._on_fallback = False
+        self._stalls = 0
+        self._best_goal_distance: Optional[float] = None
+        self._costmap: Optional[OccupancyGrid] = None
+        self._costmap_sub = None                                 # créé au premier besoin
+        self._plan_client = ActionClient(self, ComputePathToPose, 'compute_path_to_pose')
         self._cmd_pub = self.create_publisher(
             Twist, self.get_parameter('cmd_vel_topic').value, 10)
         self._clear_clients = [
@@ -188,6 +208,113 @@ class TaskSolution(Node):
         if pose is None:
             return None
         return pose.distance_to(self._task.goal_x, self._task.goal_y)
+
+    def _now_sec(self) -> float:
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _spin_sim(self, seconds: float) -> None:
+        target = self._now_sec() + seconds
+        while rclpy.ok() and self._now_sec() < target and self._time_left() > 0.0:
+            rclpy.spin_once(self, timeout_sec=0.05)
+            self._report_pose()
+
+    def _distance_to_target(self) -> Optional[float]:
+        pose = self._robot_pose()
+        if pose is None:
+            return None
+        return pose.distance_to(self._target[0], self._target[1])
+
+    def _fresh_costmap(self) -> Optional[OccupancyGrid]:
+        if self._costmap_sub is None:
+            self._costmap_sub = self.create_subscription(
+                OccupancyGrid, str(self.get_parameter('costmap_topic').value),
+                lambda msg: setattr(self, '_costmap', msg),
+                QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                           durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        t0 = self._now_sec()
+        self._costmap = None
+        while rclpy.ok() and self._time_left() > 0.0 and self._now_sec() <= t0 + 5.0:
+            rclpy.spin_once(self, timeout_sec=0.05)
+            if self._costmap is not None and self._costmap.header.stamp.sec + \
+                    self._costmap.header.stamp.nanosec * 1e-9 >= t0 + 1.0:
+                return self._costmap
+        return self._costmap if self._costmap is not None else None
+
+    def _plan_exists(self, x: float, y: float) -> bool:
+        if not self._plan_client.wait_for_server(timeout_sec=1.0):
+            return False
+        pose = self._robot_pose() or self._task.spawn
+        heading = math.atan2(y - pose.y, x - pose.x)
+        goal = PoseStamped()
+        goal.header.frame_id = self._global_frame
+        goal.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.position.x = x
+        goal.pose.position.y = y
+        qx, qy, qz, qw = quaternion_from_yaw(heading)
+        goal.pose.orientation.x, goal.pose.orientation.y = qx, qy
+        goal.pose.orientation.z, goal.pose.orientation.w = qz, qw
+        request = ComputePathToPose.Goal()
+        request.goal = goal
+        request.planner_id = str(self.get_parameter('planner_id').value)
+        request.use_start = False
+        send = self._plan_client.send_goal_async(request)
+        end = time.monotonic() + 10.0
+        while rclpy.ok() and not send.done():
+            rclpy.spin_once(self, timeout_sec=0.05)
+            self._report_pose()
+            if self._time_left() <= 0.0 or not self._bringup_alive() or time.monotonic() > end:
+                return False
+        handle = send.result() if send.done() else None
+        if handle is None or not handle.accepted:
+            return False
+        result = handle.get_result_async()
+        while rclpy.ok() and not result.done():
+            rclpy.spin_once(self, timeout_sec=0.05)
+            self._report_pose()
+            if self._time_left() <= 0.0 or not self._bringup_alive() or time.monotonic() > end:
+                return False
+        res = result.result() if result.done() else None
+        return res is not None and res.status == GoalStatus.STATUS_SUCCEEDED \
+            and len(res.result.path.poses) > 0
+
+    def _choose_fallback(self) -> bool:
+        costmap = self._fresh_costmap()
+        if costmap is None:
+            self.get_logger().warn('Repli : costmap indisponible.')
+            return False
+        excluded: list = []
+        goal_x, goal_y = self._task.goal_x, self._task.goal_y
+        max_radius = float(self.get_parameter('fallback_max_radius').value)
+        max_cost = int(self.get_parameter('fallback_max_cost').value)
+        max_checks = int(self.get_parameter('fallback_max_checks').value)
+        for _ in range(max_checks):
+            cell = nearest_free_cell(
+                costmap.data, costmap.info.width, costmap.info.height,
+                costmap.info.resolution, costmap.info.origin.position.x,
+                costmap.info.origin.position.y, goal_x, goal_y,
+                max_radius, max_cost, excluded)
+            if cell is None:
+                break
+            if cell[2] < costmap.info.resolution and not self._on_fallback:
+                return False
+            if self._plan_exists(cell[0], cell[1]):
+                self._target = (cell[0], cell[1])
+                self._on_fallback = True
+                self._metrics.fallback_used = True
+                self._metrics.fallback_offset_m = cell[2]
+                self.get_logger().warn(
+                    f'Repli : but officiel inaccessible, nouvelle cible à {cell[2]:.2f} m du centre du but.')
+                return True
+            excluded.append((cell[0], cell[1]))
+        self.get_logger().warn(
+            f'Repli : aucun point libre atteignable à moins de {max_radius} m du but.')
+        return False
+
+    def _reset_target(self) -> None:
+        self._target = (self._task.goal_x, self._task.goal_y)
+        self._on_fallback = False
+        self._stalls = 0
+        self._best_goal_distance = None
 
     def _bringup_alive(self) -> bool:
         return self._bringup is None or self._bringup.poll() is None
@@ -376,12 +503,12 @@ class TaskSolution(Node):
 
     def _goal_message(self) -> NavigateToPose.Goal:
         pose = self._robot_pose() or self._task.spawn
-        heading = math.atan2(self._task.goal_y - pose.y, self._task.goal_x - pose.x)
+        heading = math.atan2(self._target[1] - pose.y, self._target[0] - pose.x)
         goal = PoseStamped()
         goal.header.frame_id = self._global_frame
         goal.header.stamp = self.get_clock().now().to_msg()
-        goal.pose.position.x = self._task.goal_x
-        goal.pose.position.y = self._task.goal_y
+        goal.pose.position.x = self._target[0]
+        goal.pose.position.y = self._target[1]
         qx, qy, qz, qw = quaternion_from_yaw(heading)
         goal.pose.orientation.x, goal.pose.orientation.y = qx, qy
         goal.pose.orientation.z, goal.pose.orientation.w = qz, qw
@@ -426,7 +553,7 @@ class TaskSolution(Node):
             data = self._metrics.to_dict()
             with open(os.path.join(folder, f'run_{stamp}.json'), 'w', encoding='utf-8') as stream:
                 json.dump(data, stream, indent=2)
-            csv_path = os.path.join(folder, 'runs.csv')
+            csv_path = os.path.join(folder, 'runs_v2.csv')
             new = not os.path.exists(csv_path)
             with open(csv_path, 'a', newline='', encoding='utf-8') as stream:
                 writer = csv.DictWriter(stream, fieldnames=list(data.keys()))
@@ -441,7 +568,8 @@ class TaskSolution(Node):
         """Un envoi du but.
 
         Retourne 'success', 'retry' (échec de Nav2), 'rejected' (Nav2 pas encore
-        actif), 'timeout' ou 'abort' (bringup arrêté).
+        actif), 'timeout', 'abort' (bringup arrêté) ou 'hold' (cible de repli
+        atteinte hors du cercle).
         """
         send_future = self._nav_client.send_goal_async(
             self._goal_message(), feedback_callback=self._on_feedback)
@@ -476,14 +604,18 @@ class TaskSolution(Node):
         result = result_future.result() if result_future.done() else None
         status = result.status if result is not None else GoalStatus.STATUS_UNKNOWN
         if status == GoalStatus.STATUS_SUCCEEDED:
-            distance = self._distance_to_goal()
+            distance = self._distance_to_target()
             limit = float(self.get_parameter('arrival_recheck_radius').value)
             if distance is not None and distance > limit:
                 self.get_logger().warn(
-                    f'Nav2 annonce l\'arrivée mais le robot est à {distance:.2f} m du but : '
+                    f'Nav2 annonce l\'arrivée mais le robot est à {distance:.2f} m de la cible : '
                     'nouvel envoi.')
                 return 'retry'
-            return 'success'
+            if not self._on_fallback:
+                return 'success'
+            to_goal = self._distance_to_goal()
+            circle = float(self.get_parameter('goal_circle_radius').value)
+            return 'success' if to_goal is not None and to_goal <= circle else 'hold'
         if self._arrived():
             return 'success'
         self.get_logger().warn(f'Nav2 a interrompu la navigation (statut {status}).')
@@ -532,10 +664,15 @@ class TaskSolution(Node):
             if outcome == 'success':
                 self.stop_robot()
                 distance = self._distance_to_goal()
-                self.get_logger().info(
-                    f'BUT ATTEINT en {self._elapsed():.1f} s, {attempt} tentative(s)'
-                    + (f', centre du robot à {distance:.2f} m du centre du but.'
-                       if distance is not None else '.'))
+                if self._on_fallback:
+                    self.get_logger().info(
+                        f'BUT ATTEINT par repli en {self._elapsed():.1f} s : centre du robot à '
+                        f'{distance:.2f} m du centre du but, dans le cercle de 0,6 m.')
+                else:
+                    self.get_logger().info(
+                        f'BUT ATTEINT en {self._elapsed():.1f} s, {attempt} tentative(s)'
+                        + (f', centre du robot à {distance:.2f} m du centre du but.'
+                           if distance is not None else '.'))
                 return EXIT_SUCCESS
             if outcome == 'timeout':
                 self.stop_robot()
@@ -548,7 +685,44 @@ class TaskSolution(Node):
                 self.get_logger().error('Le bringup s\'est arrêté : navigation impossible.')
                 return EXIT_FAILURE
 
-            # Échec récupérable : on repart avec des costmaps propres.
+            if outcome == 'hold':
+                # Cible de repli atteinte hors du cercle : le robot ne bouge plus et
+                # réexamine la situation sans rouler.
+                self.stop_robot()
+                self.get_logger().warn('Repli atteint hors du cercle : attente et réexamen.')
+                saved_target = self._target
+                saved_offset = self._metrics.fallback_offset_m
+                while rclpy.ok() and self._time_left() > 0.0:
+                    self._spin_sim(float(self.get_parameter('fallback_hold_sec').value))
+                    if self._time_left() <= 0.0:
+                        break
+                    if self._plan_exists(self._task.goal_x, self._task.goal_y):
+                        self.get_logger().info('Le but officiel est de nouveau atteignable.')
+                        self._reset_target()
+                        break
+                    previous = self._metrics.fallback_offset_m
+                    if self._choose_fallback() and previous is not None \
+                            and self._metrics.fallback_offset_m <= previous - 0.10:
+                        break                       # un point nettement plus proche existe
+                    self._target = saved_target
+                    self._metrics.fallback_offset_m = saved_offset
+                continue
+
+            # Échec récupérable. On mesure d'abord le progrès vers le but officiel.
+            distance = self._distance_to_goal()
+            progress = float(self.get_parameter('fallback_progress_min').value)
+            if distance is not None and (self._best_goal_distance is None
+                                         or self._best_goal_distance - distance >= progress):
+                self._best_goal_distance = distance
+                self._stalls = 0
+            else:
+                self._stalls += 1
+            if bool(self.get_parameter('goal_fallback').value) \
+                    and self._stalls >= int(self.get_parameter('fallback_after_stalls').value):
+                self._stalls = 0
+                # La costmap doit rester intacte pendant la recherche : pas d'effacement ici.
+                if self._choose_fallback():
+                    continue
             self._clear_costmaps()
             self._spin(float(self.get_parameter('retry_pause_sec').value))
         return EXIT_FAILURE

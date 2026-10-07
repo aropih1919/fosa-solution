@@ -391,3 +391,39 @@ def estimate_translation_correction(field: np.ndarray, grid: GridMap,
     if dx == 0.0 and dy == 0.0:
         return None
     return dx, dy, 1.0 - best / 0.5
+
+
+def nearest_free_cell(values, width: int, height: int, resolution: float,
+                      origin_x: float, origin_y: float,
+                      goal_x: float, goal_y: float,
+                      max_radius: float, max_cost: int,
+                      excluded: Sequence[Tuple[float, float]] = (),
+                      exclusion_radius: float = 0.15
+                      ) -> Optional[Tuple[float, float, float]]:
+    """Centre de la cellule admissible la plus proche du but.
+
+    `values` est le tableau d'une OccupancyGrid (ligne 0 = y minimal,
+    -1 inconnu, 0..100). Une cellule est admissible si 0 <= valeur <= max_cost,
+    si elle est à moins de max_radius du but et à plus de exclusion_radius de
+    chaque point de `excluded`. Retourne (x, y, distance_au_but) ou None.
+    Coût : O(k), k = nombre de cellules de la fenêtre carrée autour du but.
+    """
+    grid = np.asarray(values, dtype=np.int16).reshape(height, width)
+    cx = int(math.floor((goal_x - origin_x) / resolution))
+    cy = int(math.floor((goal_y - origin_y) / resolution))
+    n = int(math.ceil(max_radius / resolution))
+    x0, x1 = max(0, cx - n), min(width, cx + n + 1)
+    y0, y1 = max(0, cy - n), min(height, cy + n + 1)
+    if x0 >= x1 or y0 >= y1:
+        return None
+    window = grid[y0:y1, x0:x1]
+    xs = origin_x + (np.arange(x0, x1) + 0.5) * resolution
+    ys = origin_y + (np.arange(y0, y1) + 0.5) * resolution
+    d2 = (ys[:, None] - goal_y) ** 2 + (xs[None, :] - goal_x) ** 2
+    ok = (window >= 0) & (window <= max_cost) & (d2 <= max_radius ** 2)
+    for ex, ey in excluded:
+        ok &= ((ys[:, None] - ey) ** 2 + (xs[None, :] - ex) ** 2) > exclusion_radius ** 2
+    if not ok.any():
+        return None
+    j, i = divmod(int(np.argmin(np.where(ok, d2, np.inf))), window.shape[1])
+    return float(xs[i]), float(ys[j]), float(math.sqrt(d2[j, i]))
