@@ -1,129 +1,106 @@
 # Fosa — notes techniques de la solution de navigation
 
-Document de travail de l'équipe. Le document de soumission est `README.md`.
+Document de travail de l'equipe. Le document de soumission est `README.md`.
 
 ## 1. Architecture
 
 ```
-task_solution.py  (caytu_nav_solution)        seule commande à lancer
- ├─ lit task_params.yaml : spawn et but, repère Gazebo
- ├─ compare un scan lidar à la carte du café (carte vide si désaccord)
+task_solution.py  (caytu_nav_solution)        seule commande a lancer
+ ├─ lit task_params.yaml : spawn et but, repere Gazebo
+ ├─ compare un scan lidar a la carte du cafe (carte vide si desaccord)
  ├─ lance caytu_nav_bringup/launch/solution_bringup.launch.py
- │    ├─ laser_filters            /scan -> /scan_filtered   (robot retiré)
+ │    ├─ laser_filters            /scan -> /scan_filtered   (robot retire)
  │    ├─ lidar_floor_filter       /scan_filtered -> /scan_clean, /scan_clear
  │    │                           TF base_footprint -> base_footprint_level
  │    ├─ pointcloud_to_laserscan  x2 : /top_camera_scan, /bottom_camera_scan
- │    ├─ odom_imu_localizer       TF map -> odom  (roues + cap IMU)
+ │    ├─ odom_imu_localizer       TF map -> odom  (roues + cap IMU + recalage murs)
  │    └─ navigation.launch.py     map_server, planner, controller,
- │                                behaviors, bt_navigator, lifecycle_manager
- ├─ envoie le but, le renvoie après chaque échec jusqu'à la limite de temps
- └─ arrête le robot et ferme tout ce qu'il a lancé
+ │                                behaviors, bt_navigator, collision_monitor (option),
+ │                                lifecycle_manager
+ ├─ envoie le but, le renvoie apres chaque echec jusqu'a la limite de temps
+ ├─ ecrit run_*.json + runs.csv dans report_dir
+ └─ arrete le robot et ferme tout ce qu'il a lance
+
+nav_monitor (outil) : lit /plan, action NavigateToPose, cmd_vel, poses,
+ scans, contacts, tilt, correction ; affiche [ETIQUETTE] texte + ligne toutes les 2 s.
+run_benchmark.py (outil) : serie d'essais avec scenarios YAML, boites SDF,
+ mesure reelle Gazebo, agregats CSV + MD.
 ```
 
-| Fichier | Rôle |
+| Fichier | Role |
 |---|---|
-| `caytu_nav_solution/task_solution.py` | point d'entrée officiel |
-| `caytu_nav_solution/odom_imu_localizer.py` | localisation sans carte |
-| `caytu_nav_solution/lidar_floor_filter.py` | inclinaison du robot, sol du lidar, repère horizontal |
-| `caytu_nav_solution/nav_math.py` | calculs purs, testés sans ROS |
+| `caytu_nav_solution/task_solution.py` | point d'entree officiel + rapport |
+| `caytu_nav_solution/odom_imu_localizer.py` | localisation roues + IMU + recalage |
+| `caytu_nav_solution/lidar_floor_filter.py` | inclinaison, sol lidar, repere horizontal |
+| `caytu_nav_solution/nav_math.py` | calculs purs (poses, fusion, sol, carte, champ, recalage) |
+| `caytu_nav_solution/nav_events.py` | detecteur pur d'evenements (moniteur) |
+| `caytu_nav_solution/nav_monitor.py` | noeud moniteur terminal |
+| `caytu_nav_solution/run_report.py` | metriques O(1) et rapport JSON/CSV |
 | `caytu_nav_solution/task_params.py` | lecture de `task_params.yaml` |
-| `caytu_nav_bringup/config/nav2_params.yaml` | toute la configuration Nav2 |
-| `caytu_nav_bringup/behavior_trees/navigate_replan_if_invalid.xml` | arbre par défaut |
+| `caytu_nav_bringup/config/nav2_params.yaml` | toute la configuration Nav2 + collision_monitor |
+| `caytu_nav_bringup/behavior_trees/navigate_replan_if_invalid.xml` | arbre par defaut |
 | `caytu_nav_bringup/behavior_trees/navigate_replan_periodic.xml` | arbre de secours |
-| `caytu_nav_bringup/maps/cafe_map.*` | murs du café, repère Gazebo |
-| `caytu_nav_bringup/tools/generate_world_map.py` | génération de la carte (développement) |
-| `tools/diag_nav.py` | diagnostic pendant un essai (développement) |
+| `caytu_nav_bringup/maps/cafe_map.*` | murs du cafe, repere Gazebo |
+| `tools/run_benchmark.py` + `benchmark_scenarios.yaml` | essais en serie |
 
-Le URDF et les paquets officiels PARC ne sont pas modifiés. La pose réelle
-`/sitoe_robot/pose` n'est lue que par l'outil de diagnostic, jamais par la
-solution.
+Le URDF et les paquets officiels PARC ne sont pas modifies. La pose reelle
+`/sitoe_robot/pose` n'est lue que par `nav_monitor` et `run_benchmark.py`,
+jamais par la solution.
 
-## 2. Choix techniques
+## 2. Parametres de task_solution.py
 
-- **Repère `map` = repère Gazebo.** L'odométrie démarre à zéro au spawn ; la
-  localisation publie donc `map -> odom` à partir du spawn de
-  `task_params.yaml`. Le but du même fichier s'envoie tel quel.
-- **Cap pris sur l'IMU.** L'entraxe déclaré au plugin d'odométrie (0,3409 m)
-  est plus petit que l'entraxe réel (0,393 m).
-- **Robot incliné de 2,5°.** La roulette arrière est 1 cm plus basse que les
-  roues. Les nuages des caméras sont filtrés dans `base_footprint_level`, et
-  les rayons du lidar qui touchent le sol sont retirés.
-- **Caméra haute à `min_height` 0,60 m.** Le bruit de profondeur de Gazebo
-  (0,10 m) s'applique aussi à la hauteur des points.
-- **Une couche de costmap par capteur**, combinées en maximum.
-  `obstacle_max_range` reste inférieur à la portée du scan caméra.
-- **Replanification seulement si le chemin devient invalide.** Le robot garde
-  son chemin tant qu'aucun obstacle ne le coupe.
-- **Tolérance d'arrivée de 0,10 m** autour du centre du but, cap libre.
-
-## 3. Paramètres utiles
-
-Paramètres de `task_solution.py` :
 `ros2 run caytu_nav_solution task_solution.py --ros-args -p nom:=valeur`
 
-| Paramètre | Défaut | Effet |
+| Parametre | Defaut | Effet |
 |---|---|---|
-| `behavior_tree` | `if_invalid` | `periodic` : replanification à 2 Hz (arbre de secours) |
-| `static_map` | `auto` | `always` : carte imposée ; `never` : carte vide |
-| `time_limit_sec` | `600.0` | limite de la tâche, en temps simulé |
-| `task_params_file` | vide | autre fichier de spawn et de but (essais) |
+| `time_limit_sec` | `600.0` | limite de la tache, horloge du noeud |
+| `stop_margin_sec` | `1.0` | marge avant arret propre |
+| `success_radius` | `0.20` | rayon d'arrivee au centre du but |
+| `arrival_recheck_radius` | `0.35` | reenvoi si Nav2 annonce trop loin |
+| `retry_pause_sec` | `1.0` | pause entre tentatives |
+| `nav2_startup_timeout_sec` | `180.0` | attente Nav2 (temps reel) |
+| `launch_bringup` | `True` | lance le bringup, sinon suppose tourne |
+| `bringup_package` | `caytu_nav_bringup` | paquet du launch |
+| `bringup_launch` | `solution_bringup.launch.py` | launch complet |
+| `behavior_tree` | `if_invalid` | `periodic` : secours a 2 Hz |
+| `static_map` | `auto` | `always` imposee ; `never` vide |
+| `map_yaml` | vide | carte (vide = cafe du bringup) |
+| `map_check_timeout_sec` | `4.0` | attente scan de controle |
+| `map_check_min_agreement` | `0.35` | seuil validation cafe |
+| `task_params_file` | vide | autre spawn/but (essais) |
+| `global_frame` | `map` | repere monde Gazebo |
+| `base_frame` | `base_footprint` | base du robot |
+| `scan_topic` | `/scan` | scan brut pour controle carte |
+| `cmd_vel_topic` | `/robot_base_controller/cmd_vel_unstamped` | commande robot |
+| `write_report` | `True` | ecriture du rapport |
+| `report_dir` | `~/.ros/fosa_runs` | dossier JSON + CSV |
+| `map_correction` | `auto` | `never` : jamais de recalage |
+| `collision_monitor` | `False` | `True` : couche approche |
 
-Réglages dans `nav2_params.yaml` :
+## 3. Outils
 
-| Besoin | Paramètre |
-|---|---|
-| Vitesse | `FollowPath.desired_linear_vel` (0.5 ; monter par paliers de 0.1) |
-| Pivots sur place | `FollowPath.rotate_to_heading_min_angle` (0.785) |
-| Arrêts « collision ahead » trop fréquents | `FollowPath.max_allowed_time_to_collision_up_to_carrot` (1.0) |
-| Marge autour des obstacles | `inflation_radius` et `cost_travel_multiplier` |
-
-Réglages dans `solution_bringup.launch.py` :
-
-| Besoin | Paramètre |
-|---|---|
-| Faux obstacles de la caméra haute sur sol vide | `min_height` (0.60, maximum 0.72) |
-| Lidar qui marque encore le sol | argument `floor_line_distance` (distance lue droit devant dans `/scan`) |
-
-## 4. Diagnostic pendant un essai
-
+Moniteur (terminal separe, pendant la solution) :
 ```
-python3 src/fosa-solution/tools/diag_nav.py --ros-args -p use_sim_time:=true | tee diag.log
+ros2 run caytu_nav_solution nav_monitor --ros-args -p use_sim_time:=true
+ros2 run caytu_nav_solution nav_monitor --ros-args -p log_file:=/tmp/nav.log
 ```
+Ligne toutes les 2 s : pose, but a D m, ecart (ou n/d), v w, lidar top bottom,
+sol_lidar, tangage (mesure ou defaut), replans, contacts.
 
-| Colonne | Valeur attendue |
-|---|---|
-| `ecart` | sous 0,15 m (affiche « n/d » si `/sitoe_robot/pose` ne publie pas) |
-| `top` | 0 à 2 sur sol dégagé |
-| `sol_lidar` | stable |
-| `tangage` | 2 à 3,5°, suivi de « mesuré » |
-| `v` | proche de 0,50 en ligne droite |
-| `contacts` | 0 |
+Rapport : `report_dir/run_AAAAMMJJ_HHMMSS.json` + `runs.csv` (6 lignes loguees).
 
-Messages attendus de `task_solution.py`, dans l'ordre :
-`Carte du café validée`, `Inclinaison mesurée`, `Nav2 prêt et robot localisé`,
-`Envoi du but`, `BUT ATTEINT`.
-
-## 5. Tests
-
+Benchmark :
 ```
-cd ~/ros2_ws
-colcon test --packages-select caytu_nav_bringup caytu_nav_solution
-colcon test-result --verbose
+python3 tools/run_benchmark.py --runs 2 --scenarios officiel,deux_boites --out /tmp/bench
 ```
+Sorties `benchmark_results.csv` + `benchmark_results.md` (moyennes en une passe).
 
-- `caytu_nav_solution/test` : calculs (poses, fusion roues + IMU, sol du lidar, carte).
-- `caytu_nav_bringup/test` : garde-fous sur la configuration, les arbres et la carte.
+## 4. Avant la soumission
 
-## 6. Avant la soumission
-
-- [ ] Remplacer l'adresse du mainteneur dans les deux `package.xml`.
-- [ ] Compléter les noms des membres dans `README.md` (deux langues).
-- [ ] 5 essais réussis d'affilée avec la configuration officielle.
-- [ ] 5 essais avec un autre spawn et un autre but dans `task_params.yaml`.
-- [ ] 5 essais avec des obstacles ajoutés ; `contacts` à 0 dans `diag.log`.
-- [ ] Essai de la commande unique sur une machine propre, avec les seules
-      dépendances du README.
-- [ ] Vidéo de démonstration de moins de 200 Mo.
-- [ ] Zip du dossier, sans `build/`, `install/`, `log/` ni `.git/`.
-- [ ] Question posée aux organisateurs : limite de 10 minutes en temps simulé
-      ou réel ; usage d'outils d'aide à l'écriture du code.
+- [ ] Adresse mainteneur a remplacer dans les deux `package.xml`.
+- [ ] Noms des membres dans `README.md` (deux langues).
+- [ ] `colcon build` + `colcon test` : 0 echec.
+- [ ] Commande unique sur machine propre avec seules dependances du README.
+- [ ] `grep -rniE "gmail|trinome|/home/"` : seul le test d'absence repond.
+- [ ] Aucune coordonnee en dur hors `task_params.yaml`.
+- [ ] Video de moins de 200 Mo, zip sans `build/`, `install/`, `log/`, `.git/`.

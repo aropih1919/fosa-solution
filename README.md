@@ -34,6 +34,10 @@ Phase 1 asks teams to drive the CAYTU Sito-É service robot autonomously through
 
     * `$ sudo apt-get install python3-yaml`
 
+* `NumPy`: distance field and wall alignment vectors.
+
+    * `$ sudo apt-get install python3-numpy`
+
 All dependencies are declared in the `package.xml` files, so they can also be installed with `rosdep install --from-paths src --ignore-src -r -y`, then built with `colcon build`.
 
 ## Task
@@ -96,6 +100,10 @@ La phase 1 demande de faire naviguer de façon autonome le robot de service CAYT
 * `PyYAML` : lit `task_params.yaml` et le fichier de carte.
 
     * `$ sudo apt-get install python3-yaml`
+
+* `NumPy` : champ de distance et recalage vectorise sur les murs.
+
+    * `$ sudo apt-get install python3-numpy`
 
 Toutes les dépendances sont déclarées dans les `package.xml` ; on peut donc aussi les installer avec `rosdep install --from-paths src --ignore-src -r -y`, puis compiler avec `colcon build`.
 
