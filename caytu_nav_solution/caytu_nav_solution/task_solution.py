@@ -16,6 +16,7 @@ Ce nœud exécute TOUTE la solution, sans aucune intervention manuelle :
 
 import math
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -123,6 +124,7 @@ class TaskSolution(Node):
         self._last_report_t = 0.0
         self._wall_start = time.monotonic()
         self._map_used = ''
+        self._temp_dir: Optional[str] = None
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=False)
@@ -333,7 +335,7 @@ class TaskSolution(Node):
 
         if mode == 'never':
             self.get_logger().info('Carte des murs désactivée (static_map=never).')
-            return self._write_blank_map(), False
+            return self._blank_or_cafe(map_yaml)
         if mode == 'always':
             self.get_logger().info('Carte des murs imposée (static_map=always).')
             return map_yaml, True
@@ -352,7 +354,7 @@ class TaskSolution(Node):
                                     float(meta['origin'][0]), float(meta['origin'][1]))
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
             self.get_logger().warn(f'Carte illisible ({error}) : navigation sans carte.')
-            return self._write_blank_map(), False
+            return self._blank_or_cafe(map_yaml)
 
         deadline = time.monotonic() + float(self.get_parameter('map_check_timeout_sec').value)
         while rclpy.ok() and self._last_scan is None and time.monotonic() < deadline:
@@ -372,7 +374,7 @@ class TaskSolution(Node):
                 f'Seulement {agreement * 100:.0f} % des {used} retours lidar tombent sur un '
                 'mur de la carte : le monde ne semble pas être le café officiel, '
                 'navigation sans carte statique.')
-            return self._write_blank_map(), False
+            return self._blank_or_cafe(map_yaml)
         self.get_logger().info(
             f'Carte du café validée : {agreement * 100:.0f} % des {used} retours lidar '
             'coïncident avec ses murs.')
@@ -388,6 +390,7 @@ class TaskSolution(Node):
         width = int(math.ceil((x_max - x_min) / resolution))
         height = int(math.ceil((y_max - y_min) / resolution))
         folder = tempfile.mkdtemp(prefix='fosa_map_')
+        self._temp_dir = folder
         with open(os.path.join(folder, 'blank_map.pgm'), 'wb') as stream:
             stream.write(f'P5\n{width} {height}\n255\n'.encode('ascii'))
             stream.write(bytes([254]) * (width * height))
@@ -398,6 +401,14 @@ class TaskSolution(Node):
                 f'resolution: {resolution}\norigin: [{x_min:.3f}, {y_min:.3f}, 0.0]\n'
                 'negate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n')
         return yaml_path
+
+    def _blank_or_cafe(self, map_yaml: str) -> tuple:
+        try:
+            return self._write_blank_map(), False
+        except OSError as error:
+            self.get_logger().warn(
+                f'Carte vide impossible à écrire ({error}) : carte du café conservée.')
+            return map_yaml, True
 
     # ---------------------------------------------------------------- bringup
     def _start_bringup(self, map_yaml: str, cafe_valid: bool):
@@ -495,6 +506,8 @@ class TaskSolution(Node):
             self._goal_handle = None
         self.stop_robot()
         self.stop_bringup()
+        if self._temp_dir is not None:
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
         # Dernière commande nulle une fois que plus rien ne peut en publier.
         self.stop_robot()
 
