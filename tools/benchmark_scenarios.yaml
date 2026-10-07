@@ -5,3 +5,4 @@ scenarios:
   inverse:         {swap_official: true, yaw: -1.4}
   deux_boites:     {use_official: true, boxes: [[-0.6, -4.0, 0.4, 0.4, 0.5], [-1.4, -0.6, 0.4, 0.4, 0.5]]}
   boite_basse:     {use_official: true, boxes: [[-0.9, -2.5, 0.4, 0.4, 0.3]]}
+  boite_sur_but:   {use_official: true, boxes: [[-2.29335, 2.23209, 0.4, 0.4, 0.5]]}
