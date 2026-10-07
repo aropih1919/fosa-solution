@@ -43,6 +43,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from caytu_nav_solution.nav_math import (
     Pose2D, load_pgm_map, nearest_free_cell, quaternion_from_yaw, scan_map_agreement,
     yaw_from_quaternion)
+from caytu_nav_solution.process_utils import find_stale_bringups
 from caytu_nav_solution.run_report import RunMetrics
 from caytu_nav_solution.task_params import TaskParams, load_task_params
 
@@ -438,6 +439,39 @@ class TaskSolution(Node):
             except subprocess.TimeoutExpired:
                 continue
 
+    def _stop_stale_bringups(self) -> None:
+        pids = find_stale_bringups(
+            str(self.get_parameter('bringup_package').value),
+            str(self.get_parameter('bringup_launch').value), os.getpid())
+        if not pids:
+            return
+        self.get_logger().warn(
+            f'Ancien lanceur de la solution encore actif (PID {pids}) : arrêt avant de démarrer.')
+        for pid in pids:
+            for sig, wait in ((signal.SIGINT, 10.0), (signal.SIGTERM, 5.0), (signal.SIGKILL, 2.0)):
+                try:
+                    pgid = os.getpgid(pid)
+                except ProcessLookupError:
+                    break
+                try:
+                    if pgid != os.getpgrp():
+                        os.killpg(pgid, sig)
+                    else:
+                        os.kill(pid, sig)
+                except ProcessLookupError:
+                    break
+                except PermissionError as error:
+                    self.get_logger().warn(f'PID {pid} non arrêtable : {error!r}.')
+                    break
+                end = time.monotonic() + wait
+                while time.monotonic() < end:
+                    if not os.path.exists(f'/proc/{pid}'):
+                        break
+                    self._spin(0.1)
+                if not os.path.exists(f'/proc/{pid}'):
+                    break
+        self._spin(1.0)
+
     def stop_robot(self):
         """Envoie plusieurs commandes nulles : le robot reste où il est.
 
@@ -629,6 +663,8 @@ class TaskSolution(Node):
         self._map_used = map_yaml
         self._metrics.map_used = map_yaml
         self.destroy_subscription(self._scan_sub)      # le scan ne sert plus ici
+        if bool(self.get_parameter('launch_bringup').value):
+            self._stop_stale_bringups()
         self._start_bringup(map_yaml, cafe_valid)
         if not self._wait_for_nav2():
             return EXIT_FAILURE
@@ -738,6 +774,7 @@ def main(args=None):
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     signal.signal(signal.SIGINT, _raise_keyboard_interrupt)
     signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+    signal.signal(signal.SIGHUP, _raise_keyboard_interrupt)
     # La tâche tourne dans Gazebo : temps simulé par défaut, sans option à passer.
     # Une valeur donnée en ligne de commande reste prioritaire.
     overrides = []
@@ -760,6 +797,7 @@ def main(args=None):
             # Un second Ctrl-C pendant le nettoyage ne doit pas l'interrompre.
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
             try:
                 node._write_report(code)
             except Exception:
