@@ -64,7 +64,6 @@
 
             </Fallback>
 
-            <!-- Recovery planner -->
             <Sequence name="PlannerRecovery">
 
               <WouldAPlannerRecoveryHelp
