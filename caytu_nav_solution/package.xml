@@ -4,7 +4,7 @@
   <name>caytu_nav_solution</name>
   <version>0.2.0</version>
   <description>Point d'entrée officiel PARC 2026 (task_solution.py), localisation roues + IMU et filtrage du lidar — CAYTU Sito-É, équipe Fosa</description>
-  <!-- package.xml exige un mainteneur avec une adresse : mettre ici le contact de l'équipe. -->
+  <!-- Adresse à remplacer par le contact de l'équipe. -->
   <maintainer email="equipe.fosa@example.com">Équipe Fosa</maintainer>
   <license>MIT</license>
 

@@ -4,7 +4,7 @@
   <name>caytu_nav_bringup</name>
   <version>0.2.0</version>
   <description>Configuration et lancement Nav2 pour le CAYTU Sito-É — PARC 2026, équipe Fosa (costmaps, planificateur, contrôleur, behavior trees, carte du café)</description>
-  <!-- package.xml exige un mainteneur avec une adresse : mettre ici le contact de l'équipe. -->
+  <!-- Adresse à remplacer par le contact de l'équipe. -->
   <maintainer email="equipe.fosa@example.com">Équipe Fosa</maintainer>
   <license>MIT</license>
 
