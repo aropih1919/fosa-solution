@@ -6,5 +6,4 @@ build/
 install/
 log/
 diag.log
-step.md
-test.txt
+benchmark_results.*
