@@ -6,11 +6,11 @@ Commande d'évaluation (après `ros2 launch parc_robot_bringup task.launch.py`) 
     ros2 run caytu_nav_solution task_solution.py
 
 Ce nœud exécute TOUTE la solution, sans aucune intervention manuelle :
+  0. arrête un ancien lanceur de la solution resté en vie ;
   1. lit le point de départ et le but dans task_params.yaml (repère Gazebo) ;
   2. vérifie que la carte des murs correspond bien au monde chargé ;
   3. démarre la perception, la localisation et Nav2 (launch du bringup) ;
-  4. envoie le but à Nav2 et le renvoie après chaque échec, tant que la limite
-     de 10 minutes n'est pas atteinte ;
+  4. envoie le but à Nav2, le renvoie après chaque échec, et vise le point libre le plus proche si le but est inaccessible ;
   5. arrête le robot sur le but et ferme proprement tout ce qu'il a lancé.
 """
 

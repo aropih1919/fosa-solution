@@ -8,7 +8,7 @@ Document de travail de l'equipe. Le document de soumission est `README.md`.
 task_solution.py  (caytu_nav_solution)        seule commande a lancer
  ├─ lit task_params.yaml : spawn et but, repere Gazebo
  ├─ compare un scan lidar a la carte du cafe (carte vide si desaccord)
- ├─ lance caytu_nav_bringup/launch/solution_bringup.launch.py
+ ├─ arrete un ancien lanceur reste en vie, puis lance le bringup
  │    ├─ laser_filters            /scan -> /scan_filtered   (robot retire)
  │    ├─ lidar_floor_filter       /scan_filtered -> /scan_clean, /scan_clear
  │    │                           TF base_footprint -> base_footprint_level
@@ -17,8 +17,8 @@ task_solution.py  (caytu_nav_solution)        seule commande a lancer
  │    └─ navigation.launch.py     map_server, planner, controller,
  │                                behaviors, bt_navigator, collision_monitor (option),
  │                                lifecycle_manager
- ├─ envoie le but, le renvoie apres chaque echec jusqu'a la limite de temps
- ├─ ecrit run_*.json + runs.csv dans report_dir
+ ├─ envoie le but ; apres 2 echecs sans progres, vise le point libre le plus proche
+ ├─ ecrit run_*.json + runs_v2.csv dans report_dir
  └─ arrete le robot et ferme tout ce qu'il a lance
 
 nav_monitor (outil) : lit /plan, action NavigateToPose, cmd_vel, poses,
@@ -32,7 +32,8 @@ run_benchmark.py (outil) : serie d'essais avec scenarios YAML, boites SDF,
 | `caytu_nav_solution/task_solution.py` | point d'entree officiel + rapport |
 | `caytu_nav_solution/odom_imu_localizer.py` | localisation roues + IMU + recalage |
 | `caytu_nav_solution/lidar_floor_filter.py` | inclinaison, sol lidar, repere horizontal |
-| `caytu_nav_solution/nav_math.py` | calculs purs (poses, fusion, sol, carte, champ, recalage) |
+| `caytu_nav_solution/nav_math.py` | calculs purs (poses, fusion, sol, carte, champ, recalage, repli du but) |
+| `caytu_nav_solution/process_utils.py` | recherche d'un ancien lanceur |
 | `caytu_nav_solution/nav_events.py` | detecteur pur d'evenements (moniteur) |
 | `caytu_nav_solution/nav_monitor.py` | noeud moniteur terminal |
 | `caytu_nav_solution/run_report.py` | metriques O(1) et rapport JSON/CSV |
@@ -46,6 +47,8 @@ run_benchmark.py (outil) : serie d'essais avec scenarios YAML, boites SDF,
 Le URDF et les paquets officiels PARC ne sont pas modifies. La pose reelle
 `/sitoe_robot/pose` n'est lue que par `nav_monitor` et `run_benchmark.py`,
 jamais par la solution.
+
+Planification : GridBased = SmacPlannerHybrid (empreinte reelle, arcs avant). GridBased2D = SmacPlanner2D est charge mais n'est pas utilise par defaut ; il se selectionne sur le sujet planner_selector.
 
 ## 2. Parametres de task_solution.py
 
@@ -74,8 +77,18 @@ jamais par la solution.
 | `cmd_vel_topic` | `/robot_base_controller/cmd_vel_unstamped` | commande robot |
 | `write_report` | `True` | ecriture du rapport |
 | `report_dir` | `~/.ros/fosa_runs` | dossier JSON + CSV |
-| `map_correction` | `auto` | `never` : jamais de recalage |
+| `map_correction` | `auto` | auto : recalage actif si la carte du cafe est validee ; never : jamais |
 | `collision_monitor` | `False` | `True` : couche approche |
+| `goal_fallback` | `True` | active le repli |
+| `goal_circle_radius` | `0.60` | rayon du cercle du reglement |
+| `fallback_after_stalls` | `2` | echecs sans progres avant le repli |
+| `fallback_progress_min` | `0.25` | progres minimal (m) entre deux tentatives |
+| `fallback_max_radius` | `1.50` | rayon de recherche autour du but |
+| `fallback_max_cost` | `70` | cout maximal admis dans la costmap globale (0 a 100) |
+| `fallback_max_checks` | `6` | nombre maximal de cibles soumises au planificateur |
+| `fallback_hold_sec` | `10.0` | periode de reexamen a l'arret (temps du noeud) |
+| `planner_id` | `GridBased` | planificateur interroge, identique a celui de l'arbre |
+| `costmap_topic` | `/global_costmap/costmap` | costmap lue pour le repli |
 
 ## 3. Outils
 
@@ -87,7 +100,7 @@ ros2 run caytu_nav_solution nav_monitor --ros-args -p log_file:=/tmp/nav.log
 Ligne toutes les 2 s : pose, but a D m, ecart (ou n/d), v w, lidar top bottom,
 sol_lidar, tangage (mesure ou defaut), replans, contacts.
 
-Rapport : `report_dir/run_AAAAMMJJ_HHMMSS.json` + `runs.csv` (6 lignes loguees).
+Rapport : `report_dir/run_AAAAMMJJ_HHMMSS.json` + `runs_v2.csv` (6 lignes loguees, colonnes `fallback_used`, `fallback_offset_m` en plus).
 
 Benchmark :
 ```

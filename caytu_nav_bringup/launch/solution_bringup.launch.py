@@ -58,7 +58,7 @@ def generate_launch_description():
                         "devant dans /scan. 0.0 = calcul automatique par l'IMU."),
         DeclareLaunchArgument(
             "map_correction", default_value="false", choices=["true", "false"],
-            description="Recalage sur les murs (defaut desactive)."),
+            description="Recalage sur les murs. false en lancement direct ; task_solution.py passe true quand la carte du cafe est validee."),
         DeclareLaunchArgument(
             "collision_monitor", default_value="false", choices=["true", "false"],
             description="Couche de securite liee a la vitesse (defaut desactive)."),

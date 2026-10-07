@@ -18,7 +18,7 @@ Phase 1 asks teams to drive the CAYTU Sito-É service robot autonomously through
 
 **Packages needed** (ROS 2 Jazzy, Gazebo Harmonic):
 
-* `navigation2`: Nav2 stack (map server, Smac 2D planner, Regulated Pure Pursuit controller, behaviors, BT navigator, costmaps, lifecycle manager, messages).
+* `navigation2`: Nav2 stack (map server, Smac Hybrid-A* planner, Regulated Pure Pursuit controller, behaviors, BT navigator, costmaps, lifecycle manager, messages).
 
     * `$ sudo apt-get install ros-jazzy-navigation2`
 
@@ -42,7 +42,7 @@ All dependencies are declared in the `package.xml` files, so they can also be in
 
 ## Task
 
-The `task_solution.py` node runs the whole solution. It reads the start pose and the goal from `task_params.yaml` in the official package, then starts perception, localization and Nav2 by itself. Localization uses neither a SLAM map nor a particle filter: the `map` frame is aligned with the Gazebo world frame from the start pose, then the position is tracked with wheel distance and IMU heading. The lidar scan is cleaned of the sectors where it sees the robot and of the beams that hit the floor; the two camera point clouds are height-filtered in a levelled frame and converted to scans. Each sensor feeds its own costmap layer, and a wall map of the café, generated from the official world, helps the planner (it is dropped automatically if the lidar shows a different world). The Smac 2D planner computes the path, the Regulated Pure Pursuit controller follows it, and the path is replanned only when an obstacle makes it invalid. The goal is sent again after any failure until the time limit; on arrival the robot is stopped at the centre of the circle and everything that was started is shut down.
+The `task_solution.py` node runs the whole solution. It reads the start pose and the goal from `task_params.yaml` in the official package, then starts perception, localization and Nav2 by itself. Localization uses neither a SLAM map nor a particle filter: the `map` frame is aligned with the Gazebo world frame from the start pose, then the position is tracked with wheel distance and IMU heading. When the wall map is confirmed, the lidar scan is matched against the walls about once per second and the position is corrected by a few centimetres at a time. The lidar scan is cleaned of the sectors where it sees the robot and of the beams that hit the floor; the two camera point clouds are height-filtered in a levelled frame and converted to scans. Each sensor feeds its own costmap layer, and a wall map of the café, generated from the official world, helps the planner (it is dropped automatically if the lidar shows a different world). The Smac Hybrid-A* planner computes the path with the real rectangular footprint of the robot, the Regulated Pure Pursuit controller follows it, and the path is replanned only when an obstacle makes it invalid. The goal is sent again after any failure until the time limit; on arrival the robot is stopped at the centre of the circle and everything that was started is shut down. If the goal itself cannot be reached, for example because an obstacle stands on it, the robot goes to the closest free point around it instead of staying where it is. Closing the terminal also stops the robot and everything that was started, and a launcher left over by a previous run is stopped at start-up.
 
 Commands, in two terminals:
 
@@ -85,7 +85,7 @@ La phase 1 demande de faire naviguer de façon autonome le robot de service CAYT
 
 **Paquets nécessaires** (ROS 2 Jazzy, Gazebo Harmonic) :
 
-* `navigation2` : pile Nav2 (serveur de carte, planificateur Smac 2D, contrôleur Regulated Pure Pursuit, behaviors, BT navigator, costmaps, lifecycle manager, messages).
+* `navigation2` : pile Nav2 (serveur de carte, planificateur Smac Hybrid-A*, contrôleur Regulated Pure Pursuit, behaviors, BT navigator, costmaps, lifecycle manager, messages).
 
     * `$ sudo apt-get install ros-jazzy-navigation2`
 
@@ -109,7 +109,7 @@ Toutes les dépendances sont déclarées dans les `package.xml` ; on peut donc a
 
 ## Tâche
 
-Le nœud `task_solution.py` exécute toute la solution. Il lit le point de départ et le but dans `task_params.yaml` du paquet officiel, puis démarre lui-même la perception, la localisation et Nav2. La localisation n'utilise ni carte SLAM ni filtre à particules : le repère `map` est calé sur le repère de Gazebo à partir du point de départ, puis la position est suivie avec la distance des roues et le cap de l'IMU. Le scan du lidar est débarrassé des secteurs où il voit le robot et des rayons qui touchent le sol ; les nuages des deux caméras sont filtrés en hauteur dans un repère remis à l'horizontale, puis convertis en scans. Chaque capteur alimente sa propre couche de costmap, et une carte des murs du café, générée depuis le monde officiel, aide le planificateur (elle est écartée automatiquement si le lidar montre un autre monde). Le planificateur Smac 2D calcule le chemin, le contrôleur Regulated Pure Pursuit le suit, et le chemin n'est recalculé que si un obstacle le rend invalide. Le but est renvoyé après tout échec jusqu'à la limite de temps ; à l'arrivée, le robot est arrêté au centre du cercle et tout ce qui a été lancé est fermé.
+Le nœud `task_solution.py` exécute toute la solution. Il lit le point de départ et le but dans `task_params.yaml` du paquet officiel, puis démarre lui-même la perception, la localisation et Nav2. La localisation n'utilise ni carte SLAM ni filtre à particules : le repère `map` est calé sur le repère de Gazebo à partir du point de départ, puis la position est suivie avec la distance des roues et le cap de l'IMU. Quand la carte des murs est confirmée, le scan du lidar est comparé aux murs environ une fois par seconde et la position est corrigée de quelques centimètres à la fois. Le scan du lidar est débarrassé des secteurs où il voit le robot et des rayons qui touchent le sol ; les nuages des deux caméras sont filtrés en hauteur dans un repère remis à l'horizontale, puis convertis en scans. Chaque capteur alimente sa propre couche de costmap, et une carte des murs du café, générée depuis le monde officiel, aide le planificateur (elle est écartée automatiquement si le lidar montre un autre monde). Le planificateur Smac Hybrid-A* calcule le chemin avec l'empreinte rectangulaire réelle du robot, le contrôleur Regulated Pure Pursuit le suit, et le chemin n'est recalculé que si un obstacle le rend invalide. Le but est renvoyé après tout échec jusqu'à la limite de temps ; à l'arrivée, le robot est arrêté au centre du cercle et tout ce qui a été lancé est fermé. Si le but lui-même est inaccessible, par exemple parce qu'un obstacle est posé dessus, le robot rejoint le point libre le plus proche autour du but au lieu de rester sur place. Fermer le terminal arrête aussi le robot et tout ce qui a été lancé, et un lanceur resté en vie après un essai précédent est arrêté au démarrage.
 
 Commandes, dans deux terminaux :
 
