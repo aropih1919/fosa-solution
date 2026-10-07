@@ -40,8 +40,9 @@ def generate_launch_description():
             description="Carte statique (repère Gazebo). task_solution.py la "
                         "remplace par une carte vide si le monde n'est pas le café."),
         DeclareLaunchArgument(
-            "controller", default_value="rpp", choices=["rpp", "dwb"],
-            description="Contrôleur local : config/controller_<nom>.yaml."),
+            "behavior_tree", default_value="if_invalid", choices=["if_invalid", "periodic"],
+            description="Replanification : seulement si le chemin devient invalide "
+                        "(défaut) ou périodique à 2 Hz."),
         DeclareLaunchArgument(
             "task_params_file", default_value="",
             description="task_params.yaml à utiliser (vide = package officiel)."),
@@ -170,7 +171,7 @@ def generate_launch_description():
         launch_arguments={
             "use_sim_time": LaunchConfiguration("use_sim_time"),
             "map": LaunchConfiguration("map"),
-            "controller": LaunchConfiguration("controller"),
+            "behavior_tree": LaunchConfiguration("behavior_tree"),
         }.items(),
     )
 

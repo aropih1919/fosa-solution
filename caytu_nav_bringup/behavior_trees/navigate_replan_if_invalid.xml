@@ -32,18 +32,37 @@
             default_planner="GridBased"
             topic_name="planner_selector"/>
 
-        <!-- Replanification à 2 Hz : le contrôleur suit le chemin, l'évitement vient de la replanification -->
+        <!--
+          Replanification seulement si nécessaire (schéma de l'arbre officiel
+          Nav2 « navigate_w_replanning_only_if_path_becomes_invalid »).
+          Deux fois par seconde, on vérifie que le chemin en cours est encore
+          libre dans la costmap globale. Tant qu'il l'est, on le garde : le
+          robot ne change plus d'avis entre deux contournements équivalents.
+          Un nouveau chemin n'est calculé que si un obstacle coupe le chemin
+          courant, ou si le but change.
+        -->
         <RateController hz="2.0">
 
           <RecoveryNode
               number_of_retries="1"
               name="ComputePathToPose">
 
-            <ComputePathToPose
-                goal="{goal}"
-                path="{path}"
-                planner_id="{selected_planner}"
-                error_code_id="{compute_path_error_code}"/>
+            <Fallback name="ReplanOnlyIfNeeded">
+
+              <ReactiveSequence name="PathStillValid">
+                <Inverter>
+                  <GlobalUpdatedGoal/>
+                </Inverter>
+                <IsPathValid path="{path}"/>
+              </ReactiveSequence>
+
+              <ComputePathToPose
+                  goal="{goal}"
+                  path="{path}"
+                  planner_id="{selected_planner}"
+                  error_code_id="{compute_path_error_code}"/>
+
+            </Fallback>
 
             <!-- Recovery planner -->
             <Sequence name="PlannerRecovery">

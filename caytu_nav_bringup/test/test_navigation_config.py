@@ -63,7 +63,8 @@ def test_every_costmap_plugin_and_source_is_defined():
 
 def test_costmap_layout():
     assert costmap("global_costmap")["plugins"] == [
-        "static_layer", "lidar_layer", "top_camera_layer", "inflation_layer"]
+        "static_layer", "lidar_layer", "top_camera_layer", "bottom_camera_layer",
+        "inflation_layer"]
     assert costmap("local_costmap")["plugins"] == [
         "lidar_layer", "top_camera_layer", "bottom_camera_layer", "inflation_layer"]
     local = costmap("local_costmap")
@@ -107,7 +108,7 @@ def test_camera_layers_cannot_mark_empty_rays():
             # Les points d'un scan caméra ont z ~ 0 dans la costmap.
             assert source["min_obstacle_height"] < 0.0
             seen += 1
-    assert seen == 3
+    assert seen == 4
 
 
 def test_inflation_gives_a_cost_slope_beyond_the_robot():
@@ -115,7 +116,7 @@ def test_inflation_gives_a_cost_slope_beyond_the_robot():
     for name in ("global_costmap", "local_costmap"):
         inflation = costmap(name)["inflation_layer"]
         assert inflation["inflation_radius"] >= inscribed_radius + 0.25
-    rpp = load_yaml("controller_rpp.yaml")["controller_server"]["ros__parameters"]["FollowPath"]
+    rpp = nav2()["controller_server"]["ros__parameters"]["FollowPath"]
     assert rpp["inflation_cost_scaling_factor"] == costmap("local_costmap")[
         "inflation_layer"]["cost_scaling_factor"]
 
@@ -140,11 +141,13 @@ def test_navigation_launch_starts_everything_in_one_lifecycle_manager():
                        "behavior_server", "bt_navigator", "lifecycle_manager"):
         assert executable in text
     assert "/robot_base_controller/cmd_vel_unstamped" in text
-    assert "navigate_bounded_recovery.xml" in text
+    assert "navigate_replan_" in text
     assert "get_package_share_directory" in text
+    # Un seul fichier de paramètres Nav2 : pas d'ordre de chargement à respecter.
+    assert "nav2_params.yaml" in text and "controller_file" not in text
 
 
-def test_controller_files_exist_and_are_consistent():
+def test_controller_is_consistent_with_the_robot_and_the_scoring():
     common = nav2()["controller_server"]["ros__parameters"]
     assert common["enable_stamped_cmd_vel"] is False
     assert common["controller_plugins"] == ["FollowPath"]
@@ -152,19 +155,12 @@ def test_controller_files_exist_and_are_consistent():
     assert common["goal_checker"]["xy_goal_tolerance"] <= 0.15
     assert common["goal_checker"]["yaw_goal_tolerance"] > 3.14
 
-    rpp = load_yaml("controller_rpp.yaml")["controller_server"]["ros__parameters"]["FollowPath"]
+    rpp = common["FollowPath"]
     assert rpp["plugin"] == (
         "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController")
     assert not (rpp["use_rotate_to_heading"] and rpp["allow_reversing"])
     assert rpp["rotate_to_heading_angular_vel"] <= 1.0      # limite du plugin DiffDrive
-
-    dwb = load_yaml("controller_dwb.yaml")["controller_server"]["ros__parameters"]["FollowPath"]
-    assert dwb["plugin"] == "dwb_core::DWBLocalPlanner"
-    assert dwb["debug_trajectory_details"] is False
-    assert dwb["max_vel_y"] == 0.0 and dwb["vy_samples"] == 1
-    for critic in dwb["critics"]:
-        assert critic in ("RotateToGoal", "Oscillation", "ObstacleFootprint", "GoalAlign",
-                          "PathAlign", "PathDist", "GoalDist", "PreferForward")
+    assert rpp["use_collision_detection"] is True
 
 
 def test_planner_is_smac_2d_without_hybrid_parameters():
@@ -217,11 +213,38 @@ def test_cafe_map_is_in_the_gazebo_frame_and_keeps_spawn_and_goal_free():
     assert any(value(4.34 + d, -6.0) == 0 for d in (-0.1, -0.05, 0.0, 0.05, 0.1))
 
 
-def test_behavior_tree_only_uses_known_recovery_services():
-    text = (PACKAGE_DIR / "behavior_trees" / "navigate_bounded_recovery.xml").read_text(
+# Nœuds fournis par nav2_behavior_tree (Jazzy) ou par BehaviorTree.CPP.
+KNOWN_BT_NODES = {
+    "root", "BehaviorTree", "RecoveryNode", "PipelineSequence", "RoundRobin",
+    "RateController", "ControllerSelector", "PlannerSelector", "ComputePathToPose",
+    "FollowPath", "IsPathValid", "GlobalUpdatedGoal", "WouldAPlannerRecoveryHelp",
+    "WouldAControllerRecoveryHelp", "ClearEntireCostmap", "Spin", "Wait", "BackUp",
+    "Sequence", "Fallback", "ReactiveSequence", "Inverter",
+}
+
+
+def test_behavior_trees_are_well_formed_and_use_known_nodes():
+    import xml.dom.minidom
+
+    for name in ("navigate_replan_if_invalid.xml", "navigate_replan_periodic.xml"):
+        path = PACKAGE_DIR / "behavior_trees" / name
+        document = xml.dom.minidom.parseString(path.read_bytes())
+        tags = {node.tagName for node in document.getElementsByTagName("*")}
+        assert tags <= KNOWN_BT_NODES, f"{name}: nœuds inconnus {tags - KNOWN_BT_NODES}"
+        text = path.read_text(encoding="utf-8")
+        assert 'main_tree_to_execute="MainTree"' in text
+        assert "local_costmap/clear_entirely_local_costmap" in text
+        assert "global_costmap/clear_entirely_global_costmap" in text
+        assert 'default_controller="FollowPath"' in text
+        assert 'default_planner="GridBased"' in text
+
+
+def test_default_tree_replans_only_when_the_path_becomes_invalid():
+    text = (PACKAGE_DIR / "behavior_trees" / "navigate_replan_if_invalid.xml").read_text(
         encoding="utf-8")
-    assert 'main_tree_to_execute="MainTree"' in text
-    assert "local_costmap/clear_entirely_local_costmap" in text
-    assert "global_costmap/clear_entirely_global_costmap" in text
-    assert 'default_controller="FollowPath"' in text
-    assert 'default_planner="GridBased"' in text
+    # Sans cela, le chemin change de côté d'un calcul à l'autre devant un
+    # obstacle et le robot hésite (constaté dans Gazebo le 6 octobre 2026).
+    assert '<IsPathValid path="{path}"/>' in text
+    assert "<GlobalUpdatedGoal/>" in text
+    launch = (LAUNCH_DIR / "navigation.launch.py").read_text(encoding="utf-8")
+    assert 'default_value="if_invalid"' in launch

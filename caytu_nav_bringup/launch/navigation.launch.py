@@ -25,15 +25,14 @@ def _nav2_nodes(context):
     bringup_dir = get_package_share_directory("caytu_nav_bringup")
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
     map_yaml = LaunchConfiguration("map").perform(context)
-    controller = LaunchConfiguration("controller").perform(context)
+    behavior_tree = LaunchConfiguration("behavior_tree").perform(context)
 
     params_file = os.path.join(bringup_dir, "config", "nav2_params.yaml")
-    controller_file = os.path.join(bringup_dir, "config", f"controller_{controller}.yaml")
-    if not os.path.isfile(controller_file):
-        raise RuntimeError(f"Contrôleur inconnu : {controller} ({controller_file} absent)")
     # Chemin résolu dans le package installé : aucun chemin personnel en dur.
     bt_xml_file = os.path.join(
-        bringup_dir, "behavior_trees", "navigate_bounded_recovery.xml")
+        bringup_dir, "behavior_trees", f"navigate_replan_{behavior_tree}.xml")
+    if not os.path.isfile(bt_xml_file):
+        raise RuntimeError(f"Behavior tree inconnu : {behavior_tree} ({bt_xml_file} absent)")
     sim_time = {"use_sim_time": use_sim_time}
 
     return [
@@ -49,9 +48,7 @@ def _nav2_nodes(context):
             executable="controller_server",
             name="controller_server",
             output="screen",
-            # Le fichier du contrôleur est chargé après nav2_params.yaml : il
-            # complète controller_server avec le plugin FollowPath choisi.
-            parameters=[params_file, controller_file, sim_time],
+            parameters=[params_file, sim_time],
             remappings=[("cmd_vel", CMD_VEL_TOPIC)],
         ),
         Node(
@@ -105,7 +102,8 @@ def generate_launch_description():
             "map", default_value=os.path.join(bringup_dir, "maps", "cafe_map.yaml"),
             description="Fichier YAML de la carte statique."),
         DeclareLaunchArgument(
-            "controller", default_value="rpp", choices=["rpp", "dwb"],
-            description="Contrôleur local : config/controller_<nom>.yaml."),
+            "behavior_tree", default_value="if_invalid", choices=["if_invalid", "periodic"],
+            description="Replanification : seulement si le chemin devient invalide "
+                        "(défaut) ou périodique à 2 Hz."),
         OpaqueFunction(function=_nav2_nodes),
     ])

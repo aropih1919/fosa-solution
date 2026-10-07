@@ -3,8 +3,9 @@
 <package format="3">
   <name>caytu_nav_bringup</name>
   <version>0.2.0</version>
-  <description>Configuration et lancement Nav2 pour le CAYTU Sito-É — PARC 2026, équipe Fosa (costmaps, planificateur, contrôleur, carte du café)</description>
-  <maintainer email="johny@fosa.mg">Johny — Trinôme 2</maintainer>
+  <description>Configuration et lancement Nav2 pour le CAYTU Sito-É — PARC 2026, équipe Fosa (costmaps, planificateur, contrôleur, behavior trees, carte du café)</description>
+  <!-- package.xml exige un mainteneur avec une adresse : mettre ici le contact de l'équipe. -->
+  <maintainer email="equipe.fosa@example.com">Équipe Fosa</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -21,7 +22,6 @@
   <exec_depend>nav2_smac_planner</exec_depend>
   <exec_depend>nav2_controller</exec_depend>
   <exec_depend>nav2_regulated_pure_pursuit_controller</exec_depend>
-  <exec_depend>nav2_dwb_controller</exec_depend>
   <exec_depend>nav2_behaviors</exec_depend>
   <exec_depend>nav2_bt_navigator</exec_depend>
   <exec_depend>nav2_behavior_tree</exec_depend>
