@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime
 from typing import Optional
 
 import rclpy
@@ -40,7 +41,13 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from caytu_nav_solution.nav_math import (
     Pose2D, load_pgm_map, quaternion_from_yaw, scan_map_agreement, yaw_from_quaternion)
+from caytu_nav_solution.run_report import RunMetrics
 from caytu_nav_solution.task_params import TaskParams, load_task_params
+
+try:
+    from ros_gz_interfaces.msg import Contacts
+except ImportError:
+    Contacts = None
 
 EXIT_SUCCESS, EXIT_FAILURE, EXIT_TIMEOUT = 0, 1, 2
 # Position du lidar dans base_footprint (URDF officiel) : 2,1 cm derrière le centre.
@@ -80,6 +87,8 @@ class TaskSolution(Node):
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter('cmd_vel_topic', '/robot_base_controller/cmd_vel_unstamped')
+        self.declare_parameter('write_report', True)
+        self.declare_parameter('report_dir', '~/.ros/fosa_runs')
 
         self._task: TaskParams = load_task_params(
             self.get_parameter('task_params_file').value or None)
@@ -90,6 +99,14 @@ class TaskSolution(Node):
         self._last_scan: Optional[LaserScan] = None
         self._last_feedback_log = 0.0
         self._goal_handle = None        # but Nav2 en cours, pour pouvoir l'annuler
+        self._metrics = RunMetrics()
+        self._metrics.behavior_tree = str(self.get_parameter('behavior_tree').value)
+        self._metrics.map_correction = 'auto'
+        self._metrics.collision_monitor = 'false'
+        self._metrics.contacts_available = Contacts is not None
+        self._last_report_t = 0.0
+        self._wall_start = time.monotonic()
+        self._map_used = ''
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=False)
@@ -105,6 +122,10 @@ class TaskSolution(Node):
         self._scan_sub = self.create_subscription(
             LaserScan, self.get_parameter('scan_topic').value, self._on_scan,
             qos_profile_sensor_data)
+        if Contacts is not None:
+            for topic in ('/base_collisions', '/left_wheel_collisions',
+                          '/right_wheel_collisions', '/top_chassis_collisions'):
+                self.create_subscription(Contacts, topic, self._on_contacts, 10)
 
         self.get_logger().info(
             f'Départ ({self._task.spawn.x:.3f}, {self._task.spawn.y:.3f}, '
@@ -115,6 +136,23 @@ class TaskSolution(Node):
     def _on_scan(self, msg: LaserScan):
         self._last_scan = msg
 
+    def _on_contacts(self, msg) -> None:
+        for contact in msg.contacts:
+            self._metrics.add_contact(
+                contact.collision1.name, contact.collision2.name)
+
+    def _report_pose(self) -> None:
+        """Echantillonne la pose pour le rapport, au plus 5 Hz (horloge du noeud)."""
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now - self._last_report_t < 0.2:
+            return
+        self._last_report_t = now
+        pose = self._robot_pose()
+        if pose is None:
+            return
+        self._metrics.update_pose(
+            now, pose.x, pose.y, self._task.goal_x, self._task.goal_y)
+
     def _spin(self, wall_seconds: float):
         """Traite les messages ROS pendant une durée réelle donnée."""
         end = time.monotonic() + wall_seconds
@@ -123,6 +161,7 @@ class TaskSolution(Node):
             if remaining <= 0.0:
                 break
             rclpy.spin_once(self, timeout_sec=min(0.05, remaining))
+            self._report_pose()
 
     def _elapsed(self) -> float:
         """Temps écoulé depuis le lancement de la solution (horloge du nœud)."""
@@ -361,6 +400,35 @@ class TaskSolution(Node):
         return distance is not None and distance <= float(
             self.get_parameter('success_radius').value)
 
+    def _write_report(self, code: int) -> None:
+        """Ecrit le rapport JSON + CSV, une seule fois en fin de trajet (O(1))."""
+        if not bool(self.get_parameter('write_report').value):
+            return
+        try:
+            import csv
+            import json
+            names = {EXIT_SUCCESS: 'success', EXIT_TIMEOUT: 'timeout'}
+            result = names.get(code, 'failure')
+            final = self._distance_to_goal()
+            self._metrics.finish(result, self._elapsed(),
+                                 time.monotonic() - self._wall_start, final)
+            folder = os.path.expanduser(str(self.get_parameter('report_dir').value))
+            os.makedirs(folder, exist_ok=True)
+            stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            data = self._metrics.to_dict()
+            with open(os.path.join(folder, f'run_{stamp}.json'), 'w', encoding='utf-8') as stream:
+                json.dump(data, stream, indent=2)
+            csv_path = os.path.join(folder, 'runs.csv')
+            new = not os.path.exists(csv_path)
+            with open(csv_path, 'a', newline='', encoding='utf-8') as stream:
+                writer = csv.DictWriter(stream, fieldnames=list(data.keys()))
+                if new:
+                    writer.writeheader()
+                writer.writerow(data)
+            self.get_logger().info('\n' + self._metrics.to_text())
+        except Exception as error:
+            self.get_logger().warn(f'Rapport non ecrit : {error!r}')
+
     def _navigate_once(self) -> str:
         """Un envoi du but.
 
@@ -371,6 +439,7 @@ class TaskSolution(Node):
             self._goal_message(), feedback_callback=self._on_feedback)
         while rclpy.ok() and not send_future.done():
             rclpy.spin_once(self, timeout_sec=0.05)
+            self._report_pose()
             if self._time_left() <= 0.0:
                 return 'timeout'
             if not self._bringup_alive():
@@ -383,12 +452,14 @@ class TaskSolution(Node):
         result_future = goal_handle.get_result_async()
         while rclpy.ok() and not result_future.done():
             rclpy.spin_once(self, timeout_sec=0.05)
+            self._report_pose()
             if self._time_left() <= 0.0:
                 self.get_logger().error('Limite de temps atteinte : annulation du but.')
                 cancel_future = goal_handle.cancel_goal_async()
                 end = time.monotonic() + 2.0
                 while rclpy.ok() and not cancel_future.done() and time.monotonic() < end:
                     rclpy.spin_once(self, timeout_sec=0.05)
+                    self._report_pose()
                 return 'timeout'
             if not self._bringup_alive():
                 return 'abort'
@@ -413,7 +484,10 @@ class TaskSolution(Node):
     # ------------------------------------------------------------------- tâche
     def run(self) -> int:
         self._wait_for_clock()
+        self._metrics.start(self._elapsed(), time.monotonic() - self._wall_start)
         map_yaml = self._choose_map()
+        self._map_used = map_yaml
+        self._metrics.map_used = map_yaml
         self.destroy_subscription(self._scan_sub)      # le scan ne sert plus ici
         self._start_bringup(map_yaml)
         if not self._wait_for_nav2():
@@ -429,6 +503,7 @@ class TaskSolution(Node):
             else:
                 if rejections == 0:
                     attempt += 1
+                    self._metrics.add_attempt()
                     distance = self._distance_to_goal()
                     self.get_logger().info(
                         f'Envoi du but, tentative {attempt}'
@@ -441,6 +516,7 @@ class TaskSolution(Node):
                 if rejections % 10 == 0:
                     self.get_logger().info('Nav2 n\'accepte pas encore de but, nouvel essai...')
                 rejections += 1
+                self._metrics.add_rejection()
                 self._spin(0.5)
                 continue
             rejections = 0
@@ -502,6 +578,10 @@ def main(args=None):
             # Un second Ctrl-C pendant le nettoyage ne doit pas l'interrompre.
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            try:
+                node._write_report(code)
+            except Exception:
+                pass
             try:
                 node.shutdown_sequence()
             except Exception as error:      # noqa: BLE001

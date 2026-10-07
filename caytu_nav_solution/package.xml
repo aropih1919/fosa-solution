@@ -26,6 +26,7 @@
   <!-- ...puis démarre toute la pile avec `ros2 launch caytu_nav_bringup ...`. -->
   <exec_depend>ros2launch</exec_depend>
   <exec_depend>caytu_nav_bringup</exec_depend>
+  <exec_depend>ros_gz_interfaces</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 
