@@ -2,20 +2,33 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>caytu_nav_solution</name>
-  <version>0.1.0</version>
-  <description>Point d'entrée officiel PARC2026 — Goal + Nav2 Client — CAYTU Sito-É</description>
-  <maintainer email="liantsoaandreane@gmail.com">Liantsoa — Trinôme 2</maintainer>
+  <version>0.5.0</version>
+  <description>Point d'entrée officiel PARC 2026 (task_solution.py), localisation roues + IMU, filtrage du lidar et stabilisation du chemin — CAYTU Sito-É, équipe Fosa</description>
+  <maintainer email="equipe.fosa@example.com">Équipe Fosa</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
 
+  <!-- Bibliothèques ROS utilisées par les nœuds Python. -->
   <depend>rclpy</depend>
-  <depend>nav2_msgs</depend>
-  <depend>geometry_msgs</depend>
-  <depend>std_msgs</depend>
+  <depend>rcl_interfaces</depend>
   <depend>action_msgs</depend>
-  <!-- GoalLocator lit task_params.yaml avec PyYAML. -->
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>nav2_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2_ros</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <!-- Lecture de task_params.yaml et du YAML de carte ; calculs sur les grilles. -->
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <!-- task_solution.py lit task_params.yaml dans le package officiel... -->
+  <exec_depend>parc_robot_bringup</exec_depend>
+  <!-- ...puis démarre toute la pile avec `ros2 launch caytu_nav_bringup ...`. -->
+  <exec_depend>ros2launch</exec_depend>
+  <exec_depend>caytu_nav_bringup</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

@@ -3,14 +3,10 @@ project(caytu_nav_bringup)
 
 find_package(ament_cmake REQUIRED)
 
-install(DIRECTORY config launch behavior_trees
+# Configuration, launch, behavior tree et carte : tout est lu depuis le dossier
+# share du package installé (aucun chemin absolu dans la solution).
+install(DIRECTORY config launch behavior_trees maps
   DESTINATION share/${PROJECT_NAME}
-  OPTIONAL
-)
-
-install(DIRECTORY maps
-  DESTINATION share/${PROJECT_NAME}
-  OPTIONAL
 )
 
 if(BUILD_TESTING)

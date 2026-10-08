@@ -1,0 +1,7 @@
+run :
+1 . 4min26s 
+2 . 5min52s
+3 . 2min56s
+4 . 2min53s
+5 . bloqué devant une table (collision ahead , tsy misy recovery mode ataony)
+6 . bloqué 

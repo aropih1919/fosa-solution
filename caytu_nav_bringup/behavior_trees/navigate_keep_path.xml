@@ -4,23 +4,14 @@
   <BehaviorTree ID="MainTree">
 
     <!--
-      Arbre par défaut de Nav2 pour la solution Fosa.
+      Arbre « chemin stabilisé ». Identique à navigate_bounded_recovery.xml, à
+      une ligne près : ComputePathToPose s'adresse au nœud path_keeper
+      (server_name="compute_path_stable"), qui interroge le planificateur puis
+      ne change de chemin que si le nouveau est nettement meilleur ou si le
+      chemin suivi est coupé par un obstacle.
 
-      Conduite : replanification PÉRIODIQUE à 2 Hz. Le chemin suit en continu
-      ce que les caméras découvrent, donc le robot dévie tôt. C'est la conduite
-      de la version mesurée à 2 min 33 s sur le trajet officiel.
-
-      Récupérations (elles ne jouent que si quelque chose échoue) :
-      - la costmap globale n'est jamais effacée en entier ici : seule la zone
-        à plus de 2,5 m du robot l'est. Un plateau de table n'est vu que par
-        les caméras, vers l'avant ; l'effacer quand il est sur le côté ferait
-        passer le chemin suivant à travers la table ;
-      - quatre récupérations au plus, dans cet ordre : nettoyer, attendre,
-        regarder autour (pivot), reculer. Ensuite Nav2 rend la main à
-        task_solution.py, qui décide selon la cause de l'échec.
-
-      navigate_keep_path.xml est le même arbre, à une ligne près : le chemin y
-      est demandé au nœud path_keeper au lieu du planificateur.
+      task_solution.py ne demande cet arbre que si path_keeper répond ; sinon
+      Nav2 utilise l'arbre par défaut.
     -->
 
     <RecoveryNode number_of_retries="4" name="NavigateRecovery">
@@ -47,6 +38,7 @@
                 goal="{goal}"
                 path="{path}"
                 planner_id="{selected_planner}"
+                server_name="compute_path_stable"
                 error_code_id="{compute_path_error_code}"/>
 
             <Sequence name="PlannerRecovery">

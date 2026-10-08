@@ -4,7 +4,7 @@ package_name = 'caytu_nav_solution'
 
 setup(
     name=package_name,
-    version='0.1.0',
+    version='0.5.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -13,17 +13,24 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Liantsoa',
-    maintainer_email='liantsoaandreane@gmail.com',
-    description='Point d\'entrée officiel PARC2026 — Goal + Nav2 Client',
+    maintainer='Équipe Fosa',
+    maintainer_email='equipe.fosa@example.com',
+    description='Point d\'entrée officiel PARC 2026 (task_solution.py), '
+                'localisation roues + IMU, filtrage du lidar et stabilisation '
+                'du chemin — équipe Fosa',
     license='MIT',
-    tests_require=['pytest'],
+    extras_require={'test': ['pytest']},
     entry_points={
         'console_scripts': [
+            # Nom imposé par le règlement :
+            #   ros2 run caytu_nav_solution task_solution.py
+            'task_solution.py = caytu_nav_solution.task_solution:main',
+            # Alias conservé pour les habitudes de l'équipe.
             'task_solution = caytu_nav_solution.task_solution:main',
-            # Installé afin que le bringup puisse le lancer depuis le package,
-            # sans chemin source absolu ni `python3 <fichier>` manuel.
-            'localization_watchdog = caytu_nav_solution.localization_watchdog:main',
+            # Nœuds lancés par caytu_nav_bringup/launch/solution_bringup.launch.py
+            'odom_imu_localizer = caytu_nav_solution.odom_imu_localizer:main',
+            'lidar_floor_filter = caytu_nav_solution.lidar_floor_filter:main',
+            'path_keeper = caytu_nav_solution.path_keeper:main',
         ],
     },
 )
