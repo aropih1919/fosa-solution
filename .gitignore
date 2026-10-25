@@ -1,2 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+install/
+log/
+diag.log
 step.md
 test.txt

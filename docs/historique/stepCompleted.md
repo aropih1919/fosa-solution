@@ -1,3 +1,5 @@
+> **Document historique (version 1).** Il décrit l'ancienne architecture (carte SLAM, AMCL, watchdog de covariance), remplacée en version 2. Voir `docs/CHANGEMENTS_V2.md`.
+
 # Guide de lancement — Navigation PARC 2026
 
 Ce guide démarre la simulation officielle, puis toute la pile de navigation
