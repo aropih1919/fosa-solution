@@ -22,21 +22,19 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
-# Repère horizontal publié par lidar_floor_filter (le robot penche de ~2,5°).
-LEVEL_FRAME = "base_footprint_level"
+# Repère horizontal publié par le filtre sol lidar (le robot penche de ~2,5°).
+REPERE_HORIZONTAL = "base_footprint_level"
 
 
-def generate_launch_description():
-    bringup_dir = get_package_share_directory("caytu_nav_bringup")
-
-    use_sim_time = ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)
-
-    arguments = [
+def _declarer_arguments(dossier_bringup):
+    """Réglages modifiables en ligne de commande."""
+    return [
         DeclareLaunchArgument(
             "use_sim_time", default_value="true",
             description="Utiliser /clock de Gazebo pour tous les nœuds."),
         DeclareLaunchArgument(
-            "map", default_value=os.path.join(bringup_dir, "maps", "cafe_map.yaml"),
+            "map", default_value=os.path.join(
+                dossier_bringup, "maps", "cafe_map.yaml"),
             description="Carte statique (repère Gazebo). task_solution.py la "
                         "remplace par une carte vide si le monde n'est pas le café."),
         DeclareLaunchArgument(
@@ -57,53 +55,63 @@ def generate_launch_description():
                         "devant dans /scan. 0.0 = calcul automatique par l'IMU."),
     ]
 
-    # 1. Le lidar est sous le châssis : quatre secteurs fixes voient les roues
-    #    et la roulette. Nav2 ne consomme jamais /scan brut.
-    laser_filter = Node(
+
+def _creer_filtre_laser(dossier_bringup, utiliser_temps_simulation):
+    """1. Le lidar est sous le châssis : quatre secteurs fixes voient les roues
+    et la roulette. Nav2 ne consomme jamais /scan brut.
+    """
+    return Node(
         package="laser_filters",
         executable="scan_to_scan_filter_chain",
         name="scan_to_scan_filter_chain",
         output="screen",
         parameters=[
-            os.path.join(bringup_dir, "config", "laser_filter_params.yaml"),
-            {"use_sim_time": use_sim_time},
+            os.path.join(dossier_bringup, "config", "laser_filter_params.yaml"),
+            {"use_sim_time": utiliser_temps_simulation},
         ],
         remappings=[("scan", "/scan"), ("scan_filtered", "/scan_filtered")],
     )
 
-    # 2. /scan_filtered -> /scan_clean (marquage) et /scan_clear (effacement),
-    #    plus la TF statique base_footprint -> base_footprint_level.
-    floor_filter = Node(
+
+def _creer_filtre_sol(utiliser_temps_simulation):
+    """/scan_filtered -> /scan_clean (marquage) et /scan_clear (effacement),
+    plus la TF statique base_footprint -> base_footprint_level.
+    """
+    return Node(
         package="caytu_nav_solution",
-        executable="lidar_floor_filter",
-        name="lidar_floor_filter",
+        executable="filtre_sol_lidar",
+        name="filtre_sol_lidar",
         output="screen",
         parameters=[{
-            "use_sim_time": use_sim_time,
-            "level_frame": LEVEL_FRAME,
+            "use_sim_time": utiliser_temps_simulation,
+            "level_frame": REPERE_HORIZONTAL,
             "floor_line_distance": ParameterValue(
                 LaunchConfiguration("floor_line_distance"), value_type=float),
         }],
     )
 
-    # 3a. Caméra haute (horizontale, 1.01 m) : tables, chaises, personnes.
-    #     Gazebo ajoute son bruit de profondeur (écart-type 0.10 m) directement
-    #     sur x, y ET z de chaque point : le sol est donc bruité de ±0.10 m en
-    #     hauteur. Dans le repère horizontal, min_height = 0.60 m représente
-    #     6 écarts-types (aucun faux obstacle dans nos simulations du capteur)
-    #     et reste sous les plateaux de table (0.74 m) et les dossiers de chaise.
-    top_cam_to_scan = Node(
+
+def _creer_camera_haute(utiliser_temps_simulation):
+    """3a. Caméra haute (horizontale, 1.01 m) : tables, chaises, personnes.
+
+    Gazebo ajoute son bruit de profondeur (écart-type 0.10 m) directement sur
+    x, y ET z de chaque point : le sol est donc bruité de ±0.10 m en hauteur.
+    Dans le repère horizontal, min_height = 0.60 m représente 6 écarts-types
+    (aucun faux obstacle dans nos simulations du capteur) et reste sous les
+    plateaux de table (0.74 m) et les dossiers de chaise.
+    """
+    return Node(
         package="pointcloud_to_laserscan",
         executable="pointcloud_to_laserscan_node",
-        name="top_cam_to_scan",
+        name="camera_haute_vers_scan",
         output="screen",
         remappings=[
             ("cloud_in", LaunchConfiguration("top_cloud_topic")),
             ("scan", "/top_camera_scan"),
         ],
         parameters=[{
-            "use_sim_time": use_sim_time,
-            "target_frame": LEVEL_FRAME,
+            "use_sim_time": utiliser_temps_simulation,
+            "target_frame": REPERE_HORIZONTAL,
             "transform_tolerance": 0.5,
             "min_height": 0.60,
             "max_height": 1.40,
@@ -118,21 +126,24 @@ def generate_launch_description():
         }],
     )
 
-    # 3b. Caméra basse (0.58 m, inclinée de 60° vers le sol) : obstacles bas et
-    #     proches. Son bruit vertical est faible (±0.04 m) : 0.25 m suffit, ce
-    #     que confirment nos journaux (0 point sur sol dégagé).
-    bottom_cam_to_scan = Node(
+
+def _creer_camera_basse(utiliser_temps_simulation):
+    """3b. Caméra basse (0.58 m, inclinée de 60° vers le sol) : obstacles bas et
+    proches. Son bruit vertical est faible (±0.04 m) : 0.25 m suffit, ce que
+    confirment nos journaux (0 point sur sol dégagé).
+    """
+    return Node(
         package="pointcloud_to_laserscan",
         executable="pointcloud_to_laserscan_node",
-        name="bottom_cam_to_scan",
+        name="camera_basse_vers_scan",
         output="screen",
         remappings=[
             ("cloud_in", LaunchConfiguration("bottom_cloud_topic")),
             ("scan", "/bottom_camera_scan"),
         ],
         parameters=[{
-            "use_sim_time": use_sim_time,
-            "target_frame": LEVEL_FRAME,
+            "use_sim_time": utiliser_temps_simulation,
+            "target_frame": REPERE_HORIZONTAL,
             "transform_tolerance": 0.5,
             "min_height": 0.25,
             "max_height": 1.40,
@@ -147,26 +158,32 @@ def generate_launch_description():
         }],
     )
 
-    # 4. Remplace AMCL : map -> odom depuis le spawn de task_params.yaml, la
-    #    distance des roues et le cap de l'IMU. `map` = repère Gazebo.
-    localizer = Node(
+
+def _creer_localisateur(utiliser_temps_simulation):
+    """4. Remplace AMCL : map -> odom depuis le départ de task_params.yaml, la
+    distance des roues et le cap de l'IMU. `map` = repère Gazebo.
+    """
+    return Node(
         package="caytu_nav_solution",
-        executable="odom_imu_localizer",
-        name="odom_imu_localizer",
+        executable="localisateur_odom_imu",
+        name="localisateur_odom_imu",
         output="screen",
         parameters=[{
-            "use_sim_time": use_sim_time,
+            "use_sim_time": utiliser_temps_simulation,
             # value_type=str : une valeur vide doit rester une chaîne vide.
             "task_params_file": ParameterValue(
                 LaunchConfiguration("task_params_file"), value_type=str),
         }],
     )
 
-    # 5. Nav2. Démarré tout de suite : le temps de la tâche court dès le
-    #    lancement de la solution.
-    navigation = IncludeLaunchDescription(
+
+def _creer_navigation(dossier_bringup):
+    """5. Nav2. Démarré tout de suite : le temps de la tâche court dès le
+    lancement de la solution.
+    """
+    return IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(bringup_dir, "launch", "navigation.launch.py")),
+            os.path.join(dossier_bringup, "launch", "navigation.launch.py")),
         launch_arguments={
             "use_sim_time": LaunchConfiguration("use_sim_time"),
             "map": LaunchConfiguration("map"),
@@ -174,11 +191,21 @@ def generate_launch_description():
         }.items(),
     )
 
-    return LaunchDescription(arguments + [
-        laser_filter,
-        floor_filter,
-        top_cam_to_scan,
-        bottom_cam_to_scan,
-        localizer,
-        navigation,
-    ])
+
+def generate_launch_description():
+    dossier_bringup = get_package_share_directory("caytu_nav_bringup")
+
+    # Un argument de launch arrive toujours sous forme de texte ("true").
+    # ParameterValue demande à ROS de le convertir en vrai booléen.
+    utiliser_temps_simulation = ParameterValue(
+        LaunchConfiguration("use_sim_time"), value_type=bool)
+
+    return LaunchDescription(
+        _declarer_arguments(dossier_bringup) + [
+            _creer_filtre_laser(dossier_bringup, utiliser_temps_simulation),
+            _creer_filtre_sol(utiliser_temps_simulation),
+            _creer_camera_haute(utiliser_temps_simulation),
+            _creer_camera_basse(utiliser_temps_simulation),
+            _creer_localisateur(utiliser_temps_simulation),
+            _creer_navigation(dossier_bringup),
+        ])

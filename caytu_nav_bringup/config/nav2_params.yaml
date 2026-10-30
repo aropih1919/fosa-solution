@@ -6,10 +6,10 @@
 # fichier par navigation.launch.py.
 #
 # REPÈRES
-#   map   = repère du monde Gazebo (publié par odom_imu_localizer à partir du
-#           spawn de task_params.yaml). Le but de task_params.yaml s'utilise
+#   map   = repère du monde Gazebo (publié par localisateur_odom_imu à
+#           partir du départ de task_params.yaml). Le but s'utilise
 #           donc tel quel.
-#   odom  = odométrie du plugin DiffDrive (origine au spawn).
+#   odom  = odométrie du plugin DiffDrive (origine au départ).
 #
 # CAPTEURS (une couche par capteur, combinées en maximum : une couche qui voit
 # « libre » n'efface jamais l'obstacle vu par une autre)

@@ -33,7 +33,7 @@
   <exec_depend>pointcloud_to_laserscan</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
 
-  <!-- Les nœuds odom_imu_localizer et lidar_floor_filter lancés ici viennent de
+  <!-- Les nœuds localisateur_odom_imu et filtre_sol_lidar lancés ici viennent de
        caytu_nav_solution. La dépendance est déclarée dans l'autre sens
        (caytu_nav_solution dépend de caytu_nav_bringup) pour éviter un cycle. -->
 

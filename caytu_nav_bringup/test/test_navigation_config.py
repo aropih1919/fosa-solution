@@ -34,7 +34,7 @@ def test_all_yaml_files_parse():
 
 
 def test_no_amcl_slam_or_watchdog_left():
-    # La localisation est assurée par odom_imu_localizer : plus de carte SLAM,
+    # La localisation est assurée par localisateur_odom_imu : plus de carte SLAM,
     # plus d'AMCL, plus de seuil de covariance (cause de « localisation perdue »).
     assert not (CONFIG_DIR / "amcl_params.yaml").exists()
     assert not (CONFIG_DIR / "slam_toolbox_params.yaml").exists()
@@ -122,14 +122,14 @@ def test_inflation_gives_a_cost_slope_beyond_the_robot():
 
 def test_camera_scans_are_filtered_in_the_level_frame():
     text = (LAUNCH_DIR / "solution_bringup.launch.py").read_text(encoding="utf-8")
-    assert 'LEVEL_FRAME = "base_footprint_level"' in text
-    assert text.count('"target_frame": LEVEL_FRAME') == 2
+    assert 'REPERE_HORIZONTAL = "base_footprint_level"' in text
+    assert text.count('"target_frame": REPERE_HORIZONTAL') == 2
     # Bruit de profondeur Gazebo : 0.10 m sur la hauteur. Ne pas redescendre
     # sous 0.60 m pour la caméra haute sans revérifier sur sol dégagé.
     assert '"min_height": 0.60' in text
     assert '"min_height": 0.25' in text
-    for node in ("scan_to_scan_filter_chain", "lidar_floor_filter",
-                 "odom_imu_localizer", "pointcloud_to_laserscan_node"):
+    for node in ("scan_to_scan_filter_chain", "filtre_sol_lidar",
+                 "localisateur_odom_imu", "pointcloud_to_laserscan_node"):
         assert node in text
     assert "TimerAction" not in text      # le temps de la tâche court dès le lancement
 

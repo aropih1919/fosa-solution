@@ -2,7 +2,7 @@
 """Diagnostic de navigation Fosa v2 : une ligne toutes les 2 s (temps simulé).
 
 Outil de mise au point, NON utilisé par la solution. Chaque ligne donne :
-  - la pose estimée par odom_imu_localizer et la distance restante au but ;
+  - la pose estimée par localisateur_odom_imu et la distance restante au but ;
   - l'écart avec la pose réelle du robot dans Gazebo (/sitoe_robot/pose), pour
     mesurer la dérive de la localisation ;
   - la commande envoyée au robot ;
