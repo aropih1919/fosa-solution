@@ -51,11 +51,7 @@ def quaternion_depuis_roulis_tangage_lacet(roulis, tangage, lacet):
 
 
 class Pose2D:
-    """Pose plane : position (m) et cap (rad).
-
-    On ne modifie jamais une pose existante : chaque calcul crée une nouvelle
-    Pose2D. C'est plus simple à relire et cela évite les effets de bord.
-    """
+    """Pose plane : position (m) et cap (rad)."""
 
     def __init__(self, x=0.0, y=0.0, yaw=0.0):
         self.x = x

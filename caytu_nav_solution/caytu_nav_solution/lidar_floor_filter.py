@@ -30,7 +30,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu, LaserScan
 from tf2_ros import StaticTransformBroadcaster
 
-from caytu_nav_solution.calculs_nav import (
+from caytu_nav_solution.nav_math import (
     GRAVITE,
     distances_sol,
     hauteur_lidar,

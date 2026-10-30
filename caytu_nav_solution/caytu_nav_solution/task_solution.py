@@ -37,16 +37,16 @@ from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 
-from caytu_nav_solution.calculs_nav import (
+from caytu_nav_solution.nav_math import (
     Pose2D,
     accord_scan_carte,
     charger_carte_pgm,
     lacet_depuis_quaternion,
     quaternion_depuis_lacet,
 )
-from caytu_nav_solution.parametres_tache import (
-    ParametresTache,
-    charger_parametres_tache,
+from caytu_nav_solution.task_params import (
+    TaskParams,
+    load_task_params,
 )
 
 # Code de sortie du programme : le shell et le jury peuvent le lire.
@@ -68,9 +68,9 @@ class SolutionTache(Node):
         self._connecter_ros()
 
         self.get_logger().info(
-            f'Départ ({self._parametres.depart.x:.3f}, {self._parametres.depart.y:.3f}, '
-            f'cap {self._parametres.depart.yaw:.3f}) -> but ({self._parametres.but_x:.3f}, '
-            f'{self._parametres.but_y:.3f}), lus dans {self._parametres.chemin}')
+            f'Départ ({self._task.spawn.x:.3f}, {self._task.spawn.y:.3f}, '
+            f'cap {self._task.spawn.yaw:.3f}) -> but ({self._task.goal_x:.3f}, '
+            f'{self._task.goal_y:.3f}), lus dans {self._task.path}')
 
     # ------------------------------------------------------------ réglages
     def _declarer_parametres(self):
@@ -111,7 +111,7 @@ class SolutionTache(Node):
     def _lire_parametres(self):
         # Lecture immédiate du fichier de départ/but : si le fichier manque, on
         # s'arrête tout de suite avec un message clair.
-        self._parametres = charger_parametres_tache(
+        self._task: TaskParams = load_task_params(
             self.get_parameter('task_params_file').value or None)
         self._repere_global = self.get_parameter('global_frame').value
         self._repere_robot = self.get_parameter('base_frame').value
@@ -206,7 +206,7 @@ class SolutionTache(Node):
         pose = self.pose_robot()
         if pose is None:
             return None
-        return pose.distance_vers(self._parametres.but_x, self._parametres.but_y)
+        return pose.distance_vers(self._task.goal_x, self._task.goal_y)
 
     def bringup_est_vivant(self):
         # poll() renvoie None tant que le programme tourne, un code quand il est
@@ -257,7 +257,7 @@ class SolutionTache(Node):
 
         # La position du lidar n'est pas exactement celle du robot : il est
         # décalé de DECALAGE_LIDAR_X.
-        pose_lidar = self._parametres.depart.composer(
+        pose_lidar = self._task.spawn.composer(
             Pose2D(DECALAGE_LIDAR_X, 0.0, 0.0))
         accord, utilises = accord_scan_carte(
             carte, pose_lidar, scan.angle_min, scan.angle_increment, scan.ranges)
@@ -309,10 +309,10 @@ class SolutionTache(Node):
         resolution = 0.05          # taille d'une case en mètres (5 cm)
         marge = 15.0               # 15 m de marge autour du départ et du but
 
-        x_min = min(self._parametres.depart.x, self._parametres.but_x) - marge
-        y_min = min(self._parametres.depart.y, self._parametres.but_y) - marge
-        x_max = max(self._parametres.depart.x, self._parametres.but_x) + marge
-        y_max = max(self._parametres.depart.y, self._parametres.but_y) + marge
+        x_min = min(self._task.spawn.x, self._task.goal_x) - marge
+        y_min = min(self._task.spawn.y, self._task.goal_y) - marge
+        x_max = max(self._task.spawn.x, self._task.goal_x) + marge
+        y_max = max(self._task.spawn.y, self._task.goal_y) + marge
 
         largeur = int(math.ceil((x_max - x_min) / resolution))
         hauteur = int(math.ceil((y_max - y_min) / resolution))
@@ -353,7 +353,7 @@ class SolutionTache(Node):
             f'use_sim_time:={"true" if utiliser_temps_simulation else "false"}',
             f'map:={chemin_carte}',
             f'controller:={self.get_parameter("controller").value}',
-            f'task_params_file:={self._parametres.chemin}',
+            f'task_params_file:={self._task.path}',
         ]
         self.get_logger().info('Démarrage de la solution : ' + ' '.join(commande))
 
@@ -463,16 +463,16 @@ class SolutionTache(Node):
         return False
 
     def message_but(self):
-        pose = self.pose_robot() or self._parametres.depart
+        pose = self.pose_robot() or self._task.spawn
         cap = math.atan2(
-            self._parametres.but_y - pose.y,
-            self._parametres.but_x - pose.x)
+            self._task.goal_y - pose.y,
+            self._task.goal_x - pose.x)
 
         but = PoseStamped()
         but.header.frame_id = self._repere_global
         but.header.stamp = self.get_clock().now().to_msg()
-        but.pose.position.x = self._parametres.but_x
-        but.pose.position.y = self._parametres.but_y
+        but.pose.position.x = self._task.goal_x
+        but.pose.position.y = self._task.goal_y
 
         qx, qy, qz, qw = quaternion_depuis_lacet(cap)
         but.pose.orientation.x = qx

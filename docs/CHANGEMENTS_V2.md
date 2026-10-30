@@ -53,8 +53,8 @@ Fichiers supprimés : `amcl_params.yaml`, `slam_toolbox_params.yaml`,
 `planner_server_params.yaml`, `maps/stadium_map*`, `localization_watchdog.py`,
 `goal_locator.py`, `nav2_client.py`.
 
-Fichiers ajoutés : `calculs_nav.py`, `parametres_tache.py`,
-`localisateur_odom_imu.py`, `filtre_sol_lidar.py`, `controller_rpp.yaml`, `controller_dwb.yaml`,
+Fichiers ajoutés : `nav_math.py`, `task_params.py`,
+`odom_imu_localizer.py`, `lidar_floor_filter.py`, `controller_rpp.yaml`, `controller_dwb.yaml`,
 `maps/cafe_map.*`, `tools/generate_world_map.py`, `tools/diag_nav.py`, tests.
 
 Le URDF et les paquets officiels PARC ne sont pas modifiés.

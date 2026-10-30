@@ -23,14 +23,14 @@ from rclpy.time import Time
 from sensor_msgs.msg import Imu
 from tf2_ros import TransformBroadcaster
 
-from caytu_nav_solution.calculs_nav import (
+from caytu_nav_solution.nav_math import (
     FusionOdomImu,
     Pose2D,
     lacet_depuis_quaternion,
     normaliser_angle,
     quaternion_depuis_lacet,
 )
-from caytu_nav_solution.parametres_tache import charger_parametres_tache
+from caytu_nav_solution.task_params import load_task_params
 
 
 class LocalisateurOdomImu(Node):
@@ -44,9 +44,9 @@ class LocalisateurOdomImu(Node):
         self._connecter_ros()
 
         self.get_logger().info(
-            f'Localisation roues + IMU : départ lu dans {self._parametres.chemin} '
-            f'(x={self._parametres.depart.x:.3f}, y={self._parametres.depart.y:.3f}, '
-            f'yaw={self._parametres.depart.yaw:.3f})')
+            f'Localisation roues + IMU : départ lu dans {self._task.path} '
+            f'(x={self._task.spawn.x:.3f}, y={self._task.spawn.y:.3f}, '
+            f'yaw={self._task.spawn.yaw:.3f})')
 
     # ------------------------------------------------------------ réglages
     def _declarer_parametres(self):
@@ -64,7 +64,7 @@ class LocalisateurOdomImu(Node):
         self.declare_parameter('transform_tolerance', 0.2)
 
     def _lire_parametres(self):
-        self._parametres = charger_parametres_tache(
+        self._task = load_task_params(
             self.get_parameter('task_params_file').value or None)
         self._repere_map = self.get_parameter('map_frame').value
         self._repere_odom = self.get_parameter('odom_frame').value
@@ -75,7 +75,7 @@ class LocalisateurOdomImu(Node):
             seconds=float(self.get_parameter('transform_tolerance').value))
 
     def _initialiser_etat(self):
-        self._fusion = FusionOdomImu(self._parametres.depart)
+        self._fusion = FusionOdomImu(self._task.spawn)
         self._lacet_imu = None            # lacet absolu courant donné par l'IMU
         self._horodatage_imu = None
         self._lacet_gyro = 0.0            # secours : intégration du gyroscope

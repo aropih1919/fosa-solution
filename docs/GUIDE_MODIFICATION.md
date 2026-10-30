@@ -4,10 +4,11 @@ Ce guide s'adresse à celui qui doit **modifier** la solution pendant ou après 
 compétition, sans connaître tout ROS 2. Il indique où se trouve chaque réglage et
 ce qu'il faut vérifier après une modification.
 
-La règle de nommage du code : les **mots du métier sont en français**
-(`charger_carte`, `recevoir_scan`, `parametres_tache`), les **termes techniques
-restent en anglais** (`Pose2D`, `scan`, `yaw`, `Nav2`). Les noms des topics,
-repères, paramètres ROS et fichiers officiels ne changent jamais.
+La règle de nommage du code : les **actions propres à notre solution peuvent
+être nommées en français** (`charger_carte`, `recevoir_scan`), tandis que les
+**termes techniques gardent leur nom anglais** (`Pose2D`, `TaskParams`, `scan`,
+`yaw`, `Nav2`). Les noms des topics, repères, paramètres ROS et fichiers
+officiels ne changent jamais.
 
 ---
 
@@ -16,10 +17,10 @@ repères, paramètres ROS et fichiers officiels ne changent jamais.
 | Fichier | Rôle | On y touche pour... |
 |---|---|---|
 | `caytu_nav_solution/caytu_nav_solution/task_solution.py` | point d'entrée officiel : lit le départ/but, choisit la carte, lance le bringup, envoie le but, gère les échecs et l'arrêt | limites de temps, rayons d'arrivée, pauses entre tentatives |
-| `caytu_nav_solution/caytu_nav_solution/calculs_nav.py` | calculs purs, sans ROS : poses, fusion roues + IMU, sol du lidar, carte PGM | formules mathématiques (rarement) |
-| `caytu_nav_solution/caytu_nav_solution/parametres_tache.py` | lit `task_params.yaml` (départ et but) | rien : le fichier vient du paquet officiel |
-| `caytu_nav_solution/caytu_nav_solution/filtre_sol_lidar.py` | retire du lidar les rayons qui touchent le sol et publie le repère horizontal | seuils du sol, géométrie du lidar |
-| `caytu_nav_solution/caytu_nav_solution/localisateur_odom_imu.py` | remplace AMCL : publie `map -> odom` avec les roues et l'IMU | choix IMU / odométrie |
+| `caytu_nav_solution/caytu_nav_solution/nav_math.py` | calculs purs, sans ROS : poses, fusion roues + IMU, sol du lidar, carte PGM | formules mathématiques (rarement) |
+| `caytu_nav_solution/caytu_nav_solution/task_params.py` | lit `task_params.yaml` (départ et but) | rien : le fichier vient du paquet officiel |
+| `caytu_nav_solution/caytu_nav_solution/lidar_floor_filter.py` | retire du lidar les rayons qui touchent le sol et publie le repère horizontal | seuils du sol, géométrie du lidar |
+| `caytu_nav_solution/caytu_nav_solution/odom_imu_localizer.py` | remplace AMCL : publie `map -> odom` avec les roues et l'IMU | choix IMU / odométrie |
 | `caytu_nav_bringup/launch/solution_bringup.launch.py` | démarre les capteurs, la localisation et Nav2 | seuils des caméras, topics, repère horizontal |
 | `caytu_nav_bringup/launch/navigation.launch.py` | démarre les nœuds Nav2 | rien au quotidien |
 | `caytu_nav_bringup/config/nav2_params.yaml` | réglages Nav2 : costmaps, planificateur, comportements | marges de sécurité, vitesse du planificateur |
@@ -151,7 +152,7 @@ python3 caytu_nav_bringup/tools/generate_world_map.py \
 
 ### Lidar et sol
 
-Fichier : `caytu_nav_solution/caytu_nav_solution/filtre_sol_lidar.py`, méthode
+Fichier : `caytu_nav_solution/caytu_nav_solution/lidar_floor_filter.py`, méthode
 `_declarer_parametres`.
 
 | Paramètre | Défaut | Effet |

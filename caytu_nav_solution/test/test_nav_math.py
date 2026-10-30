@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from caytu_nav_solution.calculs_nav import (
+from caytu_nav_solution.nav_math import (
     GRAVITE,
     FusionOdomImu,
     Pose2D,
