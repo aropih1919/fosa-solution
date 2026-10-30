@@ -61,6 +61,26 @@ ros2 launch parc_robot_bringup task.launch.py
 ros2 run caytu_nav_solution task_solution.py
 ```
 
+## Organisation du code
+
+Le code est volontairement lisible sans être expert ROS 2 : les mots du métier
+sont en français (`charger_carte`, `recevoir_scan`, `parametres_tache`), les
+termes techniques restent en anglais (`Pose2D`, `scan`, `yaw`, `Nav2`), et les
+topics, repères et paramètres ROS gardent leurs noms officiels.
+
+| Fichier | Rôle |
+|---|---|
+| `task_solution.py` | point d'entrée officiel : lit le départ/but, choisit la carte, lance le bringup, envoie le but et gère les échecs |
+| `calculs_nav.py` | calculs purs sans ROS : poses, fusion roues + IMU, sol du lidar, carte PGM |
+| `parametres_tache.py` | lecture de `task_params.yaml` |
+| `filtre_sol_lidar.py` | retire les rayons du lidar qui touchent le sol |
+| `localisateur_odom_imu.py` | publie `map -> odom` avec les roues et l'IMU (remplace AMCL) |
+| `solution_bringup.launch.py` | démarre les capteurs, la localisation et Nav2 |
+| `controller_rpp.yaml` | vitesse et réglages du contrôleur |
+
+Pour savoir où modifier un réglage (départ, but, vitesse, seuils, carte,
+tentatives), voir `docs/GUIDE_MODIFICATION.md`.
+
 ## Défis rencontrés
 
 * **Repères différents.** Notre première carte, construite au SLAM, avait pour origine le point de départ du robot, alors que `task_params.yaml` est exprimé dans le repère de Gazebo. Le robot était donc initialisé hors de la carte et visait un mauvais endroit.

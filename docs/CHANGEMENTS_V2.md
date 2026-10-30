@@ -35,7 +35,7 @@ ros2 run caytu_nav_solution task_solution.py
 | Sujet | Version 1 | Version 2 |
 |---|---|---|
 | Lancement | launch du bringup, puis `task_solution` | une seule commande, `task_solution.py`, qui lance tout |
-| Localisation | carte SLAM + AMCL + watchdog de covariance | `odom_imu_localizer` : spawn de `task_params.yaml`, distance des roues, cap de l'IMU |
+| Localisation | carte SLAM + AMCL + watchdog de covariance | `localisateur_odom_imu` : départ de `task_params.yaml`, distance des roues, cap de l'IMU |
 | Repère `map` | repère de la carte SLAM | repère du monde Gazebo |
 | Carte | `stadium_map` (SLAM, murs dédoublés) | `cafe_map`, générée depuis le monde officiel, vérifiée par le lidar au démarrage |
 | Lidar | `/scan_filtered` | `/scan_clean` (marquage) et `/scan_clear` (effacement), sans les retours du sol |
@@ -53,8 +53,8 @@ Fichiers supprimés : `amcl_params.yaml`, `slam_toolbox_params.yaml`,
 `planner_server_params.yaml`, `maps/stadium_map*`, `localization_watchdog.py`,
 `goal_locator.py`, `nav2_client.py`.
 
-Fichiers ajoutés : `nav_math.py`, `task_params.py`, `odom_imu_localizer.py`,
-`lidar_floor_filter.py`, `controller_rpp.yaml`, `controller_dwb.yaml`,
+Fichiers ajoutés : `calculs_nav.py`, `parametres_tache.py`,
+`localisateur_odom_imu.py`, `filtre_sol_lidar.py`, `controller_rpp.yaml`, `controller_dwb.yaml`,
 `maps/cafe_map.*`, `tools/generate_world_map.py`, `tools/diag_nav.py`, tests.
 
 Le URDF et les paquets officiels PARC ne sont pas modifiés.
@@ -120,11 +120,12 @@ Tous les paramètres de `task_solution.py` se passent ainsi :
 ### 5.1 L'écart de localisation grandit
 
 - En virage surtout : l'IMU n'est pas utilisée. Cherchez `Cap fourni par l'IMU`
-  dans les messages de `odom_imu_localizer`.
+  dans les messages de `localisateur_odom_imu`.
 - En ligne droite : le rayon de roue de l'odométrie est en cause, ce qui est peu
   probable en simulation. Relevez l'écart en fin de trajet et signalez-le.
 - Pour comparer avec l'odométrie seule : dans `solution_bringup.launch.py`,
-  ajoutez `"use_imu_yaw": False` aux paramètres de `odom_imu_localizer`.
+  ajoutez `"use_imu_yaw": False` aux paramètres de
+  `localisateur_odom_imu`.
 
 ### 5.2 La caméra haute voit encore des obstacles sur sol vide
 
