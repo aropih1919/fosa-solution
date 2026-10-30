@@ -1,0 +1,19 @@
+scenarios:
+  full_course:
+    available: true
+    description: "Parcours officiel avec task_params.yaml du package PARC."
+  straight_line:
+    available: false
+    reason: "Aucun monde/fixture de ligne droite séparé n'est livré."
+  curves:
+    available: false
+    reason: "Aucun monde/fixture de virages séparé n'est livré."
+  static_obstacles:
+    available: false
+    reason: "Aucun fixture contrôlé d'obstacles statiques n'est livré."
+  narrow_passage:
+    available: false
+    reason: "Aucun monde/fixture de passage étroit n'est livré."
+  dynamic_obstacles:
+    available: false
+    reason: "Aucun acteur/fixture mobile reproductible n'est livré."

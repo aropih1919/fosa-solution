@@ -16,7 +16,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -24,6 +24,41 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 # Repère horizontal publié par lidar_floor_filter (le robot penche de ~2,5°).
 LEVEL_FRAME = "base_footprint_level"
+
+
+def _validate_experiment_arguments(context):
+    params_file = LaunchConfiguration("params_file").perform(context)
+    controller = LaunchConfiguration("controller").perform(context)
+    localization = LaunchConfiguration("localization").perform(context)
+    profile = LaunchConfiguration("profile").perform(context)
+    if not params_file and (controller == "mppi" or profile != "balanced"
+                            or localization == "amcl"):
+        raise RuntimeError(
+            "Cette combinaison exige un YAML complet params_file généré par "
+            "task_solution.py ou fosa_benchmark.")
+    return []
+
+
+def _launch_localizer(context):
+    localization = LaunchConfiguration("localization").perform(context)
+    if localization == "amcl":
+        return []
+
+    params_file = LaunchConfiguration("params_file").perform(context)
+    parameters = [params_file] if params_file else []
+    parameters.append({
+        "use_sim_time": ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool),
+        "task_params_file": ParameterValue(
+            LaunchConfiguration("task_params_file"), value_type=str),
+        "use_imu_yaw": localization == "odom_imu",
+    })
+    return [Node(
+        package="caytu_nav_solution",
+        executable="odom_imu_localizer",
+        name="odom_imu_localizer",
+        output="screen",
+        parameters=parameters,
+    )]
 
 
 def generate_launch_description():
@@ -40,8 +75,24 @@ def generate_launch_description():
             description="Carte statique (repère Gazebo). task_solution.py la "
                         "remplace par une carte vide si le monde n'est pas le café."),
         DeclareLaunchArgument(
-            "controller", default_value="rpp", choices=["rpp", "dwb"],
-            description="Contrôleur local : config/controller_<nom>.yaml."),
+            "controller", default_value="rpp", choices=["rpp", "dwb", "mppi"],
+            description="Contrôleur local sélectionné dans params_file."),
+        DeclareLaunchArgument(
+            "localization", default_value="odom_imu",
+            choices=["odom_imu", "odom_only", "amcl"],
+            description="Localisation : une seule source map -> odom."),
+        DeclareLaunchArgument(
+            "profile", default_value="balanced",
+            choices=[
+                "ultra_safe", "safe", "balanced", "fast", "ultra_fast",
+                "tight_clearance"],
+            description="Profil chargé dans params_file."),
+        DeclareLaunchArgument(
+            "params_file", default_value="",
+            description="YAML fusionné complet généré par task_solution/fosa_benchmark."),
+        DeclareLaunchArgument("initial_pose_x", default_value="0.0"),
+        DeclareLaunchArgument("initial_pose_y", default_value="0.0"),
+        DeclareLaunchArgument("initial_pose_yaw", default_value="0.0"),
         DeclareLaunchArgument(
             "task_params_file", default_value="",
             description="task_params.yaml à utiliser (vide = package officiel)."),
@@ -147,21 +198,6 @@ def generate_launch_description():
         }],
     )
 
-    # 4. Remplace AMCL : map -> odom depuis le spawn de task_params.yaml, la
-    #    distance des roues et le cap de l'IMU. `map` = repère Gazebo.
-    localizer = Node(
-        package="caytu_nav_solution",
-        executable="odom_imu_localizer",
-        name="odom_imu_localizer",
-        output="screen",
-        parameters=[{
-            "use_sim_time": use_sim_time,
-            # value_type=str : une valeur vide doit rester une chaîne vide.
-            "task_params_file": ParameterValue(
-                LaunchConfiguration("task_params_file"), value_type=str),
-        }],
-    )
-
     # 5. Nav2. Démarré tout de suite : le temps de la tâche court dès le
     #    lancement de la solution.
     navigation = IncludeLaunchDescription(
@@ -171,14 +207,21 @@ def generate_launch_description():
             "use_sim_time": LaunchConfiguration("use_sim_time"),
             "map": LaunchConfiguration("map"),
             "controller": LaunchConfiguration("controller"),
+            "localization": LaunchConfiguration("localization"),
+            "profile": LaunchConfiguration("profile"),
+            "params_file": LaunchConfiguration("params_file"),
+            "initial_pose_x": LaunchConfiguration("initial_pose_x"),
+            "initial_pose_y": LaunchConfiguration("initial_pose_y"),
+            "initial_pose_yaw": LaunchConfiguration("initial_pose_yaw"),
         }.items(),
     )
 
     return LaunchDescription(arguments + [
+        OpaqueFunction(function=_validate_experiment_arguments),
         laser_filter,
         floor_filter,
         top_cam_to_scan,
         bottom_cam_to_scan,
-        localizer,
+        OpaqueFunction(function=_launch_localizer),
         navigation,
     ])

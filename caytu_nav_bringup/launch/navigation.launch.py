@@ -26,24 +26,69 @@ def _nav2_nodes(context):
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
     map_yaml = LaunchConfiguration("map").perform(context)
     controller = LaunchConfiguration("controller").perform(context)
+    localization = LaunchConfiguration("localization").perform(context)
+    params_file = LaunchConfiguration("params_file").perform(context)
 
-    params_file = os.path.join(bringup_dir, "config", "nav2_params.yaml")
+    default_params_file = os.path.join(bringup_dir, "config", "nav2_params.yaml")
     controller_file = os.path.join(bringup_dir, "config", f"controller_{controller}.yaml")
-    if not os.path.isfile(controller_file):
-        raise RuntimeError(f"Contrôleur inconnu : {controller} ({controller_file} absent)")
+    if not params_file:
+        if controller == "mppi":
+            raise RuntimeError(
+                "MPPI exige le YAML complet params_file généré par task_solution.py.")
+        if not os.path.isfile(controller_file):
+            raise RuntimeError(
+                f"Contrôleur inconnu : {controller} ({controller_file} absent)")
+    elif not os.path.isfile(params_file):
+        raise RuntimeError(f"Fichier de paramètres introuvable : {params_file}")
+    if localization == "amcl" and not params_file:
+        raise RuntimeError("AMCL exige un YAML complet avec pose initiale validée.")
+
     # Chemin résolu dans le package installé : aucun chemin personnel en dur.
     bt_xml_file = os.path.join(
         bringup_dir, "behavior_trees", "navigate_bounded_recovery.xml")
     sim_time = {"use_sim_time": use_sim_time}
+    if params_file:
+        common_parameters = [params_file, sim_time]
+        controller_parameters = [params_file, sim_time]
+    else:
+        common_parameters = [default_params_file, sim_time]
+        controller_parameters = [default_params_file, controller_file, sim_time]
 
-    return [
+    lifecycle_nodes = list(LIFECYCLE_NODES)
+    if localization == "amcl":
+        lifecycle_nodes.insert(1, "amcl")
+
+    nodes = [
         Node(
             package="nav2_map_server",
             executable="map_server",
             name="map_server",
             output="screen",
-            parameters=[sim_time, {"yaml_filename": map_yaml}],
+            parameters=common_parameters + [{"yaml_filename": map_yaml}],
         ),
+    ]
+
+    if localization == "amcl":
+        initial_pose = {
+            "x": float(LaunchConfiguration("initial_pose_x").perform(context)),
+            "y": float(LaunchConfiguration("initial_pose_y").perform(context)),
+            "z": 0.0,
+            "yaw": float(LaunchConfiguration("initial_pose_yaw").perform(context)),
+        }
+        nodes.append(Node(
+            package="nav2_amcl",
+            executable="amcl",
+            name="amcl",
+            output="screen",
+            parameters=common_parameters + [{
+                "set_initial_pose": True,
+                "always_reset_initial_pose": True,
+                "initial_pose": initial_pose,
+                "use_sim_time": use_sim_time,
+            }],
+        ))
+
+    nodes.extend([
         Node(
             package="nav2_controller",
             executable="controller_server",
@@ -51,7 +96,7 @@ def _nav2_nodes(context):
             output="screen",
             # Le fichier du contrôleur est chargé après nav2_params.yaml : il
             # complète controller_server avec le plugin FollowPath choisi.
-            parameters=[params_file, controller_file, sim_time],
+            parameters=controller_parameters,
             remappings=[("cmd_vel", CMD_VEL_TOPIC)],
         ),
         Node(
@@ -59,14 +104,14 @@ def _nav2_nodes(context):
             executable="planner_server",
             name="planner_server",
             output="screen",
-            parameters=[params_file, sim_time],
+            parameters=common_parameters,
         ),
         Node(
             package="nav2_behaviors",
             executable="behavior_server",
             name="behavior_server",
             output="screen",
-            parameters=[params_file, sim_time],
+            parameters=common_parameters,
             remappings=[("cmd_vel", CMD_VEL_TOPIC)],
         ),
         Node(
@@ -74,7 +119,7 @@ def _nav2_nodes(context):
             executable="bt_navigator",
             name="bt_navigator",
             output="screen",
-            parameters=[params_file, sim_time, {"default_nav_to_pose_bt_xml": bt_xml_file}],
+            parameters=common_parameters + [{"default_nav_to_pose_bt_xml": bt_xml_file}],
         ),
         Node(
             package="nav2_lifecycle_manager",
@@ -83,7 +128,7 @@ def _nav2_nodes(context):
             output="screen",
             parameters=[sim_time, {
                 "autostart": True,
-                "node_names": LIFECYCLE_NODES,
+                "node_names": lifecycle_nodes,
                 # La simulation tourne bien plus lentement que le temps réel :
                 # on laisse aux nœuds le temps de répondre avant de les
                 # déclarer morts.
@@ -92,7 +137,8 @@ def _nav2_nodes(context):
                 "bond_respawn_max_duration": 20.0,
             }],
         ),
-    ]
+    ])
+    return nodes
 
 
 def generate_launch_description():
@@ -105,7 +151,16 @@ def generate_launch_description():
             "map", default_value=os.path.join(bringup_dir, "maps", "cafe_map.yaml"),
             description="Fichier YAML de la carte statique."),
         DeclareLaunchArgument(
-            "controller", default_value="rpp", choices=["rpp", "dwb"],
-            description="Contrôleur local : config/controller_<nom>.yaml."),
+            "controller", default_value="rpp", choices=["rpp", "dwb", "mppi"],
+            description="Contrôleur local sélectionné dans le YAML complet."),
+        DeclareLaunchArgument(
+            "localization", default_value="odom_imu",
+            choices=["odom_imu", "odom_only", "amcl"],
+            description="Localisation sélectionnée par solution_bringup.launch.py."),
+        DeclareLaunchArgument("profile", default_value="balanced"),
+        DeclareLaunchArgument("params_file", default_value=""),
+        DeclareLaunchArgument("initial_pose_x", default_value="0.0"),
+        DeclareLaunchArgument("initial_pose_y", default_value="0.0"),
+        DeclareLaunchArgument("initial_pose_yaw", default_value="0.0"),
         OpaqueFunction(function=_nav2_nodes),
     ])

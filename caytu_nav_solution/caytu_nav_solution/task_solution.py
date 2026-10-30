@@ -17,6 +17,7 @@ Ce nœud exécute TOUTE la solution, sans aucune intervention manuelle :
 import math
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,7 +27,7 @@ from typing import Optional
 import rclpy
 import yaml
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 from rclpy.action import ActionClient
@@ -38,6 +39,15 @@ from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 
+from caytu_nav_solution.benchmark_config import (
+    ConfigurationError,
+    build_experiment_config,
+    validate_localization_map,
+    validate_experiment_config,
+    validate_scan_map_agreement,
+    validate_selection,
+    write_experiment_config,
+)
 from caytu_nav_solution.nav_math import (
     Pose2D, load_pgm_map, quaternion_from_yaw, scan_map_agreement, yaw_from_quaternion)
 from caytu_nav_solution.task_params import TaskParams, load_task_params
@@ -67,7 +77,10 @@ class TaskSolution(Node):
         self.declare_parameter('launch_bringup', True)
         self.declare_parameter('bringup_package', 'caytu_nav_bringup')
         self.declare_parameter('bringup_launch', 'solution_bringup.launch.py')
-        self.declare_parameter('controller', 'rpp')                 # rpp | dwb
+        self.declare_parameter('controller', 'rpp')                 # rpp | dwb | mppi
+        self.declare_parameter('localization', 'odom_imu')
+        self.declare_parameter('profile', 'balanced')
+        self.declare_parameter('nav2_params_file', '')
         # Carte des murs : auto (vérifiée avec le lidar), always, never.
         # (Pas « on/off » : YAML les lirait comme des booléens.)
         self.declare_parameter('static_map', 'auto')
@@ -82,6 +95,10 @@ class TaskSolution(Node):
 
         self._task: TaskParams = load_task_params(
             self.get_parameter('task_params_file').value or None)
+        self._controller = str(self.get_parameter('controller').value).lower()
+        self._localization = str(self.get_parameter('localization').value).lower()
+        self._profile = str(self.get_parameter('profile').value).lower()
+        validate_selection(self._controller, self._localization, self._profile)
         self._global_frame = self.get_parameter('global_frame').value
         self._base_frame = self.get_parameter('base_frame').value
         self._bringup: Optional[subprocess.Popen] = None
@@ -89,6 +106,8 @@ class TaskSolution(Node):
         self._last_scan: Optional[LaserScan] = None
         self._last_feedback_log = 0.0
         self._goal_handle = None        # but Nav2 en cours, pour pouvoir l'annuler
+        self._amcl_pose = None
+        self._generated_config_dir = None
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=False)
@@ -104,6 +123,9 @@ class TaskSolution(Node):
         self._scan_sub = self.create_subscription(
             LaserScan, self.get_parameter('scan_topic').value, self._on_scan,
             qos_profile_sensor_data)
+        if self._localization == 'amcl':
+            self._amcl_pose_sub = self.create_subscription(
+                PoseWithCovarianceStamped, '/amcl_pose', self._on_amcl_pose, 10)
 
         self.get_logger().info(
             f'Départ ({self._task.spawn.x:.3f}, {self._task.spawn.y:.3f}, '
@@ -113,6 +135,9 @@ class TaskSolution(Node):
     # ------------------------------------------------------------- utilitaires
     def _on_scan(self, msg: LaserScan):
         self._last_scan = msg
+
+    def _on_amcl_pose(self, msg: PoseWithCovarianceStamped):
+        self._amcl_pose = msg
 
     def _spin(self, wall_seconds: float):
         """Traite les messages ROS pendant une durée réelle donnée."""
@@ -154,6 +179,9 @@ class TaskSolution(Node):
     def _choose_map(self) -> str:
         """Retourne le YAML de carte à donner à Nav2 (murs réels ou carte vide)."""
         mode = str(self.get_parameter('static_map').value).lower()
+        if mode not in ('auto', 'always', 'never'):
+            raise ConfigurationError(f"static_map inconnu : {mode}")
+        needs_static_map = self._localization == 'amcl'
         map_yaml = self.get_parameter('map_yaml').value
         if not map_yaml:
             from ament_index_python.packages import get_package_share_directory
@@ -162,9 +190,13 @@ class TaskSolution(Node):
                 'maps', 'cafe_map.yaml')
 
         if mode == 'never':
+            if needs_static_map:
+                raise ConfigurationError(
+                    "AMCL ne peut pas démarrer avec static_map=never : une carte "
+                    "statique connue et cohérente est obligatoire.")
             self.get_logger().info('Carte des murs désactivée (static_map=never).')
             return self._write_blank_map()
-        if mode == 'always':
+        if mode == 'always' and not needs_static_map:
             self.get_logger().info('Carte des murs imposée (static_map=always).')
             return map_yaml
 
@@ -181,14 +213,28 @@ class TaskSolution(Node):
                 grid = load_pgm_map(stream.read(), float(meta['resolution']),
                                     float(meta['origin'][0]), float(meta['origin'][1]))
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
+            if needs_static_map:
+                raise ConfigurationError(
+                    f"AMCL indisponible : carte statique illisible ({error}).") from error
             self.get_logger().warn(f'Carte illisible ({error}) : navigation sans carte.')
             return self._write_blank_map()
+
+        if needs_static_map:
+            validate_localization_map(
+                map_yaml,
+                self._task.spawn,
+                Pose2D(self._task.goal_x, self._task.goal_y),
+            )
 
         deadline = time.monotonic() + float(self.get_parameter('map_check_timeout_sec').value)
         while rclpy.ok() and self._last_scan is None and time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.05)
         scan = self._last_scan
         if scan is None:
+            if needs_static_map:
+                raise ConfigurationError(
+                    "AMCL indisponible : aucun scan lidar n'est arrivé pour valider "
+                    "la cohérence de la carte.")
             self.get_logger().warn(
                 'Pas de scan reçu pour vérifier la carte : carte du café conservée.')
             return map_yaml
@@ -197,6 +243,8 @@ class TaskSolution(Node):
         agreement, used = scan_map_agreement(
             grid, lidar, scan.angle_min, scan.angle_increment, scan.ranges)
         threshold = float(self.get_parameter('map_check_min_agreement').value)
+        if needs_static_map:
+            validate_scan_map_agreement(agreement, used, threshold)
         if used >= 30 and agreement < threshold:
             self.get_logger().warn(
                 f'Seulement {agreement * 100:.0f} % des {used} retours lidar tombent sur un '
@@ -235,14 +283,41 @@ class TaskSolution(Node):
             self.get_logger().info('launch_bringup=false : le bringup doit déjà tourner.')
             return
         use_sim_time = self.get_parameter('use_sim_time').value
+        params_file = str(self.get_parameter('nav2_params_file').value)
+        if params_file:
+            if not os.path.isfile(params_file):
+                raise ConfigurationError(f"nav2_params_file absent : {params_file}")
+            with open(params_file, encoding='utf-8') as stream:
+                config = yaml.safe_load(stream)
+            if not isinstance(config, dict):
+                raise ConfigurationError("nav2_params_file doit contenir un mapping YAML complet.")
+            validate_experiment_config(
+                config, self._controller, self._localization, self._profile)
+        else:
+            self._generated_config_dir = tempfile.mkdtemp(prefix='fosa_nav_config_')
+            params_file = os.path.join(self._generated_config_dir, 'params.yaml')
+            config = build_experiment_config(
+                self._controller,
+                self._localization,
+                self._profile,
+                self._task.spawn,
+                use_sim_time=use_sim_time,
+            )
+            write_experiment_config(config, params_file)
         command = [
             'ros2', 'launch',
             self.get_parameter('bringup_package').value,
             self.get_parameter('bringup_launch').value,
             f'use_sim_time:={"true" if use_sim_time else "false"}',
             f'map:={map_yaml}',
-            f'controller:={self.get_parameter("controller").value}',
+            f'controller:={self._controller}',
+            f'localization:={self._localization}',
+            f'profile:={self._profile}',
+            f'params_file:={params_file}',
             f'task_params_file:={self._task.path}',
+            f'initial_pose_x:={self._task.spawn.x}',
+            f'initial_pose_y:={self._task.spawn.y}',
+            f'initial_pose_yaw:={self._task.spawn.yaw}',
         ]
         self.get_logger().info('Démarrage de la solution : ' + ' '.join(command))
         # Groupe de processus dédié : permet d'arrêter tout le bringup d'un coup.
@@ -286,6 +361,9 @@ class TaskSolution(Node):
             self._goal_handle = None
         self.stop_robot()
         self.stop_bringup()
+        if self._generated_config_dir is not None:
+            shutil.rmtree(self._generated_config_dir, ignore_errors=True)
+            self._generated_config_dir = None
         # Dernière commande nulle une fois que plus rien ne peut en publier.
         self.stop_robot()
 
@@ -308,7 +386,8 @@ class TaskSolution(Node):
         while rclpy.ok():
             self._spin(0.2)
             server = self._nav_client.server_is_ready()
-            localized = self._robot_pose() is not None
+            localized = (self._robot_pose() is not None
+                         and (self._localization != 'amcl' or self._amcl_pose is not None))
             if server and localized:
                 self.get_logger().info(
                     f'Nav2 prêt et robot localisé après {time.monotonic() - start:.1f} s réelles.')

@@ -28,21 +28,22 @@ def costmap(name):
 
 
 def test_all_yaml_files_parse():
-    for path in list(CONFIG_DIR.glob("*.yaml")) + list(MAPS_DIR.glob("*.yaml")):
+    for path in list(CONFIG_DIR.rglob("*.yaml")) + list(MAPS_DIR.rglob("*.yaml")):
         with path.open(encoding="utf-8") as stream:
             assert yaml.safe_load(stream) is not None, path.name
 
 
-def test_no_amcl_slam_or_watchdog_left():
-    # La localisation est assurée par odom_imu_localizer : plus de carte SLAM,
-    # plus d'AMCL, plus de seuil de covariance (cause de « localisation perdue »).
-    assert not (CONFIG_DIR / "amcl_params.yaml").exists()
+def test_amcl_is_optional_and_never_runs_with_the_custom_localizer():
+    # AMCL remplace le localisateur Fosa; les deux ne publient pas map -> odom.
     assert not (CONFIG_DIR / "slam_toolbox_params.yaml").exists()
-    for launch_file in LAUNCH_DIR.glob("*.py"):
-        text = launch_file.read_text(encoding="utf-8")
-        assert "nav2_amcl" not in text
-        assert "localization_watchdog" not in text
-        assert "/home/" not in text
+    solution = (LAUNCH_DIR / "solution_bringup.launch.py").read_text(encoding="utf-8")
+    navigation = (LAUNCH_DIR / "navigation.launch.py").read_text(encoding="utf-8")
+    assert 'if localization == "amcl":' in solution
+    assert 'return []' in solution
+    assert 'package="nav2_amcl"' in navigation
+    assert 'lifecycle_nodes.insert(1, "amcl")' in navigation
+    assert "localization_watchdog" not in solution + navigation
+    assert "/home/" not in solution + navigation
 
 
 def test_every_costmap_plugin_and_source_is_defined():
@@ -142,6 +143,7 @@ def test_navigation_launch_starts_everything_in_one_lifecycle_manager():
     assert "/robot_base_controller/cmd_vel_unstamped" in text
     assert "navigate_bounded_recovery.xml" in text
     assert "get_package_share_directory" in text
+    assert 'choices=["rpp", "dwb", "mppi"]' in text
 
 
 def test_controller_files_exist_and_are_consistent():
@@ -165,6 +167,14 @@ def test_controller_files_exist_and_are_consistent():
     for critic in dwb["critics"]:
         assert critic in ("RotateToGoal", "Oscillation", "ObstacleFootprint", "GoalAlign",
                           "PathAlign", "PathDist", "GoalDist", "PreferForward")
+
+    mppi = load_yaml("controllers/mppi.yaml")["controller_server"]["ros__parameters"][
+        "FollowPath"]
+    assert mppi["plugin"] == "nav2_mppi_controller::MPPIController"
+    assert mppi["motion_model"] == "DiffDrive"
+    assert mppi["visualize"] is False
+    assert mppi["batch_size"] <= 1000
+    assert mppi["vx_max"] <= 1.5 and mppi["wz_max"] <= 1.0
 
 
 def test_planner_is_smac_2d_without_hybrid_parameters():

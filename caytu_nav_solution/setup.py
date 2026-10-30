@@ -26,6 +26,8 @@ setup(
             'task_solution.py = caytu_nav_solution.task_solution:main',
             # Alias conservé pour les habitudes de l'équipe.
             'task_solution = caytu_nav_solution.task_solution:main',
+            'fosa_benchmark = caytu_nav_solution.benchmark_cli:main',
+            'fosa_compare = caytu_nav_solution.compare_cli:main',
             # Nœuds lancés par caytu_nav_bringup/launch/solution_bringup.launch.py
             'odom_imu_localizer = caytu_nav_solution.odom_imu_localizer:main',
             'lidar_floor_filter = caytu_nav_solution.lidar_floor_filter:main',

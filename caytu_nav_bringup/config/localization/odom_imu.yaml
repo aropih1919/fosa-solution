@@ -1,0 +1,8 @@
+# Les valeurs de nœud restent celles du localisateur personnalisé existant.
+odom_imu_localizer:
+  ros__parameters:
+    map_frame: map
+    odom_frame: odom
+    odom_topic: /odom
+    imu_topic: /imu
+    use_imu_yaw: true
