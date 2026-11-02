@@ -2,8 +2,6 @@
 
 import json
 import os
-import urllib.error
-import urllib.request
 
 from caytu_assistant.models import ErreurIntention, Intention
 
@@ -12,7 +10,7 @@ SCHEMA_INTENT = {
     'type': 'object',
     'properties': {
         'intentions': {
-            'type': 'array', 'items': {'type': 'string'}, 'minItems': 1,
+            'type': 'array', 'items': {'type': 'string'},
         },
         'lieux': {'type': 'array', 'items': {'type': 'string'}},
         'confirmation': {'type': 'string', 'enum': ['oui', 'non', '']},
@@ -42,6 +40,7 @@ class ClientLLM:
         self._secrets = configuration.secrets
         self._prompts = configuration.prompts
         self._lieux = configuration.semantic_map.locations
+        self._chaines = {}
 
     def _construire_prompt_systeme(self):
         """Assemble les instructions, règles de sécurité et liste des lieux autorisés."""
@@ -54,64 +53,77 @@ class ClientLLM:
                 + '\nLieux autorisés (noms et alias seulement): '
                 + json.dumps(lieux, ensure_ascii=False))
 
+    def _creer_chaine(self, fournisseur):
+        """Construit une chaîne LangChain avec une sortie d'intention structurée."""
+        if fournisseur in self._chaines:
+            return self._chaines[fournisseur]
+
+        from langchain_core.messages import SystemMessage
+        from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+        if fournisseur == 'local':
+            from langchain_ollama import ChatOllama
+
+            modele = ChatOllama(
+                model=self._configuration_llm.local_model,
+                base_url=os.environ.get(
+                    'FOSA_OLLAMA_URL', self._configuration_llm.local_base),
+                temperature=self._configuration_llm.temperature,
+                client_kwargs={'timeout': self._configuration_llm.timeout_sec},
+            )
+        else:
+            from langchain_openai import ChatOpenAI
+
+            token = (self._secrets.fosa_llm_api_key
+                     or self._secrets.openai_api_key)
+            if not token:
+                raise LLMIndisponible(
+                    'FOSA_LLM_API_KEY ou OPENAI_API_KEY absent.')
+            modele = ChatOpenAI(
+                model=self._configuration_llm.api_model,
+                base_url=self._configuration_llm.api_base,
+                api_key=token,
+                temperature=self._configuration_llm.temperature,
+                timeout=self._configuration_llm.timeout_sec,
+                max_retries=0,
+                use_responses_api=False,
+            )
+
+        invite = ChatPromptTemplate.from_messages([
+            SystemMessage(content=self._construire_prompt_systeme()),
+            MessagesPlaceholder(variable_name='historique'),
+            ('human', '{texte}'),
+        ])
+        chaine = invite | modele.with_structured_output(
+            SCHEMA_INTENT, method='json_schema')
+        self._chaines[fournisseur] = chaine
+        return chaine
+
+    def _interpreter_avec(self, fournisseur, texte, historique):
+        """Exécute la chaîne et valide à nouveau les champs reçus."""
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        messages = []
+        for tour in historique:
+            if tour.get('role') == 'user':
+                messages.append(HumanMessage(content=tour.get('content', '')))
+            elif tour.get('role') == 'assistant':
+                messages.append(AIMessage(content=tour.get('content', '')))
+        resultat = self._creer_chaine(fournisseur).invoke({
+            'historique': messages,
+            'texte': texte,
+        })
+        if not isinstance(resultat, dict):
+            raise ErreurIntention('LangChain n’a pas retourné un objet JSON.')
+        return Intention.depuis_json(json.dumps(resultat, ensure_ascii=False))
+
     def _appeler_local(self, texte, historique):
-        """Interroge le serveur Ollama local via son API HTTP /api/chat."""
-        adresse_base = os.environ.get(
-            'FOSA_OLLAMA_URL', self._configuration_llm.local_base)
-        url = adresse_base.rstrip('/') + '/api/chat'
-        messages = [{'role': 'system', 'content': self._construire_prompt_systeme()}]
-        messages.extend(historique)
-        messages.append({'role': 'user', 'content': texte})
-        corps_json = {
-            'model': self._configuration_llm.local_model,
-            'messages': messages,
-            'format': SCHEMA_INTENT,
-            'stream': False,
-            'options': {'temperature': self._configuration_llm.temperature},
-        }
-        reponse = self._envoyer_requete_json(url, corps_json, None)
-        contenu = reponse.get('message', {}).get('content', '')
-        return Intention.depuis_json(contenu)
+        """Interroge le modèle Ollama local avec LangChain."""
+        return self._interpreter_avec('local', texte, historique)
 
     def _appeler_api(self, texte, historique):
-        """Interroge une API compatible OpenAI (ChatGPT, Groq, etc.)."""
-        token = (self._secrets.fosa_llm_api_key
-                 or self._secrets.openai_api_key)
-        if not token:
-            raise LLMIndisponible('FOSA_LLM_API_KEY ou OPENAI_API_KEY absent.')
-        adresse_base = self._configuration_llm.api_base
-        url = adresse_base.rstrip('/') + '/chat/completions'
-        messages = [{'role': 'system', 'content': self._construire_prompt_systeme()}]
-        messages.extend(historique)
-        messages.append({'role': 'user', 'content': texte})
-        corps_json = {
-            'model': self._configuration_llm.api_model,
-            'messages': messages,
-            'temperature': self._configuration_llm.temperature,
-            'response_format': {
-                'type': 'json_schema',
-                'json_schema': {'name': 'intent', 'strict': True,
-                                'schema': SCHEMA_INTENT},
-            },
-        }
-        reponse = self._envoyer_requete_json(url, corps_json, token)
-        contenu = reponse['choices'][0]['message']['content']
-        return Intention.depuis_json(contenu)
-
-    def _envoyer_requete_json(self, url, corps_json, token):
-        """Effectue une requête POST HTTP avec sérialisation/désérialisation JSON."""
-        entetes = {'Content-Type': 'application/json'}
-        if token:
-            entetes['Authorization'] = f'Bearer {token}'
-        requete = urllib.request.Request(
-            url, data=json.dumps(corps_json).encode('utf-8'), headers=entetes)
-        try:
-            with urllib.request.urlopen(
-                    requete, timeout=self._configuration_llm.timeout_sec) as reponse:
-                return json.loads(reponse.read().decode('utf-8'))
-        except (OSError, urllib.error.URLError, TimeoutError,
-                json.JSONDecodeError, KeyError) as erreur:
-            raise LLMIndisponible(str(erreur)) from erreur
+        """Interroge une API compatible OpenAI avec LangChain."""
+        return self._interpreter_avec('api', texte, historique)
 
     def interpreter(self, texte, historique=()):
         """Interprète la phrase de l'utilisateur et retourne une Intention structurée.
@@ -128,7 +140,6 @@ class ClientLLM:
             for _ in range(self._configuration_llm.max_retries + 1):
                 try:
                     return fournisseur(texte, historique)
-                except (LLMIndisponible, ErreurIntention) as erreur:
+                except Exception as erreur:
                     erreurs.append(str(erreur))
-                    break
         raise LLMIndisponible('; '.join(erreurs) or 'Fournisseur indisponible.')

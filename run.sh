@@ -70,6 +70,12 @@ source "/opt/ros/$ROS_DISTRO/setup.bash"
 source "$ESPACE_TRAVAIL/install/setup.bash"
 if [[ -f "$ESPACE_TRAVAIL/.venv/bin/activate" ]]; then
     source "$ESPACE_TRAVAIL/.venv/bin/activate"
+    DOSSIER_PAQUETS_PYTHON="$("$ESPACE_TRAVAIL/.venv/bin/python" -c \
+        'import sys; print(f"python{sys.version_info.major}.{sys.version_info.minor}")')"
+    DOSSIER_PAQUETS_PYTHON="$ESPACE_TRAVAIL/.venv/lib/$DOSSIER_PAQUETS_PYTHON/site-packages"
+    if [[ -d "$DOSSIER_PAQUETS_PYTHON" ]]; then
+        export PYTHONPATH="$DOSSIER_PAQUETS_PYTHON${PYTHONPATH:+:$PYTHONPATH}"
+    fi
 fi
 set -u
 

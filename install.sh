@@ -14,7 +14,8 @@ afficher_aide() {
 Usage : ./install.sh [--models | --no-models] [--help]
 
 Installe ROS 2, les dépendances système et Python, le simulateur PARC,
-construit les paquets du workspace et propose le téléchargement des modèles IA.
+construit les paquets du workspace et propose le téléchargement des modèles IA
+(YOLO, LLM, Whisper et voix Piper).
 
 Options :
   --models      télécharger dès maintenant les modèles IA locaux configurés
@@ -36,7 +37,7 @@ while (($#)); do
 done
 
 if [[ -z "$TELECHARGER_MODELES" && -t 0 ]]; then
-    read -r -p "Télécharger maintenant les modèles IA locaux (LLM, Whisper et voix Piper) ? [o/N] " reponse
+    read -r -p "Télécharger maintenant les modèles YOLO, LLM, Whisper et Piper ? [o/N] " reponse
     case "${reponse,,}" in o|oui|y|yes) TELECHARGER_MODELES="oui" ;; *) TELECHARGER_MODELES="non" ;; esac
 else
     TELECHARGER_MODELES="${TELECHARGER_MODELES:-non}"
@@ -109,7 +110,8 @@ echo "[5/7] Installation des bibliothèques audio et IA dans l'environnement Pyt
 python3 -m venv --system-site-packages "$ESPACE_TRAVAIL/.venv"
 # ROS fournit NumPy/OpenCV via apt; l'environnement partage ces paquets système.
 "$ESPACE_TRAVAIL/.venv/bin/python" -m pip install --upgrade pip
-"$ESPACE_TRAVAIL/.venv/bin/python" -m pip install faster-whisper piper-tts sounddevice
+"$ESPACE_TRAVAIL/.venv/bin/python" -m pip install \
+    faster-whisper piper-tts sounddevice langchain langchain-ollama langchain-openai
 
 if ! command -v ollama >/dev/null 2>&1; then
     echo "[6/7] Installation d'Ollama (le modèle reste optionnel)..."
@@ -131,6 +133,16 @@ if [[ "$TELECHARGER_MODELES" == "oui" ]]; then
     DOSSIER_CONFIG_INSTALLEE="$(ros2 pkg prefix caytu_config)/share/caytu_config/config"
     DOSSIER_MODELES="$DOSSIER_CONFIG_INSTALLEE/models"
     mkdir -p "$DOSSIER_MODELES"
+
+    (
+        DOSSIER_EXPORT_YOLO="$(mktemp -d /tmp/fosa-yolo-export.XXXXXX)"
+        trap 'rm -rf "$DOSSIER_EXPORT_YOLO"' EXIT
+        python3 -m venv "$DOSSIER_EXPORT_YOLO"
+        "$DOSSIER_EXPORT_YOLO/bin/python" -m pip install --upgrade pip ultralytics
+        cd "$DOSSIER_MODELES"
+        "$DOSSIER_EXPORT_YOLO/bin/yolo" export \
+            model=yolo11n.pt format=onnx imgsz=640 opset=12
+    )
 
     readarray -t MODELES_IA < <("$ESPACE_TRAVAIL/.venv/bin/python" - "$DOSSIER_SCRIPT/caytu_config/config/fosa.yaml" <<'PY'
 import sys

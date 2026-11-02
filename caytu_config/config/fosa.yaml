@@ -76,7 +76,7 @@ perception:
     calibration_file: ~/.ros/fosa_tag_calibration.yaml
 
   yolo:
-    enabled: false                # true seulement si le modèle est présent
+    enabled: true                 # install.sh --models télécharge et exporte le modèle ONNX
     model_path: models/yolo11n.onnx
     confidence: 0.45
     input_size: 640

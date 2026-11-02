@@ -17,7 +17,7 @@ Le projet est conçu de façon modulaire et lisible :
 | [`caytu_interfaces`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_interfaces) | **Messages et services ROS 2** : contrats d'échange typés (`SemanticLocation`, `DetectedEntity`, `TagDetection`, `DialogueState`, etc.). |
 | [`caytu_semantic_map`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_semantic_map) | **Carte sémantique du site** : résolution des noms de stands, alias et tags AprilTag avec calcul de la pose d'approche devant chaque point d'intérêt. |
 | [`caytu_perception`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_perception) | **Vision et détection d'obstacles** : détection de balises AprilTag, classification 3D par nuages de points (personnes vs mobilier) et suivi de visiteurs. |
-| [`caytu_assistant`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_assistant) | **Intelligence et interaction vocale** : reconnaissance vocale (Whisper local/API), compréhension contrainte (Ollama local ou API compatible OpenAI), dispatcher d'actions déterministe et synthèse vocale (Piper/API). |
+| [`caytu_assistant`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_assistant) | **Intelligence et interaction vocale** : reconnaissance vocale (Whisper local/API), compréhension contrainte avec LangChain (Ollama local ou API compatible OpenAI), dispatcher d'actions déterministe et synthèse vocale (Piper/API). |
 | [`caytu_nav_solution`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_nav_solution) | **Solution de navigation** : point d'entrée officiel Phase 1 (`task_solution.py`) et client d'action `Nav2Navigator` réutilisable. |
 | [`caytu_nav_bringup`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_nav_bringup) | **Bringup matériel et Nav2** : filtrage des capteurs (masquage châssis LiDAR, caméras), profils de contrôleurs (RPP, DWB) et localisation odom+IMU. |
 
@@ -35,8 +35,8 @@ cd ~/ros2_ws/src/fosa-solution
 ```
 L'installateur prépare Ubuntu 24.04, ROS 2 Jazzy, le dépôt de simulation PARC,
 les dépendances Python et tous les paquets du workspace. Il demande si les
-modèles IA locaux doivent être téléchargés immédiatement. Pour les récupérer
-plus tard : `./install.sh --models`.
+modèles IA locaux (YOLO, LLM, Whisper et voix Piper) doivent être téléchargés
+immédiatement. Pour les récupérer plus tard : `./install.sh --models`.
 
 `run.sh` source automatiquement ROS, le workspace compilé et l'environnement Python.
 

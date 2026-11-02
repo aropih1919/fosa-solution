@@ -14,7 +14,12 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
     ],
-    install_requires=['setuptools'],
+    install_requires=[
+        'setuptools',
+        'langchain',
+        'langchain-ollama',
+        'langchain-openai',
+    ],
     zip_safe=True,
     maintainer='Équipe Fosa',
     maintainer_email='johny@fosa.mg',

@@ -22,7 +22,7 @@ Le projet est découpé en 7 paquets modulaires et maintenables :
 | `caytu_interfaces` | **Contrats d'échange** : définitions des messages et services ROS 2 personnalisés (`SemanticLocation`, `DetectedEntity`, `TagDetection`, `DialogueState`, etc.). | `geometry_msgs`, `std_msgs` |
 | `caytu_semantic_map` | **Carte des lieux** : résolution des noms de stands, alias et balises AprilTag, calcul de la pose d'approche devant chaque point d'intérêt. | `caytu_config`, `caytu_interfaces` |
 | `caytu_perception` | **Vision & Obstacles** : détection des balises AprilTag (OpenCV), classification 3D des obstacles (personnes vs meubles) via nuages de points caméras, et suivi de visiteurs. | `caytu_config`, OpenCV, TF2 |
-| `caytu_assistant` | **Intelligence & Voix** : reconnaissance vocale (Whisper), compréhension contrainte (Ollama local ou API compatible OpenAI), dispatcher d'actions déterministe et synthèse vocale (Piper/API). | `caytu_config`, `caytu_interfaces`, Nav2 |
+| `caytu_assistant` | **Intelligence & Voix** : reconnaissance vocale (Whisper), compréhension contrainte avec LangChain (Ollama local ou API compatible OpenAI), dispatcher d'actions déterministe et synthèse vocale (Piper/API). | `caytu_config`, `caytu_interfaces`, Nav2 |
 | `caytu_nav_solution` | **Exécution navigation** : point d'entrée officiel Phase 1 (`task_solution.py`) et briques réutilisables (`Nav2Navigator`, `BringupManager`, `TaskTimer`). | Nav2, TF2 |
 | `caytu_nav_bringup` | **Matériel & Nav2** : filtres des capteurs (châssis LiDAR, caméras), profils de navigation et fichiers de launch. | Nav2, laser_filters |
 

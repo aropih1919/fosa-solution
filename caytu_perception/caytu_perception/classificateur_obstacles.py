@@ -1,4 +1,4 @@
-"""Classification géométrique de nuages de profondeur avec fusion YOLO facultative."""
+"""Classification géométrique de nuages de profondeur, complétée par YOLO."""
 
 import math
 import os
