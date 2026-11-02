@@ -24,51 +24,60 @@ class NoeudSortieVocale(Node):
             String, self.get_parameter('response_topic').value,
             self._speak, 10)
 
-    def _speak(self, message):
-        text = message.data.strip()
-        if not text:
+    def _parler(self, message):
+        """Reçoit une réponse textuelle sur le topic ROS et déclenche la synthèse vocale."""
+        texte = message.data.strip()
+        if not texte:
             return
         tts = self._configuration.dialogue.tts
-        providers = {'local': ['local'], 'api': ['api'], 'auto': ['local', 'api']}
+        fournisseurs = {
+            'local': [self._parler_local],
+            'api': [self._parler_api],
+            'auto': [self._parler_local, self._parler_api],
+        }
         erreurs = []
-        for provider in providers[tts.provider]:
+        for fournisseur in fournisseurs.get(tts.provider, [self._parler_local]):
             try:
-                if provider == 'local':
-                    self._speak_local(text)
-                else:
-                    self._speak_api(text)
+                fournisseur(texte)
                 return
-            except Exception as error:
-                erreurs.append(f'{provider}: {error}')
+            except Exception as erreur:
+                erreurs.append(f'{tts.provider}: {erreur}')
+        # Si la voix échoue, on ne bloque pas le robot : on journalise un avertissement
         self.get_logger().warning(
-            f'TTS indisponible ({"; ".join(erreurs)}). Texte : {text}')
+            f'TTS indisponible ({"; ".join(erreurs)}). Texte : {texte}')
 
-    def _speak_local(self, text):
-        voice = self._configuration.dialogue.tts.local_voice
-        model = os.path.expanduser(voice)
-        if not os.path.isabs(model):
-            model = str(config_directory() / model)
+    def _parler_local(self, texte):
+        """Génère un fichier WAV avec Piper localement puis le joue avec le lecteur configuré (aplay)."""
+        voix = self._configuration.dialogue.tts.local_voice
+        modele = os.path.expanduser(voix)
+        if not os.path.isabs(modele):
+            modele = str(config_directory() / modele)
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as output:
-            wav_path = output.name
+            chemin_wav = output.name
         try:
             subprocess.run(
                 [self._configuration.audio.piper_executable,
-                 '--model', model, '--output_file', wav_path],
-                input=text.encode('utf-8'), check=True,
+                 '--model', modele, '--output_file', chemin_wav],
+                input=texte.encode('utf-8'), check=True,
                 timeout=self._configuration.dialogue.tts.timeout_sec)
             device = self._configuration.audio.output_device
-            command = [self._configuration.audio.audio_player]
+            commande = [self._configuration.audio.audio_player]
             if device != 'default':
-                command.extend(['-D', device])
-            command.append(wav_path)
+                commande.extend(['-D', device])
+            commande.append(chemin_wav)
             subprocess.run(
-                command, check=True,
+                commande, check=True,
                 timeout=self._configuration.dialogue.tts.timeout_sec)
         finally:
-            if os.path.exists(wav_path):
-                os.unlink(wav_path)
+            if os.path.exists(chemin_wav):
+                os.unlink(chemin_wav)
 
-    def _speak_api(self, text):
+    # Alias de compatibilité
+    _speak = _parler
+    _speak_local = _parler_local
+
+    def _parler_api(self, texte):
+        """Envoie le texte à un service TTS distant (OpenAI/ElevenLabs) et joue l'audio reçu."""
         configuration = self._configuration
         tts = configuration.dialogue.tts
         token = (configuration.secrets.fosa_tts_api_key
@@ -82,7 +91,7 @@ class NoeudSortieVocale(Node):
             data=json.dumps({
                 'model': tts.api_model,
                 'voice': tts.api_voice,
-                'input': text,
+                'input': texte,
                 'response_format': 'wav',
             }).encode('utf-8'),
             headers={
@@ -91,19 +100,23 @@ class NoeudSortieVocale(Node):
             })
         with urllib.request.urlopen(
                 request, timeout=tts.timeout_sec) as response:
-            audio_data = response.read()
+            donnees_audio = response.read()
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as output:
-            output.write(audio_data)
-            wav_path = output.name
+            output.write(donnees_audio)
+            chemin_wav = output.name
         try:
             device = configuration.audio.output_device
-            command = [configuration.audio.audio_player]
+            commande = [configuration.audio.audio_player]
             if device != 'default':
-                command.extend(['-D', device])
-            command.append(wav_path)
-            subprocess.run(command, check=True, timeout=tts.timeout_sec)
+                commande.extend(['-D', device])
+            commande.append(chemin_wav)
+            subprocess.run(commande, check=True, timeout=tts.timeout_sec)
         finally:
-            os.unlink(wav_path)
+            if os.path.exists(chemin_wav):
+                os.unlink(chemin_wav)
+
+    # Alias de compatibilité
+    _speak_api = _parler_api
 
 
 def main(args=None):

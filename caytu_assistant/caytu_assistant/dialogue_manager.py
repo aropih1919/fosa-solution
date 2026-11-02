@@ -98,19 +98,23 @@ class GestionnaireDialogue(Node):
         self.get_logger().info(
             f"Dialogue prêt (mode {self.get_parameter('input_mode').value}).")
 
-    def _receive_amcl_pose(self, message):
+    def _recevoir_pose_amcl(self, message):
+        """Mémorise la dernière estimation de pose fournie par AMCL."""
         self._amcl_pose = message
 
-    def _receive_locations(self, message):
+    def _recevoir_lieux(self, message):
+        """Met à jour le cache local des lieux sémantiques (noms et synonymes)."""
         for location in message.locations:
             self._locations[normaliser(location.name)] = location
             for alias in location.aliases:
                 self._locations[normaliser(alias)] = location
 
-    def _resolve_location_message(self, name):
-        return self._locations.get(normaliser(name))
+    def _resoudre_message_lieu(self, nom):
+        """Retrouve le message SemanticLocation correspondant à un nom ou alias."""
+        return self._locations.get(normaliser(nom))
 
-    def _robot_pose(self):
+    def _pose_robot(self):
+        """Interroge TF2 pour obtenir la position (x, y) et l'orientation (lacet) actuelles du robot."""
         try:
             transform = self._tf_buffer.lookup_transform(
                 self._configuration.system.global_frame,
@@ -125,80 +129,98 @@ class GestionnaireDialogue(Node):
             lacet_depuis_quaternion(
                 rotation.x, rotation.y, rotation.z, rotation.w))
 
-    def _navigate(self, target_pose):
+    def _naviguer(self, target_pose):
+        """Ordonne à Nav2 de déplacer le robot vers la pose cible avec gestion des échecs."""
         self._timer.start()
-        ready = self._navigator.attendre_pret(
+        pret = self._navigator.attendre_pret(
             lambda: self._amcl_pose is not None,
             self._configuration.navigation.localization,
             self._configuration.navigation.nav2_startup_timeout_sec)
-        if not ready:
+        if not pret:
             return False, 'Nav2 indisponible ou robot non localisé.'
-        spawn = self._robot_pose()
-        if spawn is None:
+        point_depart = self._pose_robot()
+        if point_depart is None:
             return False, 'Pose du robot indisponible.'
         while rclpy.ok() and not self._timer.expired():
-            result = self._navigator.naviguer_une_fois(
+            resultat = self._navigator.naviguer_une_fois(
                 target_pose.pose.position.x,
                 target_pose.pose.position.y,
                 target_pose.header.frame_id
                 or self._configuration.semantic_map.frame,
-                spawn)
-            if result == 'succes':
+                point_depart)
+            if resultat == 'succes':
                 return True, ''
-            if result in {'temps_ecoule', 'arret'}:
-                return False, result
-            if result == 'refuse':
+            if resultat in {'temps_ecoule', 'arret'}:
+                return False, resultat
+            if resultat == 'refuse':
                 time.sleep(self._configuration.navigation.retry_pause_sec)
             else:
                 self._navigator.vider_costmaps()
                 time.sleep(self._configuration.navigation.retry_pause_sec)
         return False, 'limite de temps atteinte'
 
-    def _cancel(self):
+    def _annuler(self):
+        """Annule immédiatement tout déplacement en cours dans Nav2."""
         self._navigator.annuler_but()
 
-    def _publish_state(self, state, detail=''):
+    def _publier_etat(self, etat, detail=''):
+        """Notifie l'état actuel de la machine de dialogue sur le topic `/assistant/state`."""
         message = DialogueState()
         message.header.stamp = self.get_clock().now().to_msg()
-        message.state = state
+        message.state = etat
         message.detail = detail
         self._state_publisher.publish(message)
 
-    def _receive_transcript(self, message):
-        text = message.data.strip()
-        if not text:
+    def _recevoir_transcript(self, message):
+        """Point d'entrée du dialogue : traite une phrase reçue (parole ou texte)."""
+        texte = message.data.strip()
+        if not texte:
             return
-        self._publish_state('THINKING', text)
+        self._publier_etat('THINKING', texte)
         self._dialogue_state = 'THINKING'
-        result = self._dispatcher.traiter(text)
-        self._response_publisher.publish(String(data=result.response))
-        self._dialogue_state = result.state
-        self._publish_state(result.state, result.detail)
-        self.get_logger().info(f'Visiteur : {text}')
-        self.get_logger().info(f'Assistant : {result.response}')
+        resultat = self._dispatcher.traiter(texte)
+        self._response_publisher.publish(String(data=resultat.response))
+        self._dialogue_state = resultat.state
+        self._publier_etat(resultat.state, resultat.detail)
+        self.get_logger().info(f'Visiteur : {texte}')
+        self.get_logger().info(f'Assistant : {resultat.response}')
 
-    def _receive_person_event(self, message):
+    def _recevoir_evenement_personne(self, message):
+        """Salue automatiquement un visiteur qui s'arrête devant le robot."""
         if (not self._configuration.mission.greeting_enabled
                 or self._dialogue_state not in {'IDLE', 'LISTENING'}):
             return
         try:
-            event = json.loads(message.data)
+            evenement = json.loads(message.data)
         except json.JSONDecodeError:
             self.get_logger().warning('Événement personne invalide, ignoré.')
             return
-        response = self._configuration.dialogue.greeting_reply
-        self._response_publisher.publish(String(data=response))
+        reponse = self._configuration.dialogue.greeting_reply
+        self._response_publisher.publish(String(data=reponse))
         self._dialogue_state = 'LISTENING'
-        self._publish_state('LISTENING', str(event.get('track_id', '')))
+        self._publier_etat('LISTENING', str(evenement.get('track_id', '')))
 
-    def _read_stdin(self):
+    def _lire_entree_standard(self):
+        """Boucle de saisie texte dans le terminal pour tester sans microphone."""
         self.get_logger().info('Saisissez un message, ou Ctrl-D pour terminer.')
         while rclpy.ok():
             try:
-                text = input('Vous> ')
+                texte = input('Vous> ')
             except EOFError:
                 return
-            self._receive_transcript(String(data=text))
+            self._recevoir_transcript(String(data=texte))
+
+    # Alias de compatibilité
+    _receive_amcl_pose = _recevoir_pose_amcl
+    _receive_locations = _recevoir_lieux
+    _resolve_location_message = _resoudre_message_lieu
+    _robot_pose = _pose_robot
+    _navigate = _naviguer
+    _cancel = _annuler
+    _publish_state = _publier_etat
+    _receive_transcript = _recevoir_transcript
+    _receive_person_event = _recevoir_evenement_personne
+    _read_stdin = _lire_entree_standard
 
 
 def main(args=None):

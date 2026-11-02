@@ -38,35 +38,46 @@ class NoeudEntreeVocale(Node):
         else:
             raise ValueError(f'Mode STT inconnu : {mode}')
 
-    def _publish(self, text):
-        if text:
-            self._publisher.publish(String(data=text.strip()))
+    def _publier_texte(self, texte):
+        """Publie le texte transcrit sur le topic ROS `/assistant/transcript`."""
+        if texte:
+            self._publisher.publish(String(data=texte.strip()))
 
-    def _transcribe(self, audio_path):
+    def _transcrire_audio(self, chemin_audio):
+        """Transcrit un enregistrement WAV en texte via Whisper local ou l'API."""
         stt = self._configuration.dialogue.stt
-        providers = {'local': ['local'], 'api': ['api'], 'auto': ['local', 'api']}
+        fournisseurs = {
+            'local': ['local'],
+            'api': ['api'],
+            'auto': ['local', 'api'],
+        }
         erreurs = []
-        for provider in providers[stt.provider]:
+        for fournisseur in fournisseurs.get(stt.provider, ['local']):
             try:
-                if provider == 'local':
+                if fournisseur == 'local':
                     from faster_whisper import WhisperModel
-                    model = WhisperModel(
+                    modele = WhisperModel(
                         stt.local_model, device=stt.local_device,
                         compute_type=stt.local_compute_type)
-                    segments, _ = model.transcribe(audio_path)
+                    segments, _ = modele.transcribe(chemin_audio)
                     return ' '.join(segment.text.strip() for segment in segments).strip()
-                return self._transcribe_api(audio_path)
-            except Exception as error:
-                erreurs.append(f'{provider}: {error}')
+                return self._transcrire_api(chemin_audio)
+            except Exception as erreur:
+                erreurs.append(f'{fournisseur}: {erreur}')
         raise RuntimeError('; '.join(erreurs))
 
-    def _transcribe_api(self, audio_path):
+    # Alias de compatibilité
+    _publish = _publier_texte
+    _transcribe = _transcrire_audio
+
+    def _transcrire_api(self, chemin_audio):
+        """Transcrit le fichier audio via une requête POST multipart vers l'API Whisper distante."""
         token = (self._configuration.secrets.fosa_stt_api_key
                  or self._configuration.secrets.openai_api_key)
         if not token:
             raise RuntimeError('FOSA_STT_API_KEY ou OPENAI_API_KEY absent.')
         boundary = f'fosa-{int(time.time() * 1000)}'
-        with open(audio_path, 'rb') as stream:
+        with open(chemin_audio, 'rb') as stream:
             audio_data = stream.read()
         parts = [
             f'--{boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n'
@@ -89,24 +100,27 @@ class NoeudEntreeVocale(Node):
                 timeout=self._configuration.dialogue.stt.timeout_sec) as response:
             return json.loads(response.read().decode('utf-8'))['text']
 
-    def _transcribe_file(self):
-        path = self.get_parameter('audio_file').value
-        if not path:
+    def _transcrire_fichier(self):
+        """Lit le fichier audio spécifié en paramètre et publie sa transcription."""
+        chemin = self.get_parameter('audio_file').value
+        if not chemin:
             self.get_logger().error('Le paramètre audio_file est obligatoire.')
             return
         try:
-            self._publish(self._transcribe(path))
+            self._publier_texte(self._transcrire_audio(chemin))
         except Exception as error:
             self.get_logger().error(f'Échec de transcription : {error}')
 
-    def _read_text(self):
+    def _lire_texte(self):
+        """Lit les phrases tapées au clavier dans le terminal pour les tests sans micro."""
         while rclpy.ok():
             try:
-                self._publish(input('Vous> '))
+                self._publier_texte(input('Vous> '))
             except EOFError:
                 return
 
-    def _listen(self):
+    def _ecouter_micro(self):
+        """Boucle d'écoute micro avec détection de silence VAD pour isoler les phrases."""
         try:
             import sounddevice as sd
         except ImportError:
@@ -150,28 +164,37 @@ class NoeudEntreeVocale(Node):
                         morceaux.append(morceau)
                         silence += 1
                         if silence >= silence_blocks:
-                            self._transcribe_chunks(morceaux, audio.sample_rate)
+                            self._transcrire_morceaux_audio(morceaux, audio.sample_rate)
                             actif, silence, morceaux = False, 0, []
         except Exception as error:
             self.get_logger().error(f'Échec du micro : {error}')
 
-    def _transcribe_chunks(self, chunks, sample_rate):
-        if not chunks:
+    def _transcrire_morceaux_audio(self, morceaux, frequence):
+        """Écrit les morceaux audio PCM dans un fichier WAV temporaire et déclenche Whisper."""
+        if not morceaux:
             return
+        chemin = None
         try:
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as stream:
-                path = stream.name
-            with wave.open(path, 'wb') as wav:
+                chemin = stream.name
+            with wave.open(chemin, 'wb') as wav:
                 wav.setnchannels(1)
                 wav.setsampwidth(2)
-                wav.setframerate(sample_rate)
-                wav.writeframes(b''.join(chunks))
-            self._publish(self._transcribe(path))
+                wav.setframerate(frequence)
+                wav.writeframes(b''.join(morceaux))
+            self._publier_texte(self._transcrire_audio(chemin))
         except Exception as error:
             self.get_logger().error(f'Échec de transcription micro : {error}')
         finally:
-            if 'path' in locals():
-                os.unlink(path)
+            if chemin and os.path.exists(chemin):
+                os.unlink(chemin)
+
+    # Alias de compatibilité
+    _transcribe_api = _transcrire_api
+    _transcribe_file = _transcrire_fichier
+    _read_text = _lire_texte
+    _listen = _ecouter_micro
+    _transcribe_chunks = _transcrire_morceaux_audio
 
 
 def main(args=None):

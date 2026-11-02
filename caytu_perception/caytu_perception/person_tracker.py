@@ -38,50 +38,65 @@ class SuiviPersonnes(Node):
             DialogueState, self._configuration.dialogue.state_topic,
             self._receive_state, 10)
 
-    def _receive_velocity(self, message):
+    def _recevoir_vitesse(self, message):
+        """Surveille la commande de vitesse pour savoir si le robot est à l'arrêt complet."""
         self._last_velocity = (abs(message.linear.x), abs(message.angular.z))
 
-    def _receive_state(self, message):
+    def _recevoir_etat(self, message):
+        """Mémorise l'état actuel du dialogue (IDLE, LISTENING, GUIDING, etc.)."""
         self._dialogue_state = message.state
 
-    def _receive_entities(self, message):
+    def _recevoir_entites(self, message):
+        """Filtre les personnes détectées et déclenche un événement d'accueil si les conditions sont réunies."""
         velocity = self._last_velocity
-        stopped = (velocity is not None
-                   and velocity[0] <= self._person.robot_stop_threshold_mps
-                   and velocity[1] <= self._person.robot_stop_threshold_mps)
-        eligible = {}
+        robot_arrete = (velocity is not None
+                        and velocity[0] <= self._person.robot_stop_threshold_mps
+                        and velocity[1] <= self._person.robot_stop_threshold_mps)
+        personnes_eligibles = {}
         for entity in message.entities:
+            # Doit être classifiée comme personne avec confiance suffisante
             if not entity.is_person or entity.confidence < self._person.min_confidence:
                 continue
+            # Doit être dans la plage de distance de politesse (ex: 0.8m à 2.5m)
             if not (self._person.min_distance_m <= entity.distance_m
                     <= self._person.max_distance_m):
                 continue
+            # Doit être en face du robot (dans le champ de vision avant)
             if abs(entity.bearing_rad) > self._person.front_fov_rad / 2.0:
                 continue
-            eligible[entity.track_id] = entity
+            personnes_eligibles[entity.track_id] = entity
+
+        # Compte les apparitions consécutives pour filtrer les faux positifs
         self._counts = {
             track_id: self._counts.get(track_id, 0) + 1
-            for track_id in eligible
+            for track_id in personnes_eligibles
         }
-        if (not self._configuration.mission.greeting_enabled or not stopped
+        # Ne salue pas si salutation désactivée, robot en mouvement, ou cooldown actif
+        maintenant = time.monotonic()
+        if (not self._configuration.mission.greeting_enabled or not robot_arrete
                 or self._dialogue_state not in {'IDLE', 'LISTENING'}
-                or time.monotonic() - self._last_event
-                < self._person.cooldown_sec):
+                or maintenant - self._last_event < self._person.cooldown_sec):
             return
+
         for track_id, count in self._counts.items():
             if count < self._person.consecutive_frames:
                 continue
-            entity = eligible[track_id]
-            event = {
+            personne = personnes_eligibles[track_id]
+            evenement = {
                 'track_id': track_id,
-                'distance_m': entity.distance_m,
-                'bearing_rad': entity.bearing_rad,
-                'confidence': entity.confidence,
+                'distance_m': personne.distance_m,
+                'bearing_rad': personne.bearing_rad,
+                'confidence': personne.confidence,
             }
-            self._publisher.publish(String(data=json.dumps(event)))
-            self._last_event = time.monotonic()
+            self._publisher.publish(String(data=json.dumps(evenement)))
+            self._last_event = maintenant
             self._counts = {}
             break
+
+    # Alias de compatibilité
+    _receive_velocity = _recevoir_vitesse
+    _receive_state = _recevoir_etat
+    _receive_entities = _recevoir_entites
 
 
 def main(args=None):

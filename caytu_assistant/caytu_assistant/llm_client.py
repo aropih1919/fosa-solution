@@ -29,13 +29,22 @@ class LLMIndisponible(RuntimeError):
 
 
 class ClientLLM:
+    """Client de communication avec le modèle de langage (Ollama local ou API).
+
+    Accessible pour un développeur débutant-intermédiaire :
+      - `interpreter()` prend la phrase du visiteur et l'historique de conversation ;
+      - contacte le serveur configuré (local ou API distante) ;
+      - renvoie un objet `Intention` validé et typé.
+    """
+
     def __init__(self, configuration):
         self._config = configuration.dialogue.llm
         self._secrets = configuration.secrets
         self._prompts = configuration.prompts
         self._locations = configuration.semantic_map.locations
 
-    def _system_prompt(self):
+    def _construire_prompt_systeme(self):
+        """Assemble les instructions, règles de sécurité et liste des lieux autorisés."""
         lieux = [
             {'name': item.name, 'aliases': list(item.aliases)}
             for item in self._locations
@@ -45,12 +54,17 @@ class ClientLLM:
                 + '\nLieux autorisés (noms et alias seulement): '
                 + json.dumps(lieux, ensure_ascii=False))
 
-    def _local(self, text, history):
+    def _system_prompt(self):
+        # Alias de compatibilité
+        return self._construire_prompt_systeme()
+
+    def _appeler_local(self, texte, historique):
+        """Interroge le serveur Ollama local via son API HTTP /api/chat."""
         base = os.environ.get('FOSA_OLLAMA_URL', self._config.local_base)
         url = base.rstrip('/') + '/api/chat'
-        messages = [{'role': 'system', 'content': self._system_prompt()}]
-        messages.extend(history)
-        messages.append({'role': 'user', 'content': text})
+        messages = [{'role': 'system', 'content': self._construire_prompt_systeme()}]
+        messages.extend(historique)
+        messages.append({'role': 'user', 'content': texte})
         body = {
             'model': self._config.local_model,
             'messages': messages,
@@ -58,20 +72,25 @@ class ClientLLM:
             'stream': False,
             'options': {'temperature': self._config.temperature},
         }
-        response = self._post_json(url, body, None)
-        content = response.get('message', {}).get('content', '')
-        return Intention.depuis_json(content)
+        reponse = self._envoyer_requete_json(url, body, None)
+        contenu = reponse.get('message', {}).get('content', '')
+        return Intention.depuis_json(contenu)
 
-    def _api(self, text, history):
+    def _local(self, text, history):
+        # Alias de compatibilité
+        return self._appeler_local(text, history)
+
+    def _appeler_api(self, texte, historique):
+        """Interroge une API compatible OpenAI (ChatGPT, Groq, etc.)."""
         token = (self._secrets.fosa_llm_api_key
                  or self._secrets.openai_api_key)
         if not token:
             raise LLMIndisponible('FOSA_LLM_API_KEY ou OPENAI_API_KEY absent.')
         base = self._config.api_base
         url = base.rstrip('/') + '/chat/completions'
-        messages = [{'role': 'system', 'content': self._system_prompt()}]
-        messages.extend(history)
-        messages.append({'role': 'user', 'content': text})
+        messages = [{'role': 'system', 'content': self._construire_prompt_systeme()}]
+        messages.extend(historique)
+        messages.append({'role': 'user', 'content': texte})
         body = {
             'model': self._config.api_model,
             'messages': messages,
@@ -82,37 +101,52 @@ class ClientLLM:
                                 'schema': SCHEMA_INTENT},
             },
         }
-        response = self._post_json(url, body, token)
-        content = response['choices'][0]['message']['content']
-        return Intention.depuis_json(content)
+        reponse = self._envoyer_requete_json(url, body, token)
+        contenu = reponse['choices'][0]['message']['content']
+        return Intention.depuis_json(contenu)
 
-    def _post_json(self, url, body, token):
-        headers = {'Content-Type': 'application/json'}
+    def _api(self, text, history):
+        # Alias de compatibilité
+        return self._appeler_api(text, history)
+
+    def _envoyer_requete_json(self, url, corps_json, token):
+        """Effectue une requête POST HTTP avec sérialisation/désérialisation JSON."""
+        entetes = {'Content-Type': 'application/json'}
         if token:
-            headers['Authorization'] = f'Bearer {token}'
-        request = urllib.request.Request(
-            url, data=json.dumps(body).encode('utf-8'), headers=headers)
+            entetes['Authorization'] = f'Bearer {token}'
+        requete = urllib.request.Request(
+            url, data=json.dumps(corps_json).encode('utf-8'), headers=entetes)
         try:
             with urllib.request.urlopen(
-                    request, timeout=self._config.timeout_sec) as response:
-                return json.loads(response.read().decode('utf-8'))
+                    requete, timeout=self._config.timeout_sec) as reponse:
+                return json.loads(reponse.read().decode('utf-8'))
         except (OSError, urllib.error.URLError, TimeoutError,
-                json.JSONDecodeError, KeyError) as error:
-            raise LLMIndisponible(str(error)) from error
+                json.JSONDecodeError, KeyError) as erreur:
+            raise LLMIndisponible(str(erreur)) from erreur
 
-    def interpret(self, text, history=()):
-        """Tente le fournisseur configuré puis l’autre en mode `auto`."""
-        providers = {
-            'local': [self._local],
-            'api': [self._api],
-            'auto': [self._local, self._api],
-        }.get(self._config.provider, [self._local])
+    def _post_json(self, url, body, token):
+        # Alias de compatibilité
+        return self._envoyer_requete_json(url, body, token)
+
+    def interpreter(self, texte, historique=()):
+        """Interprète la phrase de l'utilisateur et retourne une Intention structurée.
+
+        Essaie le fournisseur configuré (local ou API), puis bascule si nécessaire.
+        """
+        fournisseurs = {
+            'local': [self._appeler_local],
+            'api': [self._appeler_api],
+            'auto': [self._appeler_local, self._appeler_api],
+        }.get(self._config.provider, [self._appeler_local])
         erreurs = []
-        for provider in providers:
+        for fournisseur in fournisseurs:
             for _ in range(self._config.max_retries + 1):
                 try:
-                    return provider(text, history)
-                except (LLMIndisponible, ErreurIntention) as error:
-                    erreurs.append(str(error))
+                    return fournisseur(texte, historique)
+                except (LLMIndisponible, ErreurIntention) as erreur:
+                    erreurs.append(str(erreur))
                     break
         raise LLMIndisponible('; '.join(erreurs) or 'Fournisseur indisponible.')
+
+    # Alias de compatibilité
+    interpret = interpreter
