@@ -5,6 +5,7 @@ __pycache__/
 build/
 install/
 log/
+results/
 diag.log
 step.md
 test.txt
