@@ -42,13 +42,13 @@ Pour partager les modèles lourds sans les retélécharger :
 
 Sur le premier poste, créez `modeles-fosa.tar.gz` :
 ```bash
-./exporter_modeles.sh exporter
+./exporter_importer_modeles.sh exporter
 ```
 
 Sur le poste destinataire, lancez d'abord `./install.sh --no-models`, copiez
 `modeles-fosa.tar.gz` à la racine du projet, puis importez les modèles :
 ```bash
-./exporter_modeles.sh importer
+./exporter_importer_modeles.sh importer
 ```
 L'archive contient les modèles YOLO/Piper, Whisper et tout le dépôt de modèles Ollama.
 Les modèles YOLO/Piper sont installés dans `caytu_config/config/models/` du

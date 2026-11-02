@@ -12,14 +12,14 @@ SERVICE_OLLAMA_ACTIF="non"
 
 afficher_aide() {
     cat <<'AIDE'
-Usage : ./exporter_modeles.sh exporter|importer
+Usage : ./exporter_importer_modeles.sh exporter|importer
 
   exporter   crée modeles-fosa.tar.gz à la racine du projet
   importer   installe les modèles depuis modeles-fosa.tar.gz
 
 Sur le PC destinataire, installer d'abord le projet sans télécharger les
 modèles avec ./install.sh --no-models, copier l'archive à la racine du projet,
-puis lancer ./exporter_modeles.sh importer.
+puis lancer ./exporter_importer_modeles.sh importer.
 AIDE
 }
 
@@ -113,7 +113,7 @@ PY
     FICHIER_VOIX="$DOSSIER_CONFIG/$CHEMIN_VOIX"
 }
 
-exporter_modeles() {
+exporter_importer_modeles() {
     [[ -f "$DOSSIER_CONFIG/fosa.yaml" ]] || erreur \
         "configuration du projet absente : $DOSSIER_CONFIG/fosa.yaml"
     [[ -d "$DOSSIER_MODELES_CONFIG" ]] || erreur \
@@ -206,7 +206,7 @@ mode="${1:-}"
 case "$mode" in
     exporter)
         (($# == 1)) || { afficher_aide >&2; exit 2; }
-        exporter_modeles
+        exporter_importer_modeles
         ;;
     importer)
         (($# == 1)) || { afficher_aide >&2; exit 2; }
