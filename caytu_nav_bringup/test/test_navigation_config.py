@@ -123,12 +123,13 @@ def test_inflation_gives_a_cost_slope_beyond_the_robot():
 
 def test_camera_scans_are_filtered_in_the_level_frame():
     text = (LAUNCH_DIR / "solution_bringup.launch.py").read_text(encoding="utf-8")
-    assert 'REPERE_HORIZONTAL = "base_footprint_level"' in text
-    assert text.count('"target_frame": REPERE_HORIZONTAL') == 2
-    # Bruit de profondeur Gazebo : 0.10 m sur la hauteur. Ne pas redescendre
-    # sous 0.60 m pour la caméra haute sans revérifier sur sol dégagé.
-    assert '"min_height": 0.60' in text
-    assert '"min_height": 0.25' in text
+    assert "REPERE_HORIZONTAL = CONFIG.perception.top_scan.target_frame" in text
+    assert text.count("parameters=[_parametres_scan(") == 2
+    # Les seuils de hauteur viennent de caytu_config, pas du fichier launch.
+    from caytu_config import load_config
+    configuration = load_config()
+    assert configuration.perception.top_scan.min_height == 0.60
+    assert configuration.perception.bottom_scan.min_height == 0.25
     for node in ("scan_to_scan_filter_chain", "filtre_sol_lidar",
                  "localisateur_odom_imu", "pointcloud_to_laserscan_node"):
         assert node in text
@@ -140,7 +141,10 @@ def test_navigation_launch_starts_everything_in_one_lifecycle_manager():
     for executable in ("map_server", "controller_server", "planner_server",
                        "behavior_server", "bt_navigator", "lifecycle_manager"):
         assert executable in text
-    assert "/robot_base_controller/cmd_vel_unstamped" in text
+    assert "TOPIC_VITESSE = CONFIG.navigation.cmd_vel_topic" in text
+    from caytu_config import load_config
+    assert load_config().navigation.cmd_vel_topic == (
+        "/robot_base_controller/cmd_vel_unstamped")
     assert "navigate_bounded_recovery.xml" in text
     assert "get_package_share_directory" in text
     assert 'choices=["rpp", "dwb", "mppi"]' in text

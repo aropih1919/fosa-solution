@@ -598,21 +598,23 @@ EMERGENCY
 
 ### Lot 1 — Fusion du laboratoire navigation
 
-- [ ] Fusionner `feat/navigation-benchmark` dans `integration/phase-finale`.
-- [ ] Résoudre les 4 conflits en gardant la lisibilité française + les
+- [x] Fusionner `feat/navigation-benchmark` dans `integration/phase-finale`.
+- [x] Résoudre les 4 conflits en gardant la lisibilité française + les
   fonctionnalités du lab.
-- [ ] Vérifier `setup.py`, `package.xml`, entry points.
-- [ ] `colcon build` + `colcon test` verts.
-- [ ] Scénario phase 1 officiel toujours réussi.
+- [x] Vérifier `setup.py`, `package.xml`, entry points.
+- [x] `colcon build` + `colcon test` verts.
+- [ ] Scénario phase 1 officiel toujours réussi (à rejouer dans Gazebo).
 
 ### Lot 2 — `caytu_config`
 
-- [ ] Créer le paquet `caytu_config`.
-- [ ] Écrire `fosa.yaml`, `locations.yaml`, `knowledge.yaml`, `prompts.yaml`.
-- [ ] Loader Pydantic + overrides env + validation.
-- [ ] Tests : chargement, clé manquante, valeur invalide, override.
-- [ ] Brancher les launch files et `task_solution.py` sur le loader.
-- [ ] Audit : aucune valeur métier en dur dans les nouveaux nœuds.
+- [x] Créer le paquet `caytu_config`.
+- [x] Écrire `fosa.yaml`, `locations.yaml`, `knowledge.yaml`, `prompts.yaml`.
+- [x] Loader typé (dataclasses, sans dépendance externe) + overrides env +
+  validation stricte.
+- [x] Tests : chargement, clé manquante, valeur invalide, override, secrets.
+- [x] Brancher les launch files et `task_solution.py` sur le loader.
+- [x] Audit initial : les valeurs métier de navigation/perception sont lues
+  dans `fosa.yaml` (reste à faire pour les lots 3-8).
 
 ### Lot 3 — Extraction navigation
 

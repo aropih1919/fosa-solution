@@ -26,7 +26,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Optional
 
 import rclpy
 import yaml
@@ -43,6 +42,7 @@ from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 
+from caytu_config import load_config
 from caytu_nav_solution.benchmark_config import (
     ConfigurationError,
     build_experiment_config,
@@ -74,9 +74,10 @@ DECALAGE_LIDAR_X = -0.021
 
 class SolutionTache(Node):
 
-    def __init__(self, parameter_overrides=None):
+    def __init__(self, parameter_overrides=None, configuration=None):
         super().__init__('task_solution', parameter_overrides=parameter_overrides or [])
 
+        self._configuration = configuration or load_config()
         self._declarer_parametres()
         self._lire_parametres()
         self._initialiser_etat()
@@ -89,43 +90,43 @@ class SolutionTache(Node):
 
     # ------------------------------------------------------------ réglages
     def _declarer_parametres(self):
-        # Durée officielle de la tâche et marge gardée pour s'arrêter proprement.
-        self.declare_parameter('time_limit_sec', 600.0)
-        self.declare_parameter('stop_margin_sec', 1.0)
+        navigation = self._configuration.navigation
+        systeme = self._configuration.system
 
-        # Le robot est considéré arrivé si son centre est à moins de ce rayon du
-        # centre du but, même si Nav2 ne l'a pas encore annoncé (cercle : 0,6 m).
-        self.declare_parameter('success_radius', 0.20)
-
-        # Garde-fou : si Nav2 annonce l'arrivée alors que le robot est encore à
-        # plus de cette distance du centre du but, le but est renvoyé.
-        self.declare_parameter('arrival_recheck_radius', 0.35)
-        self.declare_parameter('retry_pause_sec', 1.0)
-        self.declare_parameter('nav2_startup_timeout_sec', 180.0)   # temps réel
+        # Toutes les valeurs viennent de caytu_config/config/fosa.yaml.
+        self.declare_parameter('time_limit_sec', navigation.time_limit_sec)
+        self.declare_parameter('stop_margin_sec', navigation.stop_margin_sec)
+        self.declare_parameter('success_radius', navigation.success_radius)
+        self.declare_parameter(
+            'arrival_recheck_radius', navigation.arrival_recheck_radius)
+        self.declare_parameter('retry_pause_sec', navigation.retry_pause_sec)
+        self.declare_parameter(
+            'nav2_startup_timeout_sec', navigation.nav2_startup_timeout_sec)
 
         # Lancement du reste de la solution par ce nœud (exigence PARC).
-        self.declare_parameter('launch_bringup', True)
-        self.declare_parameter('bringup_package', 'caytu_nav_bringup')
-        self.declare_parameter('bringup_launch', 'solution_bringup.launch.py')
-        self.declare_parameter('controller', 'rpp')                 # rpp | dwb | mppi
-        self.declare_parameter('localization', 'odom_imu')
-        self.declare_parameter('profile', 'balanced')
+        self.declare_parameter('launch_bringup', navigation.launch_bringup)
+        self.declare_parameter('bringup_package', navigation.bringup_package)
+        self.declare_parameter('bringup_launch', navigation.bringup_launch)
+        self.declare_parameter('controller', navigation.controller)
+        self.declare_parameter('localization', navigation.localization)
+        self.declare_parameter('profile', navigation.profile)
         self.declare_parameter('nav2_params_file', '')
 
         # Carte des murs : auto (vérifiée avec le lidar), always, never.
         # (Pas « on/off » : YAML les lirait comme des booléens.)
-        self.declare_parameter('static_map', 'auto')
-        self.declare_parameter('map_yaml', '')
-        self.declare_parameter('map_check_timeout_sec', 4.0)        # temps réel
-        self.declare_parameter('map_check_min_agreement', 0.35)
+        self.declare_parameter('static_map', navigation.static_map)
+        self.declare_parameter('map_yaml', navigation.map_yaml)
+        self.declare_parameter(
+            'map_check_timeout_sec', navigation.map_check_timeout_sec)
+        self.declare_parameter(
+            'map_check_min_agreement', navigation.map_check_min_agreement)
 
         self.declare_parameter('task_params_file', '')
-        self.declare_parameter('global_frame', 'map')
-        self.declare_parameter('base_frame', 'base_footprint')
-        self.declare_parameter('scan_topic', '/scan')
-        self.declare_parameter('amcl_pose_topic', '/amcl_pose')
-        self.declare_parameter(
-            'cmd_vel_topic', '/robot_base_controller/cmd_vel_unstamped')
+        self.declare_parameter('global_frame', systeme.global_frame)
+        self.declare_parameter('base_frame', systeme.base_frame)
+        self.declare_parameter('scan_topic', navigation.scan_topic)
+        self.declare_parameter('amcl_pose_topic', navigation.amcl_pose_topic)
+        self.declare_parameter('cmd_vel_topic', navigation.cmd_vel_topic)
 
     def _lire_parametres(self):
         # Lecture immédiate du fichier de départ/but : si le fichier manque, on
@@ -166,13 +167,14 @@ class SolutionTache(Node):
             Twist, self.get_parameter('cmd_vel_topic').value, 10)
 
         # Deux services pour vider les costmaps entre deux tentatives.
+        reglages_navigation = self._configuration.navigation
         self._clients_vidage_costmap = [
             self.create_client(
                 ClearEntireCostmap,
-                '/global_costmap/clear_entirely_global_costmap'),
+                reglages_navigation.global_costmap_clear_service),
             self.create_client(
                 ClearEntireCostmap,
-                '/local_costmap/clear_entirely_local_costmap'),
+                reglages_navigation.local_costmap_clear_service),
         ]
 
         # On s'abonne à /scan uniquement pour vérifier la carte au démarrage.
@@ -271,7 +273,7 @@ class SolutionTache(Node):
             chemin_carte = os.path.join(
                 get_package_share_directory(
                     self.get_parameter('bringup_package').value),
-                'maps', 'cafe_map.yaml')
+                self._configuration.navigation.default_map)
 
         if mode == 'never':
             if carte_obligatoire:
@@ -371,8 +373,9 @@ class SolutionTache(Node):
 
     def ecrire_carte_vide(self):
         """Écrit une carte entièrement libre couvrant largement départ et but."""
-        resolution = 0.05          # taille d'une case en mètres (5 cm)
-        marge = 15.0               # 15 m de marge autour du départ et du but
+        reglages = self._configuration.navigation
+        resolution = reglages.blank_map_resolution
+        marge = reglages.blank_map_margin
 
         x_min = min(self._task.spawn.x, self._task.goal_x) - marge
         y_min = min(self._task.spawn.y, self._task.goal_y) - marge
@@ -468,10 +471,10 @@ class SolutionTache(Node):
 
         self.get_logger().info('Arrêt du bringup...')
         # On essaie d'abord un arrêt propre, puis plus fort si nécessaire.
-        for signal_envoye, attente in (
-                (signal.SIGINT, 10.0),
-                (signal.SIGTERM, 5.0),
-                (signal.SIGKILL, 2.0)):
+        temporisations = self._configuration.navigation.bringup_stop_timeouts
+        for signal_envoye, attente in zip(
+                (signal.SIGINT, signal.SIGTERM, signal.SIGKILL),
+                temporisations):
             try:
                 os.killpg(
                     os.getpgid(self._processus_bringup.pid), signal_envoye)
@@ -491,7 +494,8 @@ class SolutionTache(Node):
         """
         if not rclpy.ok():
             return
-        for _ in range(10):
+        repetitions = self._configuration.navigation.stop_repeat_count
+        for _ in range(repetitions):
             self._publicateur_vitesse.publish(Twist())
             rclpy.spin_once(self, timeout_sec=0.02)
 
@@ -500,7 +504,7 @@ class SolutionTache(Node):
         if rclpy.ok() and self._but_en_cours is not None:
             # Nav2 doit cesser de commander le robot avant qu'on l'arrête.
             future_annulation = self._but_en_cours.cancel_goal_async()
-            fin = time.monotonic() + 1.0
+            fin = time.monotonic() + self._configuration.navigation.cancel_timeout_sec
             while (rclpy.ok() and not future_annulation.done()
                    and time.monotonic() < fin):
                 rclpy.spin_once(self, timeout_sec=0.05)
@@ -517,7 +521,7 @@ class SolutionTache(Node):
     # ------------------------------------------------------------------- Nav2
     def attendre_horloge(self):
         """Démarre le chronomètre dès que l'horloge (simulée) est disponible."""
-        delai = time.monotonic() + 10.0
+        delai = time.monotonic() + self._configuration.navigation.clock_wait_sec
         while rclpy.ok() and time.monotonic() < delai:
             rclpy.spin_once(self, timeout_sec=0.05)
             if self.get_clock().now().nanoseconds > 0:
@@ -591,7 +595,8 @@ class SolutionTache(Node):
 
     def recevoir_feedback(self, message_feedback):
         maintenant = time.monotonic()
-        if maintenant - self._dernier_log_feedback < 5.0:
+        periode = self._configuration.navigation.feedback_log_period_sec
+        if maintenant - self._dernier_log_feedback < periode:
             return
         self._dernier_log_feedback = maintenant
 
@@ -629,9 +634,9 @@ class SolutionTache(Node):
         return 'ok'
 
     def annuler_but(self, but):
-        """Annule le but en cours et attend au maximum 2 secondes."""
+        """Annule le but en cours et attend au maximum la temporisation configurée."""
         future_annulation = but.cancel_goal_async()
-        fin = time.monotonic() + 2.0
+        fin = time.monotonic() + self._configuration.navigation.cancel_timeout_sec
         while (rclpy.ok() and not future_annulation.done()
                and time.monotonic() < fin):
             rclpy.spin_once(self, timeout_sec=0.05)
@@ -777,16 +782,27 @@ def main(args=None):
     signal.signal(signal.SIGINT, _transformer_ctrl_c_en_interruption)
     signal.signal(signal.SIGTERM, _transformer_ctrl_c_en_interruption)
 
+    # La configuration est chargée avant le nœud : une erreur de YAML doit
+    # arrêter le programme avec un message clair, pas un traceback ROS.
+    try:
+        configuration = load_config()
+    except ConfigurationError as erreur:
+        print(f'task_solution: configuration invalide : {erreur}', file=sys.stderr)
+        sys.exit(EXIT_FAILURE)
+
     # La tâche tourne dans Gazebo : temps simulé par défaut, sans option à passer.
     # Une valeur donnée en ligne de commande reste prioritaire.
     overrides = []
     if not any('use_sim_time' in argument for argument in sys.argv):
-        overrides.append(Parameter('use_sim_time', Parameter.Type.BOOL, True))
+        overrides.append(Parameter(
+            'use_sim_time', Parameter.Type.BOOL,
+            configuration.system.use_sim_time))
 
     noeud = None
     code = EXIT_FAILURE
     try:
-        noeud = SolutionTache(parameter_overrides=overrides)
+        noeud = SolutionTache(
+            parameter_overrides=overrides, configuration=configuration)
         code = noeud.executer_mission()
     except KeyboardInterrupt:
         pass

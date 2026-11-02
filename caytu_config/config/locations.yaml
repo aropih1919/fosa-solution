@@ -1,0 +1,38 @@
+# Carte sémantique : noms, alias et ancrages AprilTag.
+# Les coordonnées d'approche sont optionnelles : si `approach_pose` est absent,
+# la pose est calculée à partir du tag détecté (phase 2, perception).
+# Remplacer les tag_ids par ceux réellement posés sur le site.
+
+world: cafe
+frame: map
+
+locations:
+  - name: accueil
+    aliases: [reception, information, entree]
+    tag_ids: [10]
+    description: "Point d'accueil des visiteurs."
+    category: service
+
+  - name: toilettes
+    aliases: [wc, sanitaires, latrines]
+    tag_ids: [11]
+    description: "Toilettes accessibles aux visiteurs."
+    category: service
+
+  - name: buvette
+    aliases: [cafe, snack, restauration]
+    tag_ids: [12]
+    description: "Buvette et espace de restauration."
+    category: service
+
+  - name: infirmerie
+    aliases: [secours, premiers secours, soins]
+    tag_ids: [13]
+    description: "Poste de secours et d'urgence."
+    category: urgence
+
+  - name: terrain
+    aliases: [stade, pelouse, match]
+    tag_ids: [14]
+    description: "Terrain principal où se déroulent les épreuves."
+    category: animation

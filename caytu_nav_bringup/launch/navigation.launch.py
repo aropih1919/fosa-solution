@@ -3,13 +3,16 @@
 import os
 
 from ament_index_python.packages import get_package_share_directory
+from caytu_config import load_config
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
+CONFIG = load_config()
+
 # Topic de commande du robot officiel (Twist non horodaté, voir gz_bridge.yaml).
-TOPIC_VITESSE = "/robot_base_controller/cmd_vel_unstamped"
+TOPIC_VITESSE = CONFIG.navigation.cmd_vel_topic
 
 # map_server en premier : la costmap globale attend /map pour se dimensionner.
 NOEUDS_CYCLE_VIE = [
@@ -153,23 +156,25 @@ def _creer_noeuds_nav2(context):
 
 def generate_launch_description():
     dossier_bringup = get_package_share_directory("caytu_nav_bringup")
+    carte = CONFIG.navigation.map_yaml or os.path.join(
+        dossier_bringup, CONFIG.navigation.default_map)
     return LaunchDescription([
         DeclareLaunchArgument(
-            "use_sim_time", default_value="true",
+            "use_sim_time", default_value=str(CONFIG.system.use_sim_time).lower(),
             description="Utiliser l'horloge Gazebo."),
         DeclareLaunchArgument(
-            "map", default_value=os.path.join(
-                dossier_bringup, "maps", "cafe_map.yaml"),
+            "map", default_value=carte,
             description="Fichier YAML de la carte statique."),
         DeclareLaunchArgument(
-            "controller", default_value="rpp", choices=["rpp", "dwb", "mppi"],
+            "controller", default_value=CONFIG.navigation.controller,
+            choices=["rpp", "dwb", "mppi"],
             description="Contrôleur local : fichier dédié ou YAML complet."),
         DeclareLaunchArgument(
-            "localization", default_value="odom_imu",
+            "localization", default_value=CONFIG.navigation.localization,
             choices=["odom_imu", "odom_only", "amcl"],
             description="Localisation sélectionnée par solution_bringup.launch.py."),
         DeclareLaunchArgument(
-            "profile", default_value="balanced",
+            "profile", default_value=CONFIG.navigation.profile,
             description="Profil de benchmark déjà fusionné dans params_file."),
         DeclareLaunchArgument(
             "params_file", default_value="",

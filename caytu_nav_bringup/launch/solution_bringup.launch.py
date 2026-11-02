@@ -16,6 +16,7 @@ Utilisation directe (mise au point) :
 import os
 
 from ament_index_python.packages import get_package_share_directory
+from caytu_config import load_config
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -27,8 +28,10 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+CONFIG = load_config()
+
 # Repère horizontal publié par le filtre sol lidar (le robot penche de ~2,5°).
-REPERE_HORIZONTAL = "base_footprint_level"
+REPERE_HORIZONTAL = CONFIG.perception.top_scan.target_frame
 
 
 def _valider_arguments_essai(context):
@@ -50,22 +53,23 @@ def _declarer_arguments(dossier_bringup):
     """Réglages modifiables en ligne de commande."""
     return [
         DeclareLaunchArgument(
-            "use_sim_time", default_value="true",
+            "use_sim_time", default_value=str(CONFIG.system.use_sim_time).lower(),
             description="Utiliser /clock de Gazebo pour tous les nœuds."),
         DeclareLaunchArgument(
-            "map", default_value=os.path.join(
-                dossier_bringup, "maps", "cafe_map.yaml"),
+            "map", default_value=CONFIG.navigation.map_yaml or os.path.join(
+                dossier_bringup, CONFIG.navigation.default_map),
             description="Carte statique (repère Gazebo). task_solution.py la "
                         "remplace par une carte vide si le monde n'est pas le café."),
         DeclareLaunchArgument(
-            "controller", default_value="rpp", choices=["rpp", "dwb", "mppi"],
+            "controller", default_value=CONFIG.navigation.controller,
+            choices=["rpp", "dwb", "mppi"],
             description="Contrôleur local sélectionné dans params_file."),
         DeclareLaunchArgument(
-            "localization", default_value="odom_imu",
+            "localization", default_value=CONFIG.navigation.localization,
             choices=["odom_imu", "odom_only", "amcl"],
             description="Localisation : une seule source map -> odom."),
         DeclareLaunchArgument(
-            "profile", default_value="balanced",
+            "profile", default_value=CONFIG.navigation.profile,
             choices=[
                 "ultra_safe", "safe", "balanced", "fast", "ultra_fast",
                 "tight_clearance"],
@@ -80,13 +84,16 @@ def _declarer_arguments(dossier_bringup):
             "task_params_file", default_value="",
             description="task_params.yaml à utiliser (vide = package officiel)."),
         DeclareLaunchArgument(
-            "top_cloud_topic", default_value="/top_camera_depth/points",
+            "top_cloud_topic",
+            default_value=CONFIG.perception.top_scan.cloud_topic,
             description="Nuage de points de la caméra haute."),
         DeclareLaunchArgument(
-            "bottom_cloud_topic", default_value="/bottom_camera_depth/points",
+            "bottom_cloud_topic",
+            default_value=CONFIG.perception.bottom_scan.cloud_topic,
             description="Nuage de points de la caméra basse."),
         DeclareLaunchArgument(
-            "floor_line_distance", default_value="0.0",
+            "floor_line_distance",
+            default_value=str(CONFIG.navigation.floor_line_distance),
             description="Forçage : distance (m) de la ligne de sol lue droit "
                         "devant dans /scan. 0.0 = calcul automatique par l'IMU."),
     ]
@@ -127,6 +134,25 @@ def _creer_filtre_sol(utiliser_temps_simulation):
     )
 
 
+def _parametres_scan(scan, utiliser_temps_simulation):
+    """Paramètres pointcloud_to_laserscan lus dans caytu_config."""
+    return {
+        "use_sim_time": utiliser_temps_simulation,
+        "target_frame": scan.target_frame,
+        "transform_tolerance": scan.transform_tolerance,
+        "min_height": scan.min_height,
+        "max_height": scan.max_height,
+        "angle_min": scan.angle_min,
+        "angle_max": scan.angle_max,
+        "angle_increment": scan.angle_increment,
+        "scan_time": scan.scan_time,
+        "range_min": scan.range_min,
+        "range_max": scan.range_max,
+        "use_inf": scan.use_inf,
+        "inf_epsilon": scan.inf_epsilon,
+    }
+
+
 def _creer_camera_haute(utiliser_temps_simulation):
     """3a. Caméra haute (horizontale, 1.01 m) : tables, chaises, personnes.
 
@@ -136,6 +162,7 @@ def _creer_camera_haute(utiliser_temps_simulation):
     (aucun faux obstacle dans nos simulations du capteur) et reste sous les
     plateaux de table (0.74 m) et les dossiers de chaise.
     """
+    scan = CONFIG.perception.top_scan
     return Node(
         package="pointcloud_to_laserscan",
         executable="pointcloud_to_laserscan_node",
@@ -143,23 +170,9 @@ def _creer_camera_haute(utiliser_temps_simulation):
         output="screen",
         remappings=[
             ("cloud_in", LaunchConfiguration("top_cloud_topic")),
-            ("scan", "/top_camera_scan"),
+            ("scan", scan.scan_topic),
         ],
-        parameters=[{
-            "use_sim_time": utiliser_temps_simulation,
-            "target_frame": REPERE_HORIZONTAL,
-            "transform_tolerance": 0.5,
-            "min_height": 0.60,
-            "max_height": 1.40,
-            "angle_min": -0.785,
-            "angle_max": 0.785,
-            "angle_increment": 0.0087,
-            "scan_time": 0.067,
-            "range_min": 0.3,
-            "range_max": 3.0,
-            "use_inf": True,
-            "inf_epsilon": 1.0,
-        }],
+        parameters=[_parametres_scan(scan, utiliser_temps_simulation)],
     )
 
 
@@ -168,6 +181,7 @@ def _creer_camera_basse(utiliser_temps_simulation):
     proches. Son bruit vertical est faible (±0.04 m) : 0.25 m suffit, ce que
     confirment nos journaux (0 point sur sol dégagé).
     """
+    scan = CONFIG.perception.bottom_scan
     return Node(
         package="pointcloud_to_laserscan",
         executable="pointcloud_to_laserscan_node",
@@ -175,23 +189,9 @@ def _creer_camera_basse(utiliser_temps_simulation):
         output="screen",
         remappings=[
             ("cloud_in", LaunchConfiguration("bottom_cloud_topic")),
-            ("scan", "/bottom_camera_scan"),
+            ("scan", scan.scan_topic),
         ],
-        parameters=[{
-            "use_sim_time": utiliser_temps_simulation,
-            "target_frame": REPERE_HORIZONTAL,
-            "transform_tolerance": 0.5,
-            "min_height": 0.25,
-            "max_height": 1.40,
-            "angle_min": -0.785,
-            "angle_max": 0.785,
-            "angle_increment": 0.0087,
-            "scan_time": 0.067,
-            "range_min": 0.3,
-            "range_max": 1.2,
-            "use_inf": True,
-            "inf_epsilon": 1.0,
-        }],
+        parameters=[_parametres_scan(scan, utiliser_temps_simulation)],
     )
 
 

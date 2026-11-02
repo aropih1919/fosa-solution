@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+from caytu_config import ConfigurationError
+
 
 CONTROLLERS = ("rpp", "dwb", "mppi")
 LOCALIZATIONS = ("odom_imu", "odom_only", "amcl", "amcl_ekf")
@@ -20,10 +22,6 @@ AMCL_EKF_UNAVAILABLE = (
     "installé ici, donc il est impossible de confirmer que le publisher actuel "
     "de odom -> base_footprint peut être désactivé sans doublon TF."
 )
-
-
-class ConfigurationError(ValueError):
-    """Configuration inconnue, invalide ou indisponible."""
 
 
 def _read_yaml(path):
