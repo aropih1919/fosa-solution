@@ -17,6 +17,7 @@ setup(
     maintainer_email='johny@fosa.mg',
     description='Carte sémantique et résolution de lieux ROS 2.',
     license='MIT',
+    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'semantic_map_node = caytu_semantic_map.noeud_carte_semantique:main',
