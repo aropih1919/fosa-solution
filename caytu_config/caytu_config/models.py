@@ -306,12 +306,15 @@ class AprilTagConfig:
     size_m: float
     max_distance_m: float
     detector: str
+    calibration_samples: int
+    calibration_file: str
 
     @classmethod
     def from_mapping(cls, data, path="perception.apriltag"):
         data = _section(data, path)
-        _check_keys(data, ("family", "size_m", "max_distance_m", "detector"),
-                     path)
+        _check_keys(data, (
+            "family", "size_m", "max_distance_m", "detector",
+            "calibration_samples", "calibration_file"), path)
         return cls(
             family=_as_str(_get(data, "family", path), f"{path}.family"),
             size_m=_as_number(
@@ -322,6 +325,12 @@ class AprilTagConfig:
             detector=_choice(
                 _get(data, "detector", path), APRILTAG_DETECTORS,
                 f"{path}.detector"),
+            calibration_samples=_as_int(
+                _get(data, "calibration_samples", path),
+                f"{path}.calibration_samples", 1),
+            calibration_file=_as_str(
+                _get(data, "calibration_file", path),
+                f"{path}.calibration_file"),
         )
 
 
@@ -330,6 +339,8 @@ class YoloConfig:
     enabled: bool
     model_path: str
     confidence: float
+    input_size: int
+    person_class_index: int
     max_fps: float
     device: str
 
@@ -337,7 +348,8 @@ class YoloConfig:
     def from_mapping(cls, data, path="perception.yolo"):
         data = _section(data, path)
         _check_keys(data, (
-            "enabled", "model_path", "confidence", "max_fps", "device"), path)
+            "enabled", "model_path", "confidence", "input_size",
+            "person_class_index", "max_fps", "device"), path)
         return cls(
             enabled=_as_bool(_get(data, "enabled", path), f"{path}.enabled"),
             model_path=_as_str(
@@ -345,6 +357,11 @@ class YoloConfig:
                 allow_empty=True),
             confidence=_as_number(
                 _get(data, "confidence", path), f"{path}.confidence", 0.0, 1.0),
+            input_size=_as_int(
+                _get(data, "input_size", path), f"{path}.input_size", 1),
+            person_class_index=_as_int(
+                _get(data, "person_class_index", path),
+                f"{path}.person_class_index", 0),
             max_fps=_as_number(
                 _get(data, "max_fps", path), f"{path}.max_fps", positive=True),
             device=_as_str(_get(data, "device", path), f"{path}.device"),
@@ -359,13 +376,25 @@ class PersonConfig:
     consecutive_frames: int
     cooldown_sec: float
     dynamic_speed_mps: float
+    min_height_m: float
+    max_width_m: float
+    cluster_tolerance_m: float
+    min_cluster_points: int
+    tracker_match_m: float
+    bearing_tolerance_rad: float
+    front_fov_rad: float
+    robot_stop_threshold_mps: float
 
     @classmethod
     def from_mapping(cls, data, path="perception.person"):
         data = _section(data, path)
         _check_keys(data, (
             "min_distance_m", "max_distance_m", "min_confidence",
-            "consecutive_frames", "cooldown_sec", "dynamic_speed_mps"), path)
+            "consecutive_frames", "cooldown_sec", "dynamic_speed_mps",
+            "min_height_m", "max_width_m", "cluster_tolerance_m",
+            "min_cluster_points", "tracker_match_m",
+            "bearing_tolerance_rad", "front_fov_rad",
+            "robot_stop_threshold_mps"), path)
         config = cls(
             min_distance_m=_as_number(
                 _get(data, "min_distance_m", path),
@@ -385,6 +414,30 @@ class PersonConfig:
             dynamic_speed_mps=_as_number(
                 _get(data, "dynamic_speed_mps", path),
                 f"{path}.dynamic_speed_mps", minimum=0.0),
+            min_height_m=_as_number(
+                _get(data, "min_height_m", path),
+                f"{path}.min_height_m", positive=True),
+            max_width_m=_as_number(
+                _get(data, "max_width_m", path),
+                f"{path}.max_width_m", positive=True),
+            cluster_tolerance_m=_as_number(
+                _get(data, "cluster_tolerance_m", path),
+                f"{path}.cluster_tolerance_m", positive=True),
+            min_cluster_points=_as_int(
+                _get(data, "min_cluster_points", path),
+                f"{path}.min_cluster_points", 1),
+            tracker_match_m=_as_number(
+                _get(data, "tracker_match_m", path),
+                f"{path}.tracker_match_m", positive=True),
+            bearing_tolerance_rad=_as_number(
+                _get(data, "bearing_tolerance_rad", path),
+                f"{path}.bearing_tolerance_rad", positive=True),
+            front_fov_rad=_as_number(
+                _get(data, "front_fov_rad", path),
+                f"{path}.front_fov_rad", positive=True),
+            robot_stop_threshold_mps=_as_number(
+                _get(data, "robot_stop_threshold_mps", path),
+                f"{path}.robot_stop_threshold_mps", minimum=0.0),
         )
         if config.min_distance_m >= config.max_distance_m:
             raise ConfigurationError(
@@ -472,6 +525,9 @@ class PerceptionConfig:
     top_info_topic: str
     bottom_color_topic: str
     bottom_depth_topic: str
+    entities_topic: str
+    tags_topic: str
+    person_events_topic: str
     apriltag: AprilTagConfig
     yolo: YoloConfig
     person: PersonConfig
@@ -483,7 +539,8 @@ class PerceptionConfig:
         data = _section(data, path)
         _check_keys(data, (
             "top_color_topic", "top_depth_topic", "top_info_topic",
-            "bottom_color_topic", "bottom_depth_topic", "apriltag", "yolo",
+            "bottom_color_topic", "bottom_depth_topic", "entities_topic",
+            "tags_topic", "person_events_topic", "apriltag", "yolo",
             "person", "top_scan", "bottom_scan"), path)
         return cls(
             top_color_topic=_as_str(
@@ -501,6 +558,14 @@ class PerceptionConfig:
             bottom_depth_topic=_as_str(
                 _get(data, "bottom_depth_topic", path),
                 f"{path}.bottom_depth_topic"),
+            entities_topic=_as_str(
+                _get(data, "entities_topic", path),
+                f"{path}.entities_topic"),
+            tags_topic=_as_str(
+                _get(data, "tags_topic", path), f"{path}.tags_topic"),
+            person_events_topic=_as_str(
+                _get(data, "person_events_topic", path),
+                f"{path}.person_events_topic"),
             apriltag=AprilTagConfig.from_mapping(
                 _get(data, "apriltag", path), f"{path}.apriltag"),
             yolo=YoloConfig.from_mapping(
@@ -521,14 +586,20 @@ class AudioConfig:
     output_device: str
     sample_rate: int
     vad_threshold: float
+    vad_rms_scale: float
+    vad_frame_ms: int
     silence_ms: int
+    piper_executable: str
+    audio_player: str
 
     @classmethod
     def from_mapping(cls, data, path="audio"):
         data = _section(data, path)
         _check_keys(data, (
             "input_device", "output_device", "sample_rate", "vad_threshold",
-            "silence_ms"), path)
+            "vad_rms_scale",
+            "vad_frame_ms", "silence_ms", "piper_executable",
+            "audio_player"), path)
         return cls(
             input_device=_as_str(
                 _get(data, "input_device", path), f"{path}.input_device"),
@@ -539,8 +610,19 @@ class AudioConfig:
             vad_threshold=_as_number(
                 _get(data, "vad_threshold", path), f"{path}.vad_threshold",
                 0.0, 1.0),
+            vad_rms_scale=_as_number(
+                _get(data, "vad_rms_scale", path),
+                f"{path}.vad_rms_scale", positive=True),
+            vad_frame_ms=_as_int(
+                _get(data, "vad_frame_ms", path),
+                f"{path}.vad_frame_ms", 1),
             silence_ms=_as_int(
                 _get(data, "silence_ms", path), f"{path}.silence_ms", 0),
+            piper_executable=_as_str(
+                _get(data, "piper_executable", path),
+                f"{path}.piper_executable"),
+            audio_player=_as_str(
+                _get(data, "audio_player", path), f"{path}.audio_player"),
         )
 
 
@@ -549,21 +631,34 @@ class AudioConfig:
 class SttConfig:
     provider: str
     local_model: str
+    local_device: str
+    local_compute_type: str
     api_model: str
+    api_base: str
     timeout_sec: float
 
     @classmethod
     def from_mapping(cls, data, path="dialogue.stt"):
         data = _section(data, path)
         _check_keys(data, (
-            "provider", "local_model", "api_model", "timeout_sec"), path)
+            "provider", "local_model", "local_device", "local_compute_type",
+            "api_model", "api_base",
+            "timeout_sec"), path)
         return cls(
             provider=_choice(
                 _get(data, "provider", path), PROVIDERS, f"{path}.provider"),
             local_model=_as_str(
                 _get(data, "local_model", path), f"{path}.local_model"),
+            local_device=_as_str(
+                _get(data, "local_device", path), f"{path}.local_device"),
+            local_compute_type=_as_str(
+                _get(data, "local_compute_type", path),
+                f"{path}.local_compute_type"),
             api_model=_as_str(
                 _get(data, "api_model", path), f"{path}.api_model",
+                allow_empty=True),
+            api_base=_as_str(
+                _get(data, "api_base", path), f"{path}.api_base",
                 allow_empty=True),
             timeout_sec=_as_number(
                 _get(data, "timeout_sec", path), f"{path}.timeout_sec",
@@ -576,13 +671,16 @@ class TtsConfig:
     provider: str
     local_voice: str
     api_voice: str
+    api_model: str
+    api_base: str
     timeout_sec: float
 
     @classmethod
     def from_mapping(cls, data, path="dialogue.tts"):
         data = _section(data, path)
         _check_keys(data, (
-            "provider", "local_voice", "api_voice", "timeout_sec"), path)
+            "provider", "local_voice", "api_voice", "api_model", "api_base",
+            "timeout_sec"), path)
         return cls(
             provider=_choice(
                 _get(data, "provider", path), PROVIDERS, f"{path}.provider"),
@@ -590,6 +688,12 @@ class TtsConfig:
                 _get(data, "local_voice", path), f"{path}.local_voice"),
             api_voice=_as_str(
                 _get(data, "api_voice", path), f"{path}.api_voice",
+                allow_empty=True),
+            api_model=_as_str(
+                _get(data, "api_model", path), f"{path}.api_model",
+                allow_empty=True),
+            api_base=_as_str(
+                _get(data, "api_base", path), f"{path}.api_base",
                 allow_empty=True),
             timeout_sec=_as_number(
                 _get(data, "timeout_sec", path), f"{path}.timeout_sec",
@@ -601,6 +705,7 @@ class TtsConfig:
 class LlmConfig:
     provider: str
     local_model: str
+    local_base: str
     api_model: str
     api_base: str
     timeout_sec: float
@@ -611,13 +716,15 @@ class LlmConfig:
     def from_mapping(cls, data, path="dialogue.llm"):
         data = _section(data, path)
         _check_keys(data, (
-            "provider", "local_model", "api_model", "api_base", "timeout_sec",
+            "provider", "local_model", "local_base", "api_model", "api_base", "timeout_sec",
             "max_retries", "temperature"), path)
         return cls(
             provider=_choice(
                 _get(data, "provider", path), PROVIDERS, f"{path}.provider"),
             local_model=_as_str(
                 _get(data, "local_model", path), f"{path}.local_model"),
+            local_base=_as_str(
+                _get(data, "local_base", path), f"{path}.local_base"),
             api_model=_as_str(
                 _get(data, "api_model", path), f"{path}.api_model",
                 allow_empty=True),
@@ -638,6 +745,9 @@ class LlmConfig:
 @dataclass(frozen=True)
 class DialogueConfig:
     languages: tuple
+    default_input_mode: str
+    greeting_reply: str
+    greeting_en_reply: str
     stt: SttConfig
     tts: TtsConfig
     llm: LlmConfig
@@ -646,14 +756,19 @@ class DialogueConfig:
     listening_timeout_sec: float
     unknown_location_reply: str
     unknown_information_reply: str
+    transcript_topic: str
+    response_topic: str
+    state_topic: str
 
     @classmethod
     def from_mapping(cls, data, path="dialogue"):
         data = _section(data, path)
         _check_keys(data, (
-            "languages", "stt", "tts", "llm", "confirmation_required",
+            "languages", "default_input_mode", "greeting_reply", "greeting_en_reply",
+            "stt", "tts", "llm", "confirmation_required",
             "max_turns_memory", "listening_timeout_sec",
-            "unknown_location_reply", "unknown_information_reply"), path)
+            "unknown_location_reply", "unknown_information_reply",
+            "transcript_topic", "response_topic", "state_topic"), path)
         languages = tuple(
             _as_str(langue, f"{path}.languages[{index}]")
             for index, langue in enumerate(
@@ -662,6 +777,16 @@ class DialogueConfig:
             raise ConfigurationError(f"{path}.languages ne doit pas être vide.")
         return cls(
             languages=languages,
+            default_input_mode=_choice(
+                _get(data, "default_input_mode", path),
+                ("microphone", "audio_file", "text"),
+                f"{path}.default_input_mode"),
+            greeting_reply=_as_str(
+                _get(data, "greeting_reply", path),
+                f"{path}.greeting_reply"),
+            greeting_en_reply=_as_str(
+                _get(data, "greeting_en_reply", path),
+                f"{path}.greeting_en_reply"),
             stt=SttConfig.from_mapping(
                 _get(data, "stt", path), f"{path}.stt"),
             tts=TtsConfig.from_mapping(
@@ -683,6 +808,14 @@ class DialogueConfig:
             unknown_information_reply=_as_str(
                 _get(data, "unknown_information_reply", path),
                 f"{path}.unknown_information_reply"),
+            transcript_topic=_as_str(
+                _get(data, "transcript_topic", path),
+                f"{path}.transcript_topic"),
+            response_topic=_as_str(
+                _get(data, "response_topic", path),
+                f"{path}.response_topic"),
+            state_topic=_as_str(
+                _get(data, "state_topic", path), f"{path}.state_topic"),
         )
 
 
@@ -775,11 +908,11 @@ class Location:
                 _get(data, "description", path, ""), f"{path}.description",
                 allow_empty=True),
             category=_as_str(
-                _get(data, "category", path, "service"), f"{path}.category",
+                _get(data, "category", path), f"{path}.category",
                 allow_empty=True),
             approach_pose=pose,
             approach_offset_m=_as_number(
-                _get(data, "approach_offset_m", path, 0.8),
+                _get(data, "approach_offset_m", path),
                 f"{path}.approach_offset_m", minimum=0.0),
         )
 
@@ -789,11 +922,16 @@ class SemanticMapConfig:
     world: str
     frame: str
     locations: tuple
+    locations_topic: str
+    resolve_service: str
+    by_tag_service: str
 
     @classmethod
     def from_mapping(cls, data, path="locations"):
         data = _section(data, path)
-        _check_keys(data, ("world", "frame", "locations"), path)
+        _check_keys(data, (
+            "world", "frame", "locations_topic", "resolve_service",
+            "by_tag_service", "locations"), path)
         locations = tuple(
             Location.from_mapping(lieu, f"{path}.locations[{index}]")
             for index, lieu in enumerate(
@@ -818,6 +956,15 @@ class SemanticMapConfig:
         return cls(
             world=_as_str(_get(data, "world", path), f"{path}.world"),
             frame=_as_str(_get(data, "frame", path), f"{path}.frame"),
+            locations_topic=_as_str(
+                _get(data, "locations_topic", path),
+                f"{path}.locations_topic"),
+            resolve_service=_as_str(
+                _get(data, "resolve_service", path),
+                f"{path}.resolve_service"),
+            by_tag_service=_as_str(
+                _get(data, "by_tag_service", path),
+                f"{path}.by_tag_service"),
             locations=locations,
         )
 
@@ -950,11 +1097,15 @@ class PromptsConfig:
     intentions: tuple
     rules: tuple
     examples: tuple
+    fallback_keywords: dict
+    responses: dict
 
     @classmethod
     def from_mapping(cls, data, path="prompts"):
         data = _section(data, path)
-        _check_keys(data, ("system", "intentions", "rules", "examples"), path)
+        _check_keys(data, (
+            "system", "intentions", "rules", "examples",
+            "fallback_keywords", "responses"), path)
         intentions = tuple(
             _as_str(intention, f"{path}.intentions[{index}]")
             for index, intention in enumerate(
@@ -967,6 +1118,32 @@ class PromptsConfig:
         if not intentions or not rules:
             raise ConfigurationError(
                 f"{path}: intentions et rules ne doivent pas être vides.")
+        fallback_data = _section(
+            _get(data, "fallback_keywords", path),
+            f"{path}.fallback_keywords")
+        fallback_keys = (
+            "yes", "no", "stop", "navigation", "localization",
+            "greeting", "farewell")
+        _check_keys(fallback_data, fallback_keys, f"{path}.fallback_keywords")
+        fallback_keywords = {
+            key: tuple(
+                _as_str(word, f"{path}.fallback_keywords.{key}[{index}]")
+                for index, word in enumerate(_as_list(
+                    _get(fallback_data, key, f"{path}.fallback_keywords"),
+                    f"{path}.fallback_keywords.{key}")))
+            for key in fallback_keys
+        }
+        if any(not values for values in fallback_keywords.values()):
+            raise ConfigurationError(
+                f"{path}.fallback_keywords: chaque groupe doit être renseigné.")
+        response_data = _section(
+            _get(data, "responses", path), f"{path}.responses")
+        responses = {
+            key: _as_str(value, f"{path}.responses.{key}")
+            for key, value in response_data.items()
+        }
+        if not responses:
+            raise ConfigurationError(f"{path}.responses ne doit pas être vide.")
         return cls(
             system=_as_str(_get(data, "system", path), f"{path}.system"),
             intentions=intentions,
@@ -977,6 +1154,8 @@ class PromptsConfig:
                 for index, exemple in enumerate(
                     _as_list(_get(data, "examples", path, []),
                              f"{path}.examples"))),
+            fallback_keywords=fallback_keywords,
+            responses=responses,
         )
 
 

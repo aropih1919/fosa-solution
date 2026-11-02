@@ -40,3 +40,25 @@ examples:
   - question: "Merci, au revoir"
     intent: fin
     location: ""
+
+fallback_keywords:
+  'yes': [oui, "yes", d'accord, okay, ok]
+  'no': [non, "no", "pas maintenant"]
+  stop: [stop, annule, "annule navigation", cancel, "cancel navigation"]
+  navigation: [emmene, emmener, conduis, "va a", "allez a", "take me to"]
+  localization: ["ou est", "ou sont", "ou se trouve", "where is", "where are"]
+  greeting: [bonjour, salut, hello, hi]
+  farewell: ["au revoir", bye, merci]
+
+responses:
+  farewell: "À bientôt."
+  declined: "D’accord, je reste ici."
+  no_pending_destination: "Je n’ai pas de destination en attente."
+  location_question: "{description} Voulez-vous que je vous y accompagne ?"
+  navigation_confirmation: "Je peux vous accompagner à {name}. Confirmez-vous ?"
+  emergency_unconfigured: "Urgence détectée, mais le lieu de secours n’est pas configuré."
+  navigation_pose_missing: "Je connais {name}, mais sa pose d’approche n’est pas encore disponible. Aucun déplacement n’a été lancé."
+  navigation_success: "Nous sommes arrivés à {name}."
+  navigation_failure: "Je n’ai pas pu rejoindre {name}."
+  navigation_cancelled: "Navigation arrêtée."
+  fallback: "Je n’ai pas compris. Pouvez-vous reformuler ?"

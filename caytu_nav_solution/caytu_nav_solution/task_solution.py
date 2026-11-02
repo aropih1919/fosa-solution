@@ -20,20 +20,35 @@ au bringup : aucune valeur d'essai n'est codée dans les nœuds.
 
 import math
 import os
-import shutil
 import signal
-import subprocess
 import sys
 import tempfile
 import time
 
+from caytu_config import load_config
+from caytu_nav_solution.benchmark_config import (
+    ConfigurationError,
+    validate_localization_map,
+    validate_scan_map_agreement,
+    validate_selection,
+)
+from caytu_nav_solution.nav_math import (
+    accord_scan_carte,
+    charger_carte_pgm,
+    lacet_depuis_quaternion,
+    Pose2D,
+)
+from caytu_nav_solution.navigation_runtime import (
+    BringupManager,
+    Nav2Navigator,
+    TaskTimer,
+)
+from caytu_nav_solution.task_params import (
+    load_task_params,
+    TaskParams,
+)
+from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 import rclpy
-import yaml
-from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
-from nav2_msgs.action import NavigateToPose
-from nav2_msgs.srv import ClearEntireCostmap
-from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import qos_profile_sensor_data
@@ -41,28 +56,7 @@ from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
-
-from caytu_config import load_config
-from caytu_nav_solution.benchmark_config import (
-    ConfigurationError,
-    build_experiment_config,
-    validate_localization_map,
-    validate_experiment_config,
-    validate_scan_map_agreement,
-    validate_selection,
-    write_experiment_config,
-)
-from caytu_nav_solution.nav_math import (
-    Pose2D,
-    accord_scan_carte,
-    charger_carte_pgm,
-    lacet_depuis_quaternion,
-    quaternion_depuis_lacet,
-)
-from caytu_nav_solution.task_params import (
-    TaskParams,
-    load_task_params,
-)
+import yaml
 
 # Code de sortie du programme : le shell et le jury peuvent le lire.
 # 0 = but atteint ; 1 = échec ; 2 = temps écoulé.
@@ -144,13 +138,8 @@ class SolutionTache(Node):
         validate_selection(self._controleur, self._localisation, self._profil)
 
     def _initialiser_etat(self):
-        self._processus_bringup = None      # le programme `ros2 launch` lancé
-        self._instant_depart = None         # instant de départ (horloge ROS)
         self._dernier_scan = None           # sert uniquement à vérifier la carte
-        self._dernier_log_feedback = 0.0    # date du dernier message de progression
-        self._but_en_cours = None           # but Nav2 en cours, pour l'annuler
         self._pose_amcl = None              # dernière pose publiée par AMCL
-        self._dossier_configuration = None  # YAML d'essai généré, à nettoyer
 
     def _connecter_ros(self):
         # Buffer = mémoire des TF ; TransformListener = l'abonnement qui la remplit.
@@ -159,23 +148,22 @@ class SolutionTache(Node):
         self._ecouteur_tf = TransformListener(
             self._memoire_tf, self, spin_thread=False)
 
-        # Client de l'action « va à cette position » de Nav2.
-        self._client_nav2 = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        navigation = self._configuration.navigation
+        self._chronometre = TaskTimer(
+            self.get_clock().now,
+            self.get_parameter('time_limit_sec').value,
+            self.get_parameter('stop_margin_sec').value)
+        self._bringup = BringupManager(navigation, self.get_logger())
+        self._navigateur = Nav2Navigator(
+            self, navigation, self._chronometre, self._bringup,
+            self.pose_robot,
+            success_radius=self.get_parameter('success_radius').value,
+            arrival_recheck_radius=self.get_parameter(
+                'arrival_recheck_radius').value)
 
         # Canal pour envoyer une vitesse au robot (avancer / tourner).
         self._publicateur_vitesse = self.create_publisher(
             Twist, self.get_parameter('cmd_vel_topic').value, 10)
-
-        # Deux services pour vider les costmaps entre deux tentatives.
-        reglages_navigation = self._configuration.navigation
-        self._clients_vidage_costmap = [
-            self.create_client(
-                ClearEntireCostmap,
-                reglages_navigation.global_costmap_clear_service),
-            self.create_client(
-                ClearEntireCostmap,
-                reglages_navigation.local_costmap_clear_service),
-        ]
 
         # On s'abonne à /scan uniquement pour vérifier la carte au démarrage.
         self._abonnement_scan = self.create_subscription(
@@ -212,16 +200,11 @@ class SolutionTache(Node):
 
     def temps_ecoule(self):
         """Temps écoulé depuis le lancement de la solution (horloge du nœud)."""
-        if self._instant_depart is None:
-            return 0.0
-        difference = self.get_clock().now() - self._instant_depart
-        return difference.nanoseconds * 1e-9
+        return self._chronometre.elapsed()
 
     def temps_restant(self):
         """Temps restant avant la limite officielle, marge de sécurité déduite."""
-        return (float(self.get_parameter('time_limit_sec').value)
-                - float(self.get_parameter('stop_margin_sec').value)
-                - self.temps_ecoule())
+        return self._chronometre.remaining()
 
     def pose_robot(self):
         """Pose du robot dans map, ou None si la TF n'est pas encore connue."""
@@ -250,18 +233,16 @@ class SolutionTache(Node):
         return pose.distance_vers(self._task.goal_x, self._task.goal_y)
 
     def bringup_est_vivant(self):
-        # poll() renvoie None tant que le programme tourne, un code quand il est
-        # terminé. Si aucun programme n'a été lancé (launch_bringup=false), on
-        # considère qu'il est « vivant » pour ne pas bloquer la mission.
-        return (self._processus_bringup is None
-                or self._processus_bringup.poll() is None)
+        # Si aucun programme n'a été lancé (launch_bringup=false), le bringup
+        # est considéré comme vivant pour ne pas bloquer la mission.
+        return self._bringup.alive()
 
     # ------------------------------------------------------------------ carte
     def choisir_carte(self):
         """Retourne le YAML de carte à donner à Nav2 (murs réels ou carte vide)."""
         mode = str(self.get_parameter('static_map').value).lower()
         if mode not in ('auto', 'always', 'never'):
-            raise ConfigurationError(f"static_map inconnu : {mode}")
+            raise ConfigurationError(f'static_map inconnu : {mode}')
 
         # AMCL exige une carte statique cohérente : elle ne peut pas être vide.
         carte_obligatoire = self._localisation == 'amcl'
@@ -278,8 +259,8 @@ class SolutionTache(Node):
         if mode == 'never':
             if carte_obligatoire:
                 raise ConfigurationError(
-                    "AMCL ne peut pas démarrer avec static_map=never : une carte "
-                    "statique connue et cohérente est obligatoire.")
+                    'AMCL ne peut pas démarrer avec static_map=never : une carte '
+                    'statique connue et cohérente est obligatoire.')
             self.get_logger().info('Carte des murs désactivée (static_map=never).')
             return self.ecrire_carte_vide()
 
@@ -295,7 +276,7 @@ class SolutionTache(Node):
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as erreur:
             if carte_obligatoire:
                 raise ConfigurationError(
-                    f"AMCL indisponible : carte statique illisible ({erreur})."
+                    f'AMCL indisponible : carte statique illisible ({erreur}).'
                 ) from erreur
             self.get_logger().warn(
                 f'Carte illisible ({erreur}) : navigation sans carte.')
@@ -313,7 +294,7 @@ class SolutionTache(Node):
             if carte_obligatoire:
                 raise ConfigurationError(
                     "AMCL indisponible : aucun scan lidar n'est arrivé pour valider "
-                    "la cohérence de la carte.")
+                    'la cohérence de la carte.')
             # Pas de lidar : on ne peut rien vérifier. On garde la carte du
             # café, car c'est le cas normal de l'évaluation.
             self.get_logger().warn(
@@ -410,81 +391,21 @@ class SolutionTache(Node):
                 'launch_bringup=false : le bringup doit déjà tourner.')
             return
 
-        utiliser_temps_simulation = self.get_parameter('use_sim_time').value
-        fichier_parametres = str(self.get_parameter('nav2_params_file').value)
-
-        if fichier_parametres:
-            if not os.path.isfile(fichier_parametres):
-                raise ConfigurationError(
-                    f"nav2_params_file absent : {fichier_parametres}")
-            with open(fichier_parametres, encoding='utf-8') as flux:
-                configuration = yaml.safe_load(flux)
-            if not isinstance(configuration, dict):
-                raise ConfigurationError(
-                    "nav2_params_file doit contenir un mapping YAML complet.")
-            validate_experiment_config(
-                configuration, self._controleur, self._localisation, self._profil)
-        else:
-            # Le laboratoire fusionne nav2_params + contrôleur + profil +
-            # localisation dans un seul YAML, puis le passe au bringup.
-            self._dossier_configuration = tempfile.mkdtemp(
-                prefix='fosa_nav_config_')
-            fichier_parametres = os.path.join(
-                self._dossier_configuration, 'params.yaml')
-            configuration = build_experiment_config(
-                self._controleur,
-                self._localisation,
-                self._profil,
-                self._task.spawn,
-                use_sim_time=utiliser_temps_simulation,
-            )
-            write_experiment_config(configuration, fichier_parametres)
-
-        # On construit une LISTE de morceaux de commande, et non une seule
-        # grande chaîne : une liste ne passe pas par le shell, donc un caractère
-        # spécial dans un chemin ne peut pas être interprété comme une commande.
-        commande = [
-            'ros2', 'launch',
-            self.get_parameter('bringup_package').value,
-            self.get_parameter('bringup_launch').value,
-            f'use_sim_time:={"true" if utiliser_temps_simulation else "false"}',
-            f'map:={chemin_carte}',
-            f'controller:={self._controleur}',
-            f'localization:={self._localisation}',
-            f'profile:={self._profil}',
-            f'params_file:={fichier_parametres}',
-            f'task_params_file:={self._task.path}',
-            f'initial_pose_x:={self._task.spawn.x}',
-            f'initial_pose_y:={self._task.spawn.y}',
-            f'initial_pose_yaw:={self._task.spawn.yaw}',
-        ]
-        self.get_logger().info('Démarrage de la solution : ' + ' '.join(commande))
-
-        # Groupe de processus dédié : permet d'arrêter tout le bringup d'un coup.
-        self._processus_bringup = subprocess.Popen(
-            commande, start_new_session=True)
+        self._bringup.start(
+            map_yaml=chemin_carte,
+            use_sim_time=self.get_parameter('use_sim_time').value,
+            params_file=self.get_parameter('nav2_params_file').value,
+            controller=self._controleur,
+            localization=self._localisation,
+            profile=self._profil,
+            task_params_path=self._task.path,
+            spawn=self._task.spawn,
+            bringup_package=self.get_parameter('bringup_package').value,
+            bringup_launch=self.get_parameter('bringup_launch').value,
+        )
 
     def arreter_bringup(self):
-        if (self._processus_bringup is None
-                or self._processus_bringup.poll() is not None):
-            return
-
-        self.get_logger().info('Arrêt du bringup...')
-        # On essaie d'abord un arrêt propre, puis plus fort si nécessaire.
-        temporisations = self._configuration.navigation.bringup_stop_timeouts
-        for signal_envoye, attente in zip(
-                (signal.SIGINT, signal.SIGTERM, signal.SIGKILL),
-                temporisations):
-            try:
-                os.killpg(
-                    os.getpgid(self._processus_bringup.pid), signal_envoye)
-            except ProcessLookupError:
-                return
-            try:
-                self._processus_bringup.wait(timeout=attente)
-                return
-            except subprocess.TimeoutExpired:
-                continue
+        self._bringup.stop()
 
     def arreter_robot(self):
         """Envoie plusieurs commandes nulles : le robot reste où il est.
@@ -501,20 +422,10 @@ class SolutionTache(Node):
 
     def sequence_arret(self):
         """Arrêt ordonné, quel que soit le motif (arrivée, échec, Ctrl-C)."""
-        if rclpy.ok() and self._but_en_cours is not None:
-            # Nav2 doit cesser de commander le robot avant qu'on l'arrête.
-            future_annulation = self._but_en_cours.cancel_goal_async()
-            fin = time.monotonic() + self._configuration.navigation.cancel_timeout_sec
-            while (rclpy.ok() and not future_annulation.done()
-                   and time.monotonic() < fin):
-                rclpy.spin_once(self, timeout_sec=0.05)
-            self._but_en_cours = None
-
+        # Nav2 doit cesser de commander le robot avant qu'on l'arrête.
+        self._navigateur.annuler_but()
         self.arreter_robot()
         self.arreter_bringup()
-        if self._dossier_configuration is not None:
-            shutil.rmtree(self._dossier_configuration, ignore_errors=True)
-            self._dossier_configuration = None
         # Dernière commande nulle une fois que plus rien ne peut en publier.
         self.arreter_robot()
 
@@ -527,173 +438,26 @@ class SolutionTache(Node):
             if self.get_clock().now().nanoseconds > 0:
                 break
 
-        self._instant_depart = self.get_clock().now()
-        if self._instant_depart.nanoseconds == 0:
+        if not self._chronometre.start():
             self.get_logger().warn(
                 'Horloge /clock absente : la simulation tourne-t-elle ?')
 
     def attendre_nav2(self):
         """Attend que Nav2 accepte des buts et que le robot soit localisé."""
-        delai = float(self.get_parameter('nav2_startup_timeout_sec').value)
-        debut = time.monotonic()
-        dernier_log = debut
-
-        while rclpy.ok():
-            self.traiter_messages_pendant(0.2)
-            serveur_pret = self._client_nav2.server_is_ready()
-            robot_localise = (
-                self.pose_robot() is not None
-                and (self._localisation != 'amcl' or self._pose_amcl is not None))
-
-            if serveur_pret and robot_localise:
-                self.get_logger().info(
-                    f'Nav2 prêt et robot localisé après '
-                    f'{time.monotonic() - debut:.1f} s réelles.')
-                return True
-
-            if not self.bringup_est_vivant():
-                self.get_logger().error(
-                    'Le bringup s\'est arrêté pendant le démarrage.')
-                return False
-
-            if (self.temps_restant() <= 0.0
-                    or time.monotonic() - debut > delai):
-                self.get_logger().error(
-                    'Nav2 n\'est pas devenu disponible à temps.')
-                return False
-
-            if time.monotonic() - dernier_log > 5.0:
-                dernier_log = time.monotonic()
-                self.get_logger().info(
-                    f'Attente de Nav2 (serveur d\'action : '
-                    f'{"oui" if serveur_pret else "non"}, '
-                    f'localisation : {"oui" if robot_localise else "non"})...')
-
-        return False
-
-    def message_but(self):
-        pose = self.pose_robot() or self._task.spawn
-        cap = math.atan2(
-            self._task.goal_y - pose.y,
-            self._task.goal_x - pose.x)
-
-        but = PoseStamped()
-        but.header.frame_id = self._repere_global
-        but.header.stamp = self.get_clock().now().to_msg()
-        but.pose.position.x = self._task.goal_x
-        but.pose.position.y = self._task.goal_y
-
-        qx, qy, qz, qw = quaternion_depuis_lacet(cap)
-        but.pose.orientation.x = qx
-        but.pose.orientation.y = qy
-        but.pose.orientation.z = qz
-        but.pose.orientation.w = qw
-
-        message = NavigateToPose.Goal()
-        message.pose = but
-        return message
-
-    def recevoir_feedback(self, message_feedback):
-        maintenant = time.monotonic()
-        periode = self._configuration.navigation.feedback_log_period_sec
-        if maintenant - self._dernier_log_feedback < periode:
-            return
-        self._dernier_log_feedback = maintenant
-
-        distance_restante = getattr(
-            message_feedback.feedback, 'distance_remaining', float('nan'))
-        self.get_logger().info(
-            f'En route : {distance_restante:.2f} m restants, '
-            f'{self.temps_ecoule():.0f} s écoulées.')
-
-    def vider_costmaps(self):
-        for client in self._clients_vidage_costmap:
-            if client.service_is_ready():
-                client.call_async(ClearEntireCostmap.Request())
+        return self._navigateur.attendre_pret(
+            lambda: self._pose_amcl is not None,
+            self._localisation,
+            float(self.get_parameter('nav2_startup_timeout_sec').value))
 
     def est_arrive(self):
-        distance = self.distance_vers_but()
-        return (distance is not None
-                and distance <= float(
-                    self.get_parameter('success_radius').value))
-
-    def attendre_future(self, future):
-        """Traite les messages ROS jusqu'à ce que `future` soit terminé.
-
-        Retourne :
-          - 'ok'           : la future est terminée (ou rclpy s'arrête) ;
-          - 'temps_ecoule' : la limite de temps est atteinte ;
-          - 'arret'        : le bringup s'est arrêté.
-        """
-        while rclpy.ok() and not future.done():
-            rclpy.spin_once(self, timeout_sec=0.05)
-            if self.temps_restant() <= 0.0:
-                return 'temps_ecoule'
-            if not self.bringup_est_vivant():
-                return 'arret'
-        return 'ok'
-
-    def annuler_but(self, but):
-        """Annule le but en cours et attend au maximum la temporisation configurée."""
-        future_annulation = but.cancel_goal_async()
-        fin = time.monotonic() + self._configuration.navigation.cancel_timeout_sec
-        while (rclpy.ok() and not future_annulation.done()
-               and time.monotonic() < fin):
-            rclpy.spin_once(self, timeout_sec=0.05)
+        return self._navigateur.est_arrive(
+            self._task.goal_x, self._task.goal_y)
 
     def naviguer_une_fois(self):
-        """Un envoi du but.
-
-        Résultats possibles :
-          - 'succes'       : but atteint ;
-          - 'reessayer'    : échec de Nav2, on renvoie le but ;
-          - 'refuse'       : Nav2 n'est pas encore actif, on insiste ;
-          - 'temps_ecoule' : limite de temps atteinte ;
-          - 'arret'        : le bringup s'est arrêté.
-        """
-        future_envoi = self._client_nav2.send_goal_async(
-            self.message_but(), feedback_callback=self.recevoir_feedback)
-        resultat = self.attendre_future(future_envoi)
-        if resultat != 'ok':
-            return resultat
-
-        but = future_envoi.result() if future_envoi.done() else None
-        if but is None or not but.accepted:
-            return 'refuse'
-        self._but_en_cours = but
-
-        future_resultat = but.get_result_async()
-        resultat = self.attendre_future(future_resultat)
-        if resultat == 'temps_ecoule':
-            self.get_logger().error(
-                'Limite de temps atteinte : annulation du but.')
-            self.annuler_but(but)
-            return 'temps_ecoule'
-        if resultat == 'arret':
-            return 'arret'
-
-        self._but_en_cours = None
-        resultat_final = (future_resultat.result()
-                          if future_resultat.done() else None)
-        statut = (resultat_final.status if resultat_final is not None
-                  else GoalStatus.STATUS_UNKNOWN)
-
-        if statut == GoalStatus.STATUS_SUCCEEDED:
-            distance = self.distance_vers_but()
-            limite = float(self.get_parameter('arrival_recheck_radius').value)
-            if distance is not None and distance > limite:
-                self.get_logger().warn(
-                    f'Nav2 annonce l\'arrivée mais le robot est à '
-                    f'{distance:.2f} m du but : nouvel envoi.')
-                return 'reessayer'
-            return 'succes'
-
-        if self.est_arrive():
-            return 'succes'
-
-        self.get_logger().warn(
-            f'Nav2 a interrompu la navigation (statut {statut}).')
-        return 'reessayer'
+        """Un envoi du but, avec réessais gérés par le navigateur."""
+        return self._navigateur.naviguer_une_fois(
+            self._task.goal_x, self._task.goal_y, self._repere_global,
+            self._task.spawn)
 
     # ------------------------------------------------------------------- tâche
     def executer_mission(self):
@@ -733,7 +497,7 @@ class SolutionTache(Node):
                 # toucher aux costmaps ni compter une tentative.
                 if refus % 10 == 0:
                     self.get_logger().info(
-                        'Nav2 n\'accepte pas encore de but, nouvel essai...')
+                        "Nav2 n'accepte pas encore de but, nouvel essai...")
                 refus += 1
                 self.traiter_messages_pendant(0.5)
                 continue
@@ -760,11 +524,11 @@ class SolutionTache(Node):
 
             if resultat == 'arret':
                 self.get_logger().error(
-                    'Le bringup s\'est arrêté : navigation impossible.')
+                    "Le bringup s'est arrêté : navigation impossible.")
                 return EXIT_FAILURE
 
             # Échec récupérable : on repart avec des costmaps propres.
-            self.vider_costmaps()
+            self._navigateur.vider_costmaps()
             self.traiter_messages_pendant(
                 float(self.get_parameter('retry_pause_sec').value))
 
@@ -823,7 +587,7 @@ def main(args=None):
                 noeud.sequence_arret()
             except Exception as erreur:
                 print(
-                    f'task_solution: erreur pendant l\'arrêt : {erreur!r}',
+                    f"task_solution: erreur pendant l'arrêt : {erreur!r}",
                     file=sys.stderr)
                 noeud.arreter_bringup()
             noeud.destroy_node()

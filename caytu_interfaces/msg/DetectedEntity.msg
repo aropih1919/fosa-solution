@@ -1,0 +1,11 @@
+std_msgs/Header header
+uint32 track_id
+string class_name
+float32 confidence
+geometry_msgs/Point position
+float32 distance_m
+float32 bearing_rad
+geometry_msgs/Vector3 velocity
+bool is_person
+bool is_dynamic
+string source

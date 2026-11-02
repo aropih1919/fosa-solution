@@ -63,17 +63,24 @@ perception:
   top_info_topic: /top_camera_color/camera_info
   bottom_color_topic: /bottom_camera_color/image_raw
   bottom_depth_topic: /bottom_camera_depth/points
+  entities_topic: /perception/entities
+  tags_topic: /perception/tags
+  person_events_topic: /perception/person_events
 
   apriltag:
     family: 36h11
     size_m: 0.18
     max_distance_m: 4.0
     detector: opencv              # opencv | apriltag_ros
+    calibration_samples: 10
+    calibration_file: ~/.ros/fosa_tag_calibration.yaml
 
   yolo:
     enabled: false                # true seulement si le modèle est présent
     model_path: models/yolo11n.onnx
     confidence: 0.45
+    input_size: 640
+    person_class_index: 0
     max_fps: 8.0
     device: cpu
 
@@ -84,6 +91,14 @@ perception:
     consecutive_frames: 3
     cooldown_sec: 25.0
     dynamic_speed_mps: 0.10
+    min_height_m: 0.80
+    max_width_m: 1.20
+    cluster_tolerance_m: 0.18
+    min_cluster_points: 12
+    tracker_match_m: 0.45
+    bearing_tolerance_rad: 0.25
+    front_fov_rad: 1.57
+    robot_stop_threshold_mps: 0.03
 
   # Conversion des nuages de points caméra en LaserScan pour Nav2.
   top_scan:
@@ -123,25 +138,38 @@ audio:
   output_device: default
   sample_rate: 16000
   vad_threshold: 0.50
+  vad_rms_scale: 0.03
+  vad_frame_ms: 100
   silence_ms: 700
+  piper_executable: piper
+  audio_player: aplay
 
 dialogue:
   languages: [fr, en]
+  default_input_mode: microphone
+  greeting_reply: "Bonjour, comment puis-je vous aider ?"
+  greeting_en_reply: "Hello, how can I help you?"
   stt:
     provider: local               # local | api | auto
     local_model: small            # faster-whisper : tiny | base | small
+    local_device: cpu
+    local_compute_type: int8
     api_model: whisper-1
+    api_base: https://api.openai.com/v1
     timeout_sec: 8.0
   tts:
     provider: local               # local | api | auto
-    local_voice: fr_FR-siwis-medium
+    local_voice: models/fr_FR-siwis-medium.onnx
     api_voice: ""
+    api_model: tts-1
+    api_base: https://api.openai.com/v1
     timeout_sec: 5.0
   llm:
     provider: local               # local | api | auto
     local_model: qwen2.5:3b
+    local_base: http://127.0.0.1:11434
     api_model: ""
-    api_base: ""
+    api_base: https://api.openai.com/v1
     timeout_sec: 8.0
     max_retries: 2
     temperature: 0.2
@@ -150,6 +178,9 @@ dialogue:
   listening_timeout_sec: 10.0
   unknown_location_reply: "Je ne connais pas ce lieu, l'accueil pourra vous renseigner."
   unknown_information_reply: "Je n'ai pas cette information, l'accueil pourra vous renseigner."
+  transcript_topic: /assistant/transcript
+  response_topic: /assistant/response
+  state_topic: /assistant/state
 
 mission:
   greeting_enabled: true

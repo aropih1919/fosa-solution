@@ -5,6 +5,9 @@
 
 world: cafe
 frame: map
+locations_topic: /semantic_map/locations
+resolve_service: /semantic_map/resolve_location
+by_tag_service: /semantic_map/get_location_by_tag
 
 locations:
   - name: accueil
@@ -12,27 +15,32 @@ locations:
     tag_ids: [10]
     description: "Point d'accueil des visiteurs."
     category: service
+    approach_offset_m: 0.8
 
   - name: toilettes
     aliases: [wc, sanitaires, latrines]
     tag_ids: [11]
     description: "Toilettes accessibles aux visiteurs."
     category: service
+    approach_offset_m: 0.8
 
   - name: buvette
     aliases: [cafe, snack, restauration]
     tag_ids: [12]
     description: "Buvette et espace de restauration."
     category: service
+    approach_offset_m: 0.8
 
   - name: infirmerie
     aliases: [secours, premiers secours, soins]
     tag_ids: [13]
     description: "Poste de secours et d'urgence."
     category: urgence
+    approach_offset_m: 0.8
 
   - name: terrain
     aliases: [stade, pelouse, match]
     tag_ids: [14]
     description: "Terrain principal où se déroulent les épreuves."
     category: animation
+    approach_offset_m: 0.8

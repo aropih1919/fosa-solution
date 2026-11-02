@@ -619,56 +619,74 @@ EMERGENCY
 
 ### Lot 3 — Extraction navigation
 
-- [ ] Extraire `BringupManager`, `Nav2Navigator`, `TaskTimer` de
+- [x] Extraire `BringupManager`, `Nav2Navigator`, `TaskTimer` de
   `task_solution.py`.
-- [ ] `task_solution.py` conserve exactement le comportement phase 1.
-- [ ] Tests unitaires des classes extraites.
-- [ ] `assistant_solution.py` peut réutiliser le client Nav2.
+- [ ] `task_solution.py` conserve exactement le comportement phase 1
+  (simulation officielle à rejouer après intégration).
+- [x] Tests unitaires des classes extraites.
+- [x] Le client Nav2 extrait est réutilisable depuis un autre nœud ROS 2.
+
+**Essai de reprise (2026-11-02)** : le build et les 70 tests du paquet passent.
+La simulation officielle a été lancée, mais son facteur temps réel était
+d'environ 0,07 ; à 14 s simulées, Nav2 a expiré deux attentes de
+`compute_path_to_pose` (statut d'action 6) et la navigation n'était pas
+terminée. Le test a été interrompu proprement ; la non-régression phase 1 reste
+à confirmer sur un simulateur assez rapide.
 
 ### Lot 4 — Interfaces + carte sémantique
 
-- [ ] Créer `caytu_interfaces`.
-- [ ] Créer `caytu_semantic_map` + services.
-- [ ] Résolution nom/alias/tag.
+- [x] Créer `caytu_interfaces`.
+- [x] Créer `caytu_semantic_map` + services.
+- [x] Résolution nom/alias/tag.
 - [ ] Tests sans ROS (registre) + test ROS du service.
 
 ### Lot 5 — Cœur assistant
 
-- [ ] Porter `validateur.py`, `registre.py`, `action.py`, `models.py`.
+- [x] Porter la validation d'intention, le registre et le dispatcher sûr.
 - [ ] Porter les tests `pole_nlp`.
-- [ ] Créer `llm_client.py` (Ollama + API + LangChain).
-- [ ] Dispatcher ROS : `naviguer`, `localiser`, `parler`, `terminer`.
-- [ ] Fallback rule-based si LLM indisponible.
+- [x] Créer `llm_client.py` (Ollama + API compatible OpenAI).
+- [x] Dispatcher : navigation, localisation, information, confirmation,
+  urgence, annulation et fin.
+- [x] Fallback rule-based si LLM indisponible.
+
+Note : le client utilise directement les API HTTP structurées; LangChain n'est
+pas nécessaire au chemin d'exécution actuel. Les scénarios restent à valider.
 
 ### Lot 6 — Voix
 
-- [ ] Nœud STT (VAD + Whisper/faster-whisper).
-- [ ] Nœud TTS (Piper + API + cache).
-- [ ] Mode `text` (stdin) et mode `audio file` pour les tests.
-- [ ] Config devices audio.
+- [x] Nœud STT (VAD + Whisper/faster-whisper local ou API).
+- [x] Nœud TTS (Piper ou API; sans cache de synthèse).
+- [x] Mode `text` et mode `audio_file`.
+- [x] Configuration des périphériques audio.
 - [ ] Tests : transcript simulé, TTS indisponible, mode hors ligne.
 
 ### Lot 7 — Perception
 
-- [ ] `tag_detector` + `tag_calibrator`.
-- [ ] `obstacle_classifier` (YOLO + géométrie).
-- [ ] `person_tracker` + événements.
+- [x] `tag_detector` + `tag_calibrator`.
+- [x] `obstacle_classifier` (YOLO facultatif + géométrie).
+- [x] `person_tracker` + événements configurables.
 - [ ] Tests : tag synthétique, personne synthétique, pas de YOLO.
 - [ ] Vérifier que Nav2 n'est pas impacté.
 
 ### Lot 8 — Mission et intégration
 
-- [ ] `dialogue_manager` + machine à états.
-- [ ] `assistant_solution.py` + `assistant.launch.py`.
-- [ ] Guidage, confirmation, urgence, stop.
+- [x] `dialogue_manager` + états de dialogue.
+- [x] `assistant_solution.py` + `assistant.launch.py`.
+- [x] Guidage Nav2, confirmation, urgence et stop au niveau code.
 - [ ] Scénarios de test dans Gazebo.
 - [ ] Mode `remote_pc` testé.
+
+Le watchdog réseau indiqué dans l'architecture cible n'est pas implémenté;
+le mode `remote_pc` n'est donc pas prêt pour une validation sur robot.
 
 ### Lot 9 — Durcissement
 
 - [ ] Latence mesurée (STT, LLM, TTS, bout en bout).
 - [ ] Mode hors ligne complet.
-- [ ] Docs : `GUIDE_CONFIG.md`, `GUIDE_ASSISTANT.md`, README.
+- [x] Guide de validation manuelle : `docs/GUIDE_TESTS_PHASE_FINALE.md`.
+- [x] Contexte persistant pour les IA suivantes : `AGENTS.md` et
+  `docs/REPRISE_IA_PHASE_FINALE.md`.
+- [ ] Docs complémentaires : `GUIDE_CONFIG.md`, `GUIDE_ASSISTANT.md`, README.
 - [ ] Vidéo de démo.
 - [ ] Zip de soumission sans `build/`, `install/`, `log/`, `results/`,
   modèles lourds, clés.
@@ -741,6 +759,9 @@ EMERGENCY
   `chore:`.
 - Code métier en français, termes techniques en anglais (comme
   `refactor/franglais`).
+- Voir `AGENTS.md` pour les règles détaillées de nommage en français et la
+  règle de configuration centralisée; toute IA qui reprend le dépôt doit le
+  lire avant de coder.
 - Un lot = un commit cohérent, tests verts avant commit.
 - Ne jamais committer `results/`, `log/`, `build/`, `install/`, caches,
   modèles lourds, clés.
@@ -779,10 +800,13 @@ ros2 run caytu_assistant dialogue_manager --ros-args -p input_mode:=text
 Ordre de lecture :
 
 1. ce document ;
-2. `docs/GUIDE_MODIFICATION.md` (refactor/franglais) ;
-3. `docs/navigation-lab/ARCHITECTURE.md` (benchmark) ;
-4. `caytu_config/config/fosa.yaml` (une fois créé) ;
-5. `pole_nlp` (dépôt externe) pour le dispatcher et le prompt.
+2. `AGENTS.md` et `docs/REPRISE_IA_PHASE_FINALE.md` ;
+3. `docs/GUIDE_MODIFICATION.md` (refactor/franglais) ;
+4. `docs/navigation-lab/ARCHITECTURE.md` (benchmark) ;
+5. `caytu_config/config/fosa.yaml` ;
+6. `docs/GUIDE_TESTS_PHASE_FINALE.md` pour les scénarios manuels.
+7. Dépôt NLP d'origine : [Faneva01/pole_nlp](https://github.com/Faneva01/pole_nlp)
+   pour les anciens validateurs, règles, actions et prompts.
 
 Règles de reprise :
 
@@ -792,5 +816,7 @@ Règles de reprise :
 - ne pas mettre de coordonnées ou de seuils dans le code ;
 - ne pas faire appeler Nav2 directement par le LLM ;
 - vérifier la phase 1 après chaque lot.
+- ne pas lancer Gazebo ni annoncer une acceptation manuelle sans confirmation
+  explicite de l'équipe.
 
 État des lots : voir la section 8. Cocher les cases au fur et à mesure.
