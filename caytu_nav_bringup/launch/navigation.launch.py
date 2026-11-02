@@ -27,28 +27,76 @@ def _creer_noeuds_nav2(context):
         LaunchConfiguration("use_sim_time").perform(context).lower() == "true")
     chemin_carte = LaunchConfiguration("map").perform(context)
     controleur = LaunchConfiguration("controller").perform(context)
+    localisation = LaunchConfiguration("localization").perform(context)
+    fichier_parametres_essai = LaunchConfiguration("params_file").perform(context)
 
     fichier_parametres = os.path.join(
         dossier_bringup, "config", "nav2_params.yaml")
     fichier_controleur = os.path.join(
         dossier_bringup, "config", f"controller_{controleur}.yaml")
-    if not os.path.isfile(fichier_controleur):
+
+    if not fichier_parametres_essai:
+        if controleur == "mppi":
+            raise RuntimeError(
+                "MPPI exige le YAML complet params_file généré par task_solution.py.")
+        if not os.path.isfile(fichier_controleur):
+            raise RuntimeError(
+                f"Contrôleur inconnu : {controleur} ({fichier_controleur} absent)")
+    elif not os.path.isfile(fichier_parametres_essai):
         raise RuntimeError(
-            f"Contrôleur inconnu : {controleur} ({fichier_controleur} absent)")
+            f"Fichier de paramètres introuvable : {fichier_parametres_essai}")
+    if localisation == "amcl" and not fichier_parametres_essai:
+        raise RuntimeError(
+            "AMCL exige un YAML complet avec pose initiale validée.")
 
     # Chemin résolu dans le package installé : aucun chemin personnel en dur.
     fichier_arbre_comportement = os.path.join(
         dossier_bringup, "behavior_trees", "navigate_bounded_recovery.xml")
     temps_simulation = {"use_sim_time": utiliser_temps_simulation}
 
-    return [
+    if fichier_parametres_essai:
+        parametres_communs = [fichier_parametres_essai, temps_simulation]
+        parametres_controleur = [fichier_parametres_essai, temps_simulation]
+    else:
+        parametres_communs = [fichier_parametres, temps_simulation]
+        parametres_controleur = [
+            fichier_parametres, fichier_controleur, temps_simulation]
+
+    noeuds_cycle_vie = list(NOEUDS_CYCLE_VIE)
+    if localisation == "amcl":
+        noeuds_cycle_vie.insert(1, "amcl")
+
+    noeuds = [
         Node(
             package="nav2_map_server",
             executable="map_server",
             name="map_server",
             output="screen",
-            parameters=[temps_simulation, {"yaml_filename": chemin_carte}],
+            parameters=parametres_communs + [{"yaml_filename": chemin_carte}],
         ),
+    ]
+
+    if localisation == "amcl":
+        pose_initiale = {
+            "x": float(LaunchConfiguration("initial_pose_x").perform(context)),
+            "y": float(LaunchConfiguration("initial_pose_y").perform(context)),
+            "z": 0.0,
+            "yaw": float(LaunchConfiguration("initial_pose_yaw").perform(context)),
+        }
+        noeuds.append(Node(
+            package="nav2_amcl",
+            executable="amcl",
+            name="amcl",
+            output="screen",
+            parameters=parametres_communs + [{
+                "set_initial_pose": True,
+                "always_reset_initial_pose": True,
+                "initial_pose": pose_initiale,
+                "use_sim_time": utiliser_temps_simulation,
+            }],
+        ))
+
+    noeuds.extend([
         Node(
             package="nav2_controller",
             executable="controller_server",
@@ -56,7 +104,7 @@ def _creer_noeuds_nav2(context):
             output="screen",
             # Le fichier du contrôleur est chargé après nav2_params.yaml : il
             # complète controller_server avec le plugin FollowPath choisi.
-            parameters=[fichier_parametres, fichier_controleur, temps_simulation],
+            parameters=parametres_controleur,
             remappings=[("cmd_vel", TOPIC_VITESSE)],
         ),
         Node(
@@ -64,14 +112,14 @@ def _creer_noeuds_nav2(context):
             executable="planner_server",
             name="planner_server",
             output="screen",
-            parameters=[fichier_parametres, temps_simulation],
+            parameters=parametres_communs,
         ),
         Node(
             package="nav2_behaviors",
             executable="behavior_server",
             name="behavior_server",
             output="screen",
-            parameters=[fichier_parametres, temps_simulation],
+            parameters=parametres_communs,
             remappings=[("cmd_vel", TOPIC_VITESSE)],
         ),
         Node(
@@ -79,11 +127,9 @@ def _creer_noeuds_nav2(context):
             executable="bt_navigator",
             name="bt_navigator",
             output="screen",
-            parameters=[
-                fichier_parametres,
-                temps_simulation,
-                {"default_nav_to_pose_bt_xml": fichier_arbre_comportement},
-            ],
+            parameters=parametres_communs + [{
+                "default_nav_to_pose_bt_xml": fichier_arbre_comportement,
+            }],
         ),
         Node(
             package="nav2_lifecycle_manager",
@@ -92,7 +138,7 @@ def _creer_noeuds_nav2(context):
             output="screen",
             parameters=[temps_simulation, {
                 "autostart": True,
-                "node_names": NOEUDS_CYCLE_VIE,
+                "node_names": noeuds_cycle_vie,
                 # La simulation tourne bien plus lentement que le temps réel :
                 # on laisse aux nœuds le temps de répondre avant de les
                 # déclarer morts.
@@ -101,7 +147,8 @@ def _creer_noeuds_nav2(context):
                 "bond_respawn_max_duration": 20.0,
             }],
         ),
-    ]
+    ])
+    return noeuds
 
 
 def generate_launch_description():
@@ -115,7 +162,20 @@ def generate_launch_description():
                 dossier_bringup, "maps", "cafe_map.yaml"),
             description="Fichier YAML de la carte statique."),
         DeclareLaunchArgument(
-            "controller", default_value="rpp", choices=["rpp", "dwb"],
-            description="Contrôleur local : config/controller_<nom>.yaml."),
+            "controller", default_value="rpp", choices=["rpp", "dwb", "mppi"],
+            description="Contrôleur local : fichier dédié ou YAML complet."),
+        DeclareLaunchArgument(
+            "localization", default_value="odom_imu",
+            choices=["odom_imu", "odom_only", "amcl"],
+            description="Localisation sélectionnée par solution_bringup.launch.py."),
+        DeclareLaunchArgument(
+            "profile", default_value="balanced",
+            description="Profil de benchmark déjà fusionné dans params_file."),
+        DeclareLaunchArgument(
+            "params_file", default_value="",
+            description="YAML complet généré par task_solution.py (essai benchmark)."),
+        DeclareLaunchArgument("initial_pose_x", default_value="0.0"),
+        DeclareLaunchArgument("initial_pose_y", default_value="0.0"),
+        DeclareLaunchArgument("initial_pose_yaw", default_value="0.0"),
         OpaqueFunction(function=_creer_noeuds_nav2),
     ])

@@ -12,20 +12,26 @@ Ce nœud exécute TOUTE la solution, sans aucune intervention manuelle :
   4. envoie le but à Nav2 et le renvoie après chaque échec, tant que la limite
      de 10 minutes n'est pas atteinte ;
   5. arrête le robot sur le but et ferme proprement tout ce qu'il a lancé.
+
+Le laboratoire de navigation peut choisir un couple profil / contrôleur /
+localisation. Le YAML complet correspondant est généré au démarrage et passé
+au bringup : aucune valeur d'essai n'est codée dans les nœuds.
 """
 
 import math
 import os
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+from typing import Optional
 
 import rclpy
 import yaml
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 from rclpy.action import ActionClient
@@ -37,6 +43,15 @@ from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 
+from caytu_nav_solution.benchmark_config import (
+    ConfigurationError,
+    build_experiment_config,
+    validate_localization_map,
+    validate_experiment_config,
+    validate_scan_map_agreement,
+    validate_selection,
+    write_experiment_config,
+)
 from caytu_nav_solution.nav_math import (
     Pose2D,
     accord_scan_carte,
@@ -92,7 +107,10 @@ class SolutionTache(Node):
         self.declare_parameter('launch_bringup', True)
         self.declare_parameter('bringup_package', 'caytu_nav_bringup')
         self.declare_parameter('bringup_launch', 'solution_bringup.launch.py')
-        self.declare_parameter('controller', 'rpp')                 # rpp | dwb
+        self.declare_parameter('controller', 'rpp')                 # rpp | dwb | mppi
+        self.declare_parameter('localization', 'odom_imu')
+        self.declare_parameter('profile', 'balanced')
+        self.declare_parameter('nav2_params_file', '')
 
         # Carte des murs : auto (vérifiée avec le lidar), always, never.
         # (Pas « on/off » : YAML les lirait comme des booléens.)
@@ -105,6 +123,7 @@ class SolutionTache(Node):
         self.declare_parameter('global_frame', 'map')
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('scan_topic', '/scan')
+        self.declare_parameter('amcl_pose_topic', '/amcl_pose')
         self.declare_parameter(
             'cmd_vel_topic', '/robot_base_controller/cmd_vel_unstamped')
 
@@ -116,12 +135,21 @@ class SolutionTache(Node):
         self._repere_global = self.get_parameter('global_frame').value
         self._repere_robot = self.get_parameter('base_frame').value
 
+        self._controleur = str(
+            self.get_parameter('controller').value).lower()
+        self._localisation = str(
+            self.get_parameter('localization').value).lower()
+        self._profil = str(self.get_parameter('profile').value).lower()
+        validate_selection(self._controleur, self._localisation, self._profil)
+
     def _initialiser_etat(self):
         self._processus_bringup = None      # le programme `ros2 launch` lancé
         self._instant_depart = None         # instant de départ (horloge ROS)
         self._dernier_scan = None           # sert uniquement à vérifier la carte
         self._dernier_log_feedback = 0.0    # date du dernier message de progression
         self._but_en_cours = None           # but Nav2 en cours, pour l'annuler
+        self._pose_amcl = None              # dernière pose publiée par AMCL
+        self._dossier_configuration = None  # YAML d'essai généré, à nettoyer
 
     def _connecter_ros(self):
         # Buffer = mémoire des TF ; TransformListener = l'abonnement qui la remplit.
@@ -152,11 +180,22 @@ class SolutionTache(Node):
             LaserScan, self.get_parameter('scan_topic').value,
             self.recevoir_scan, qos_profile_sensor_data)
 
+        # En mode AMCL, la pose initiale doit être confirmée par le localiseur
+        # avant d'envoyer un but.
+        if self._localisation == 'amcl':
+            self._abonnement_pose_amcl = self.create_subscription(
+                PoseWithCovarianceStamped,
+                self.get_parameter('amcl_pose_topic').value,
+                self.recevoir_pose_amcl, 10)
+
     # ------------------------------------------------------------- utilitaires
     def recevoir_scan(self, message):
         # On garde seulement le dernier scan : le contrôle de carte n'a besoin
         # que d'une photo à un instant donné, pas de l'historique.
         self._dernier_scan = message
+
+    def recevoir_pose_amcl(self, message):
+        self._pose_amcl = message
 
     def traiter_messages_pendant(self, secondes_reelles):
         """Traite les messages ROS pendant une durée réelle donnée."""
@@ -219,6 +258,11 @@ class SolutionTache(Node):
     def choisir_carte(self):
         """Retourne le YAML de carte à donner à Nav2 (murs réels ou carte vide)."""
         mode = str(self.get_parameter('static_map').value).lower()
+        if mode not in ('auto', 'always', 'never'):
+            raise ConfigurationError(f"static_map inconnu : {mode}")
+
+        # AMCL exige une carte statique cohérente : elle ne peut pas être vide.
+        carte_obligatoire = self._localisation == 'amcl'
         chemin_carte = self.get_parameter('map_yaml').value
 
         if not chemin_carte:
@@ -230,10 +274,14 @@ class SolutionTache(Node):
                 'maps', 'cafe_map.yaml')
 
         if mode == 'never':
+            if carte_obligatoire:
+                raise ConfigurationError(
+                    "AMCL ne peut pas démarrer avec static_map=never : une carte "
+                    "statique connue et cohérente est obligatoire.")
             self.get_logger().info('Carte des murs désactivée (static_map=never).')
             return self.ecrire_carte_vide()
 
-        if mode == 'always':
+        if mode == 'always' and not carte_obligatoire:
             self.get_logger().info('Carte des murs imposée (static_map=always).')
             return chemin_carte
 
@@ -243,12 +291,27 @@ class SolutionTache(Node):
         try:
             carte = self.charger_carte(chemin_carte)
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as erreur:
+            if carte_obligatoire:
+                raise ConfigurationError(
+                    f"AMCL indisponible : carte statique illisible ({erreur})."
+                ) from erreur
             self.get_logger().warn(
                 f'Carte illisible ({erreur}) : navigation sans carte.')
             return self.ecrire_carte_vide()
 
+        if carte_obligatoire:
+            validate_localization_map(
+                chemin_carte,
+                self._task.spawn,
+                Pose2D(self._task.goal_x, self._task.goal_y),
+            )
+
         scan = self.attendre_premier_scan()
         if scan is None:
+            if carte_obligatoire:
+                raise ConfigurationError(
+                    "AMCL indisponible : aucun scan lidar n'est arrivé pour valider "
+                    "la cohérence de la carte.")
             # Pas de lidar : on ne peut rien vérifier. On garde la carte du
             # café, car c'est le cas normal de l'évaluation.
             self.get_logger().warn(
@@ -263,6 +326,8 @@ class SolutionTache(Node):
             carte, pose_lidar, scan.angle_min, scan.angle_increment, scan.ranges)
 
         seuil = float(self.get_parameter('map_check_min_agreement').value)
+        if carte_obligatoire:
+            validate_scan_map_agreement(accord, utilises, seuil)
         # utilises >= 30 : avec moins de 30 rayons, le résultat n'est pas fiable.
         if utilises >= 30 and accord < seuil:
             self.get_logger().warn(
@@ -343,6 +408,35 @@ class SolutionTache(Node):
             return
 
         utiliser_temps_simulation = self.get_parameter('use_sim_time').value
+        fichier_parametres = str(self.get_parameter('nav2_params_file').value)
+
+        if fichier_parametres:
+            if not os.path.isfile(fichier_parametres):
+                raise ConfigurationError(
+                    f"nav2_params_file absent : {fichier_parametres}")
+            with open(fichier_parametres, encoding='utf-8') as flux:
+                configuration = yaml.safe_load(flux)
+            if not isinstance(configuration, dict):
+                raise ConfigurationError(
+                    "nav2_params_file doit contenir un mapping YAML complet.")
+            validate_experiment_config(
+                configuration, self._controleur, self._localisation, self._profil)
+        else:
+            # Le laboratoire fusionne nav2_params + contrôleur + profil +
+            # localisation dans un seul YAML, puis le passe au bringup.
+            self._dossier_configuration = tempfile.mkdtemp(
+                prefix='fosa_nav_config_')
+            fichier_parametres = os.path.join(
+                self._dossier_configuration, 'params.yaml')
+            configuration = build_experiment_config(
+                self._controleur,
+                self._localisation,
+                self._profil,
+                self._task.spawn,
+                use_sim_time=utiliser_temps_simulation,
+            )
+            write_experiment_config(configuration, fichier_parametres)
+
         # On construit une LISTE de morceaux de commande, et non une seule
         # grande chaîne : une liste ne passe pas par le shell, donc un caractère
         # spécial dans un chemin ne peut pas être interprété comme une commande.
@@ -352,8 +446,14 @@ class SolutionTache(Node):
             self.get_parameter('bringup_launch').value,
             f'use_sim_time:={"true" if utiliser_temps_simulation else "false"}',
             f'map:={chemin_carte}',
-            f'controller:={self.get_parameter("controller").value}',
+            f'controller:={self._controleur}',
+            f'localization:={self._localisation}',
+            f'profile:={self._profil}',
+            f'params_file:={fichier_parametres}',
             f'task_params_file:={self._task.path}',
+            f'initial_pose_x:={self._task.spawn.x}',
+            f'initial_pose_y:={self._task.spawn.y}',
+            f'initial_pose_yaw:={self._task.spawn.yaw}',
         ]
         self.get_logger().info('Démarrage de la solution : ' + ' '.join(commande))
 
@@ -408,6 +508,9 @@ class SolutionTache(Node):
 
         self.arreter_robot()
         self.arreter_bringup()
+        if self._dossier_configuration is not None:
+            shutil.rmtree(self._dossier_configuration, ignore_errors=True)
+            self._dossier_configuration = None
         # Dernière commande nulle une fois que plus rien ne peut en publier.
         self.arreter_robot()
 
@@ -434,7 +537,9 @@ class SolutionTache(Node):
         while rclpy.ok():
             self.traiter_messages_pendant(0.2)
             serveur_pret = self._client_nav2.server_is_ready()
-            robot_localise = self.pose_robot() is not None
+            robot_localise = (
+                self.pose_robot() is not None
+                and (self._localisation != 'amcl' or self._pose_amcl is not None))
 
             if serveur_pret and robot_localise:
                 self.get_logger().info(

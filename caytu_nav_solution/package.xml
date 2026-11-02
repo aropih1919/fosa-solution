@@ -15,6 +15,7 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>nav2_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>tf2_ros</depend>
   <exec_depend>ament_index_python</exec_depend>
@@ -22,6 +23,8 @@
   <exec_depend>python3-yaml</exec_depend>
   <!-- task_solution.py lit task_params.yaml dans le package officiel... -->
   <exec_depend>parc_robot_bringup</exec_depend>
+  <exec_depend>ros_gz_interfaces</exec_depend>
+  <exec_depend>python3-psutil</exec_depend>
   <!-- ...puis démarre toute la pile avec `ros2 launch caytu_nav_bringup ...`. -->
   <exec_depend>ros2launch</exec_depend>
   <exec_depend>caytu_nav_bringup</exec_depend>

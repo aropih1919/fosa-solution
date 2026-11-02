@@ -5,7 +5,8 @@ Démarre, sans aucun délai ni intervention manuelle :
   2. la mise à niveau (inclinaison du robot, retours du sol du lidar, repère
      horizontal base_footprint_level pour les caméras) ;
   3. la conversion des deux nuages de points caméra en LaserScan ;
-  4. la localisation roues + IMU, qui publie map -> odom ;
+  4. la localisation roues + IMU (ou AMCL en mode benchmark), qui publie
+     map -> odom ;
   5. Nav2 (carte des murs, planificateur, contrôleur, behaviors, BT).
 
 Utilisation directe (mise au point) :
@@ -16,7 +17,11 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -24,6 +29,21 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 # Repère horizontal publié par le filtre sol lidar (le robot penche de ~2,5°).
 REPERE_HORIZONTAL = "base_footprint_level"
+
+
+def _valider_arguments_essai(context):
+    """Refuse une combinaison benchmark qui exige un YAML complet absent."""
+    fichier_parametres = LaunchConfiguration("params_file").perform(context)
+    controleur = LaunchConfiguration("controller").perform(context)
+    localisation = LaunchConfiguration("localization").perform(context)
+    profil = LaunchConfiguration("profile").perform(context)
+    if not fichier_parametres and (
+            controleur == "mppi" or profil != "balanced"
+            or localisation == "amcl"):
+        raise RuntimeError(
+            "Cette combinaison exige un YAML complet params_file généré par "
+            "task_solution.py ou fosa_benchmark.")
+    return []
 
 
 def _declarer_arguments(dossier_bringup):
@@ -38,8 +58,24 @@ def _declarer_arguments(dossier_bringup):
             description="Carte statique (repère Gazebo). task_solution.py la "
                         "remplace par une carte vide si le monde n'est pas le café."),
         DeclareLaunchArgument(
-            "controller", default_value="rpp", choices=["rpp", "dwb"],
-            description="Contrôleur local : config/controller_<nom>.yaml."),
+            "controller", default_value="rpp", choices=["rpp", "dwb", "mppi"],
+            description="Contrôleur local sélectionné dans params_file."),
+        DeclareLaunchArgument(
+            "localization", default_value="odom_imu",
+            choices=["odom_imu", "odom_only", "amcl"],
+            description="Localisation : une seule source map -> odom."),
+        DeclareLaunchArgument(
+            "profile", default_value="balanced",
+            choices=[
+                "ultra_safe", "safe", "balanced", "fast", "ultra_fast",
+                "tight_clearance"],
+            description="Profil chargé dans params_file."),
+        DeclareLaunchArgument(
+            "params_file", default_value="",
+            description="YAML fusionné complet généré par task_solution/fosa_benchmark."),
+        DeclareLaunchArgument("initial_pose_x", default_value="0.0"),
+        DeclareLaunchArgument("initial_pose_y", default_value="0.0"),
+        DeclareLaunchArgument("initial_pose_yaw", default_value="0.0"),
         DeclareLaunchArgument(
             "task_params_file", default_value="",
             description="task_params.yaml à utiliser (vide = package officiel)."),
@@ -159,22 +195,33 @@ def _creer_camera_basse(utiliser_temps_simulation):
     )
 
 
-def _creer_localisateur(utiliser_temps_simulation):
-    """4. Remplace AMCL : map -> odom depuis le départ de task_params.yaml, la
-    distance des roues et le cap de l'IMU. `map` = repère Gazebo.
+def _creer_localisateur(context):
+    """4. Localisation roues + IMU, ou AMCL en mode benchmark.
+
+    En mode AMCL, navigation.launch.py démarre lui-même le nœud et applique la
+    pose initiale validée : aucun localisateur Fosa ne doit publier en parallèle.
     """
-    return Node(
+    localisation = LaunchConfiguration("localization").perform(context)
+    if localisation == "amcl":
+        return []
+
+    fichier_parametres = LaunchConfiguration("params_file").perform(context)
+    parametres = [fichier_parametres] if fichier_parametres else []
+    parametres.append({
+        "use_sim_time": ParameterValue(
+            LaunchConfiguration("use_sim_time"), value_type=bool),
+        # value_type=str : une valeur vide doit rester une chaîne vide.
+        "task_params_file": ParameterValue(
+            LaunchConfiguration("task_params_file"), value_type=str),
+        "use_imu_yaw": localisation == "odom_imu",
+    })
+    return [Node(
         package="caytu_nav_solution",
         executable="localisateur_odom_imu",
         name="localisateur_odom_imu",
         output="screen",
-        parameters=[{
-            "use_sim_time": utiliser_temps_simulation,
-            # value_type=str : une valeur vide doit rester une chaîne vide.
-            "task_params_file": ParameterValue(
-                LaunchConfiguration("task_params_file"), value_type=str),
-        }],
-    )
+        parameters=parametres,
+    )]
 
 
 def _creer_navigation(dossier_bringup):
@@ -188,6 +235,12 @@ def _creer_navigation(dossier_bringup):
             "use_sim_time": LaunchConfiguration("use_sim_time"),
             "map": LaunchConfiguration("map"),
             "controller": LaunchConfiguration("controller"),
+            "localization": LaunchConfiguration("localization"),
+            "profile": LaunchConfiguration("profile"),
+            "params_file": LaunchConfiguration("params_file"),
+            "initial_pose_x": LaunchConfiguration("initial_pose_x"),
+            "initial_pose_y": LaunchConfiguration("initial_pose_y"),
+            "initial_pose_yaw": LaunchConfiguration("initial_pose_yaw"),
         }.items(),
     )
 
@@ -202,10 +255,11 @@ def generate_launch_description():
 
     return LaunchDescription(
         _declarer_arguments(dossier_bringup) + [
+            OpaqueFunction(function=_valider_arguments_essai),
             _creer_filtre_laser(dossier_bringup, utiliser_temps_simulation),
             _creer_filtre_sol(utiliser_temps_simulation),
             _creer_camera_haute(utiliser_temps_simulation),
             _creer_camera_basse(utiliser_temps_simulation),
-            _creer_localisateur(utiliser_temps_simulation),
+            OpaqueFunction(function=_creer_localisateur),
             _creer_navigation(dossier_bringup),
         ])
