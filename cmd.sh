@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Lancez avec : ./cmd.sh gazebo | benchmark | compare
-# gazebo    : terminal 1, monde PARC/Gazebo (sorties masquées).
+# gazebo    : terminal 1, monde officiel PARC/Gazebo avec le robot.
 # benchmark : terminal 2, menu du laboratoire sur le monde déjà lancé.
 # compare   : affiche les rapports stockés dans results/.
 
@@ -71,9 +71,17 @@ fi
 
 case "$mode" in
     gazebo)
-        echo "Terminal 1 : lancement de Gazebo. Les sorties sont redirigées vers /dev/null."
-        echo "Laissez ce terminal ouvert; Ctrl+C arrête le monde."
-        ros2 launch parc_robot_bringup task.launch.py >/dev/null 2>&1
+        if ! ros2 pkg prefix parc_robot_bringup >/dev/null 2>&1; then
+            echo "Package officiel 'parc_robot_bringup' introuvable dans l'environnement ROS 2." >&2
+            echo "Vérifiez que le workspace du simulateur PARC est installé et sourcé." >&2
+            exit 1
+        fi
+        echo "Terminal 1 : lancement du monde officiel PARC avec le robot CAYTU."
+        echo "Les erreurs et avertissements seront affichés ici; Ctrl+C arrête le monde."
+        # Le launch produit beaucoup de messages INFO. Garder seulement les
+        # diagnostics utiles à l'écran, y compris ceux écrits sur stdout.
+        ros2 launch parc_robot_bringup task.launch.py "$@" 2>&1 \
+            | awk 'tolower($0) ~ /error|fatal|failed|exception|warning|unable|could not/ { print; fflush() }'
         ;;
     benchmark)
         ensure_fosa_executable fosa_benchmark
