@@ -603,7 +603,8 @@ EMERGENCY
   fonctionnalités du lab.
 - [x] Vérifier `setup.py`, `package.xml`, entry points.
 - [x] `colcon build` + `colcon test` verts.
-- [ ] Scénario phase 1 officiel toujours réussi (à rejouer dans Gazebo).
+- [x] Scénario phase 1 officiel toujours réussi (but atteint en 39,9 s
+  simulées, 0,13 m du centre, code 0).
 
 ### Lot 2 — `caytu_config`
 
