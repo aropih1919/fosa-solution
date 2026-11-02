@@ -29,6 +29,8 @@ setup(
             # Nœuds lancés par caytu_nav_bringup/launch/solution_bringup.launch.py
             'odom_imu_localizer = caytu_nav_solution.odom_imu_localizer:main',
             'lidar_floor_filter = caytu_nav_solution.lidar_floor_filter:main',
+            'dynamic_obstacle_detector = '
+            'caytu_nav_solution.dynamic_obstacle_detector:main',
         ],
     },
 )

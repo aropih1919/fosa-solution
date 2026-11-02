@@ -36,6 +36,7 @@ from rclpy.qos import qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Bool
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from caytu_nav_solution.nav_math import (
@@ -79,6 +80,12 @@ class TaskSolution(Node):
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter('cmd_vel_topic', '/robot_base_controller/cmd_vel_unstamped')
+        # Interfaces provisoires, à harmoniser avec le groupe Speech to Action.
+        self.declare_parameter('dynamic_obstacle_topic', '/dynamic_obstacle/blocked')
+        self.declare_parameter(
+            'interaction_active_topic', '/speech_to_action/interaction_active')
+        self.declare_parameter('minimum_dynamic_wait_sec', 3.0)
+        self.declare_parameter('dynamic_clear_hold_sec', 1.0)
 
         self._task: TaskParams = load_task_params(
             self.get_parameter('task_params_file').value or None)
@@ -89,6 +96,8 @@ class TaskSolution(Node):
         self._last_scan: Optional[LaserScan] = None
         self._last_feedback_log = 0.0
         self._goal_handle = None        # but Nav2 en cours, pour pouvoir l'annuler
+        self._dynamic_obstacle_blocked = False
+        self._interaction_active = False
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=False)
@@ -104,6 +113,12 @@ class TaskSolution(Node):
         self._scan_sub = self.create_subscription(
             LaserScan, self.get_parameter('scan_topic').value, self._on_scan,
             qos_profile_sensor_data)
+        self._dynamic_obstacle_sub = self.create_subscription(
+            Bool, self.get_parameter('dynamic_obstacle_topic').value,
+            self._on_dynamic_obstacle, 10)
+        self._interaction_sub = self.create_subscription(
+            Bool, self.get_parameter('interaction_active_topic').value,
+            self._on_interaction_active, 10)
 
         self.get_logger().info(
             f'Départ ({self._task.spawn.x:.3f}, {self._task.spawn.y:.3f}, '
@@ -113,6 +128,79 @@ class TaskSolution(Node):
     # ------------------------------------------------------------- utilitaires
     def _on_scan(self, msg: LaserScan):
         self._last_scan = msg
+
+    def _on_dynamic_obstacle(self, msg: Bool):
+        if msg.data != self._dynamic_obstacle_blocked:
+            self.get_logger().warn(
+                'Obstacle dynamique dans le passage.' if msg.data
+                else 'Le passage n’est plus bloqué par le mouvement détecté.')
+        self._dynamic_obstacle_blocked = msg.data
+
+    def _on_interaction_active(self, msg: Bool):
+        if msg.data != self._interaction_active:
+            self.get_logger().info(
+                'Interaction Speech to Action active.' if msg.data
+                else 'Interaction Speech to Action terminée.')
+        self._interaction_active = msg.data
+
+    def _pause_requested(self) -> bool:
+        return self._dynamic_obstacle_blocked or self._interaction_active
+
+    def _wait_for_passage_and_interaction(self) -> bool:
+        """Reste arrêté jusqu'à la fin de l'interaction et à la libération du passage."""
+        minimum_wait = max(
+            0.0, float(self.get_parameter('minimum_dynamic_wait_sec').value))
+        clear_hold = max(
+            0.0, float(self.get_parameter('dynamic_clear_hold_sec').value))
+        pause_started = time.monotonic()
+        clear_started = None
+        last_log = pause_started
+
+        while rclpy.ok() and self._time_left() > 0.0:
+            now = time.monotonic()
+            passage_clear = not self._dynamic_obstacle_blocked
+            interaction_finished = not self._interaction_active
+            if passage_clear and interaction_finished:
+                if clear_started is None:
+                    clear_started = now
+                if (now - pause_started >= minimum_wait
+                        and now - clear_started >= clear_hold):
+                    self.get_logger().info(
+                        'Passage libre et interaction terminée : reprise du même but.')
+                    return True
+            else:
+                clear_started = None
+
+            # Nav2 a annulé le but avant cette attente : on maintient une commande nulle.
+            self._cmd_pub.publish(Twist())
+            rclpy.spin_once(self, timeout_sec=0.1)
+            if time.monotonic() - last_log >= 5.0:
+                last_log = time.monotonic()
+                self.get_logger().info(
+                    'Robot en attente : '
+                    f"obstacle={'oui' if self._dynamic_obstacle_blocked else 'non'}, "
+                    f"interaction={'oui' if self._interaction_active else 'non'}.")
+
+        self.get_logger().error('Temps de tâche écoulé pendant l’attente.')
+        return False
+
+    def _cancel_goal_for_pause(self, goal_handle) -> str:
+        """Annule Nav2, arrête le robot, puis attend avant de renvoyer le but."""
+        cancel_future = goal_handle.cancel_goal_async()
+        deadline = time.monotonic() + 3.0
+        while rclpy.ok() and not cancel_future.done() and time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.05)
+        self._goal_handle = None
+        if not cancel_future.done():
+            self.get_logger().error(
+                'Nav2 n’a pas confirmé l’annulation : arrêt de la tâche par sécurité.')
+            self.stop_robot()
+            return 'abort'
+
+        self.stop_robot()
+        if self._wait_for_passage_and_interaction():
+            return 'paused'
+        return 'timeout'
 
     def _spin(self, wall_seconds: float):
         """Traite les messages ROS pendant une durée réelle donnée."""
@@ -391,6 +479,10 @@ class TaskSolution(Node):
                 return 'timeout'
             if not self._bringup_alive():
                 return 'abort'
+            if self._pause_requested():
+                self.get_logger().warn(
+                    'Pause de navigation : obstacle dynamique ou interaction détecté.')
+                return self._cancel_goal_for_pause(goal_handle)
 
         self._goal_handle = None
         result = result_future.result() if result_future.done() else None
@@ -443,6 +535,11 @@ class TaskSolution(Node):
                 self._spin(0.5)
                 continue
             rejections = 0
+
+            if outcome == 'paused':
+                # Le but d'origine est conservé dans task_params ; le prochain
+                # tour le renvoie depuis la pose actuelle, sans vider les costmaps.
+                continue
 
             if outcome == 'success':
                 self.stop_robot()

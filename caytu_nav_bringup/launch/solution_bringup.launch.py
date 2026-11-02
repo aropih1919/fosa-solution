@@ -17,6 +17,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -55,6 +56,12 @@ def generate_launch_description():
             "floor_line_distance", default_value="0.0",
             description="Forçage : distance (m) de la ligne de sol lue droit "
                         "devant dans /scan. 0.0 = calcul automatique par l'IMU."),
+        DeclareLaunchArgument(
+            "enable_dynamic_detection", default_value="true",
+            description="Activer la détection OpenCV du mouvement dans le couloir."),
+        DeclareLaunchArgument(
+            "dynamic_camera_topic", default_value="/top_camera_color/image_raw",
+            description="Image couleur utilisée par la détection OpenCV."),
     ]
 
     # 1. Le lidar est sous le châssis : quatre secteurs fixes voient les roues
@@ -147,6 +154,21 @@ def generate_launch_description():
         }],
     )
 
+    # 3c. Détection prototype : mouvement visuel résiduel dans le couloir.
+    #     Le nœud publie /dynamic_obstacle/blocked pour task_solution.py.
+    dynamic_obstacle_detector = Node(
+        package="caytu_nav_solution",
+        executable="dynamic_obstacle_detector",
+        name="dynamic_obstacle_detector",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("enable_dynamic_detection")),
+        parameters=[{
+            "use_sim_time": use_sim_time,
+            "image_topic": LaunchConfiguration("dynamic_camera_topic"),
+            "blocked_topic": "/dynamic_obstacle/blocked",
+        }],
+    )
+
     # 4. Remplace AMCL : map -> odom depuis le spawn de task_params.yaml, la
     #    distance des roues et le cap de l'IMU. `map` = repère Gazebo.
     localizer = Node(
@@ -179,6 +201,7 @@ def generate_launch_description():
         floor_filter,
         top_cam_to_scan,
         bottom_cam_to_scan,
+        dynamic_obstacle_detector,
         localizer,
         navigation,
     ])

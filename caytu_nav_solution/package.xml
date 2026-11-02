@@ -16,7 +16,10 @@
   <depend>nav_msgs</depend>
   <depend>nav2_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>tf2_ros</depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <!-- Lecture de task_params.yaml et du YAML de carte. -->
   <exec_depend>python3-yaml</exec_depend>
