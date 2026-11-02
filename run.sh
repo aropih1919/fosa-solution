@@ -12,10 +12,11 @@ Usage : ./run.sh [MODE] [arguments ROS]
 
 Modes disponibles :
   complet       Gazebo PARC et assistant vocal complet (mode par défaut)
-  navigation    tâche officielle task_solution.py (simulation déjà lancée)
+  navigation    tâche officielle surveillée, avec résultats conservés
   assistant     assistant complet sur un robot ou simulateur déjà actif
   tts [TEXTE]   prononcer un texte avec le fournisseur TTS configuré
-  gazebo        lancer séparément le monde officiel PARC
+  gazebo        terminal 1 : lancer task.launch.py, en affichant les erreurs
+                terminal 2 : ./run.sh navigation
   benchmark     ouvrir l'outil de benchmark sur un monde déjà lancé
   compare       comparer les rapports présents dans results/
   diagnostic    lancer tools/diag_nav.py
@@ -24,6 +25,7 @@ Exemples :
   ./run.sh
   ./run.sh complet input_mode:=microphone
   ./run.sh assistant input_mode:=text
+  ./run.sh gazebo
   ./run.sh navigation
   ./run.sh tts "Bonjour, ceci est un essai de synthèse vocale."
 
@@ -90,6 +92,10 @@ verifier_paquet() {
     fi
 }
 
+filtrer_erreurs() {
+    awk 'tolower($0) ~ /error|fatal|failed|exception|unable|could not|erreur|échec/ { print; fflush() }'
+}
+
 arreter_simulation() {
     if [[ -n "${PID_SIMULATION:-}" ]] && kill -0 "$PID_SIMULATION" 2>/dev/null; then
         echo "Arrêt de la simulation PARC..."
@@ -102,7 +108,8 @@ case "$mode" in
     complet)
         verifier_paquet parc_robot_bringup
         echo "Démarrage du monde PARC. Ctrl+C arrête l'assistant et la simulation."
-        setsid ros2 launch parc_robot_bringup task.launch.py &
+        setsid ros2 launch parc_robot_bringup task.launch.py \
+            > >(filtrer_erreurs) 2>&1 &
         PID_SIMULATION=$!
         trap arreter_simulation EXIT INT TERM
         if ! timeout 120s ros2 topic echo /clock --once >/dev/null 2>&1; then
@@ -115,8 +122,24 @@ case "$mode" in
     navigation)
         verifier_paquet caytu_nav_solution
         verifier_paquet parc_robot_bringup
-        echo "La simulation PARC doit être déjà active dans un autre terminal."
-        ros2 run caytu_nav_solution task_solution.py "$@"
+        echo "La simulation PARC doit déjà tourner dans un autre terminal."
+        echo "Le moniteur affichera la progression; les résultats seront enregistrés dans results/."
+        readarray -t CONFIG_NAVIGATION < <(python3 - "$DOSSIER_SCRIPT/caytu_config/config/fosa.yaml" <<'PY'
+import sys
+import yaml
+
+with open(sys.argv[1], encoding="utf-8") as fichier:
+    navigation = yaml.safe_load(fichier)["navigation"]
+for cle in ("controller", "localization", "profile"):
+    print(navigation[cle])
+PY
+)
+        ros2 run caytu_nav_solution fosa_benchmark --ros-args \
+            -p start_simulation:=false \
+            -p controller:="${CONFIG_NAVIGATION[0]}" \
+            -p localization:="${CONFIG_NAVIGATION[1]}" \
+            -p profile:="${CONFIG_NAVIGATION[2]}" \
+            -p results_dir:="$DOSSIER_SCRIPT/results" "$@"
         ;;
     assistant)
         ros2 launch caytu_assistant assistant.launch.py "$@"
@@ -148,7 +171,8 @@ PY
         ;;
     gazebo)
         verifier_paquet parc_robot_bringup
-        ros2 launch parc_robot_bringup task.launch.py "$@"
+        echo "Simulation PARC active. Seules les erreurs seront affichées. Ctrl+C arrête le monde."
+        ros2 launch parc_robot_bringup task.launch.py "$@" 2>&1 | filtrer_erreurs
         ;;
     benchmark)
         ros2 run caytu_nav_solution fosa_benchmark --ros-args \

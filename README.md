@@ -65,6 +65,11 @@ La simulation doit d'abord être lancée dans un terminal :
 ./run.sh navigation
 ```
 
+Ce mode lance `task_solution.py` avec le moniteur actif et enregistre un rapport
+par navigation dans `results/`. Le contrôleur, le profil et la localisation
+proviennent de `caytu_config/config/fosa.yaml`. Les sorties détaillées restent
+dans chaque dossier de rapport; les erreurs et le suivi du robot restent visibles.
+
 ---
 
 ### 2.4 Assistant seul et test TTS

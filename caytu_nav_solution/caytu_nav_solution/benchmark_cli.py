@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -107,6 +108,20 @@ def _stop_process(process, timeout=12.0):
 def _print_monitor(metrics, phase):
     """Réactualise l'état compact sur la ligne courante du terminal."""
     print(f"\r{metrics.live_status(phase)}", end="", flush=True)
+
+
+def _consigner_journal_tache(sortie, journal):
+    """Enregistre toutes les sorties et ne montre que les erreurs à l'écran."""
+    marqueurs_erreur = (
+        "error", "fatal", "failed", "exception", "unable", "could not",
+        "erreur", "échec",
+    )
+    for ligne in sortie:
+        journal.write(ligne)
+        journal.flush()
+        if any(marqueur in ligne.lower() for marqueur in marqueurs_erreur):
+            print(f"\n{ligne}", end="", flush=True)
+    sortie.close()
 
 
 class BenchmarkRunner(Node):
@@ -232,6 +247,7 @@ class BenchmarkRunner(Node):
         metrics.mark_experiment_start()
         simulation_process = None
         task_process = None
+        task_reader = None
         simulation_log = (run_dir / "simulation.log").open("w", encoding="utf-8")
         task_log = (run_dir / "task_solution.log").open("w", encoding="utf-8")
         mission_success = False
@@ -295,10 +311,19 @@ class BenchmarkRunner(Node):
             ]
             task_process = subprocess.Popen(
                 task_command,
-                stdout=task_log,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
                 start_new_session=True,
             )
+            task_reader = threading.Thread(
+                target=_consigner_journal_tache,
+                args=(task_process.stdout, task_log),
+                daemon=True,
+            )
+            task_reader.start()
             self.get_logger().info(f"Mission démarrée; logs: {run_dir / 'task_solution.log'}")
             last_resource_sample = 0.0
             last_monitor_output = 0.0
@@ -314,6 +339,7 @@ class BenchmarkRunner(Node):
                     monitor_active = True
                     last_monitor_output = now
             exit_code = task_process.poll()
+            task_reader.join()
             mission_success = exit_code == 0
             if not mission_success:
                 error_message = f"task_solution s'est terminé avec le code {exit_code}."
@@ -328,6 +354,8 @@ class BenchmarkRunner(Node):
             exit_code = task_process.poll() if task_process else None
         finally:
             _stop_process(task_process)
+            if task_reader is not None:
+                task_reader.join(timeout=5.0)
             _stop_process(simulation_process, timeout=30.0)
             metrics.mark_finished()
             if monitor_active:

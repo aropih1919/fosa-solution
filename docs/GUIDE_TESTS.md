@@ -42,6 +42,10 @@ Ce test vérifie que le robot atteint le but officiel dans le restaurant du stad
 2. Le robot se déplace de son point de départ jusqu'au cercle vert.
 3. Aucune collision avec les obstacles (tables, chaises, murs).
 4. Le nœud s'arrête proprement avec le code de sortie 0 une fois le but atteint.
+5. Le terminal de navigation affiche le suivi en direct et conserve un rapport
+   dans `results/` pour comparer les contrôleurs. Le choix par défaut vient des
+   champs `navigation.controller`, `navigation.profile` et
+   `navigation.localization` de `caytu_config/config/fosa.yaml`.
 
 ---
 
