@@ -130,8 +130,7 @@ if [[ "$TELECHARGER_MODELES" == "oui" ]]; then
     set +u
     source "$ESPACE_TRAVAIL/install/setup.bash"
     set -u
-    DOSSIER_CONFIG_INSTALLEE="$(ros2 pkg prefix caytu_config)/share/caytu_config/config"
-    DOSSIER_MODELES="$DOSSIER_CONFIG_INSTALLEE/models"
+    DOSSIER_MODELES="$DOSSIER_SCRIPT/caytu_config/config/models"
     mkdir -p "$DOSSIER_MODELES"
 
     (

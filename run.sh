@@ -68,6 +68,7 @@ fi
 set +u
 source "/opt/ros/$ROS_DISTRO/setup.bash"
 source "$ESPACE_TRAVAIL/install/setup.bash"
+export FOSA_CONFIG_DIR="${FOSA_CONFIG_DIR:-$DOSSIER_SCRIPT/caytu_config/config}"
 if [[ -f "$ESPACE_TRAVAIL/.venv/bin/activate" ]]; then
     source "$ESPACE_TRAVAIL/.venv/bin/activate"
     DOSSIER_PAQUETS_PYTHON="$("$ESPACE_TRAVAIL/.venv/bin/python" -c \

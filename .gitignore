@@ -6,6 +6,8 @@ build/
 install/
 log/
 results/
+/caytu_config/config/models/
+modeles-fosa.tar.gz
 diag.log
 step.md
 test.txt
@@ -13,3 +15,5 @@ test.txt
 *.swp
 *~
 .DS_Store
+
+modeles-fosa.tar.gz.tmp

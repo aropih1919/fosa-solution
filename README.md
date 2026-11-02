@@ -38,6 +38,24 @@ les dépendances Python et tous les paquets du workspace. Il demande si les
 modèles IA locaux (YOLO, LLM, Whisper et voix Piper) doivent être téléchargés
 immédiatement. Pour les récupérer plus tard : `./install.sh --models`.
 
+Pour partager les modèles lourds sans les retélécharger :
+
+Sur le premier poste, créez `modeles-fosa.tar.gz` :
+```bash
+./exporter_modeles.sh exporter
+```
+
+Sur le poste destinataire, lancez d'abord `./install.sh --no-models`, copiez
+`modeles-fosa.tar.gz` à la racine du projet, puis importez les modèles :
+```bash
+./exporter_modeles.sh importer
+```
+L'archive contient les modèles YOLO/Piper, Whisper et tout le dépôt de modèles Ollama.
+Les modèles YOLO/Piper sont installés dans `caytu_config/config/models/` du
+projet. Whisper est placé dans le cache Hugging Face de l’utilisateur et Ollama
+dans son répertoire de modèles habituel. `run.sh` charge la configuration du
+dépôt afin que les modèles restent disponibles après une reconstruction.
+
 `run.sh` source automatiquement ROS, le workspace compilé et l'environnement Python.
 
 ---
