@@ -22,7 +22,7 @@ class NoeudSortieVocale(Node):
             'response_topic', self._configuration.dialogue.response_topic)
         self._subscription = self.create_subscription(
             String, self.get_parameter('response_topic').value,
-            self._speak, 10)
+            self._parler, 10)
 
     def _parler(self, message):
         """Reçoit une réponse textuelle sur le topic ROS et déclenche la synthèse vocale."""
@@ -72,10 +72,6 @@ class NoeudSortieVocale(Node):
             if os.path.exists(chemin_wav):
                 os.unlink(chemin_wav)
 
-    # Alias de compatibilité
-    _speak = _parler
-    _speak_local = _parler_local
-
     def _parler_api(self, texte):
         """Envoie le texte à un service TTS distant (OpenAI/ElevenLabs) et joue l'audio reçu."""
         configuration = self._configuration
@@ -114,10 +110,6 @@ class NoeudSortieVocale(Node):
         finally:
             if os.path.exists(chemin_wav):
                 os.unlink(chemin_wav)
-
-    # Alias de compatibilité
-    _speak_api = _parler_api
-
 
 def main(args=None):
     rclpy.init(args=args)

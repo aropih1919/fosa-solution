@@ -3,7 +3,7 @@
 Couverture :
   1. Intention.depuis_json : JSON valide, champ manquant, intention inconnue, non-JSON
   2. AnalyseurRegles : navigation, localiser, urgence, stop, inconnu
-  3. DispatcherAssistant : navigation directe, échec, localiser/confirmation,
+  3. RepartiteurAssistant : navigation directe, échec, localiser/confirmation,
      lieu inconnu, urgence, stop, fallback LLM, information, pose absente
 """
 
@@ -14,9 +14,9 @@ import pytest
 
 from caytu_config import load_config
 from caytu_config.models import SemanticMapConfig
-from caytu_semantic_map.registry import RegistreLieux
+from caytu_semantic_map.registre import RegistreLieux
 from caytu_assistant.models import ErreurIntention, Intention
-from caytu_assistant.dispatcher import AnalyseurRegles, DispatcherAssistant
+from caytu_assistant.dispatcher import AnalyseurRegles, RepartiteurAssistant
 
 # Chargement unique de la configuration réelle (lecture de fichiers YAML, pas de ROS).
 _CONFIG_DIR = Path(__file__).resolve().parents[2] / 'caytu_config' / 'config'
@@ -37,21 +37,21 @@ def _intention_json(**kwargs):
     return json.dumps(kwargs)
 
 
-class LLMMock:
-    """LLM factice qui retourne toujours la même Intention."""
+class ModeleLangageSimule:
+    """Modèle de langage simulé qui retourne toujours la même intention."""
 
     def __init__(self, intention):
         self._intention = intention
 
-    def interpret(self, texte, history):
+    def interpreter(self, texte, historique):
         """Retourne l'intention préconfigurée sans appel réseau."""
         return self._intention
 
 
-class LLMEchecMock:
-    """LLM factice qui lève toujours une exception."""
+class ModeleLangageEnEchec:
+    """Modèle de langage simulé qui lève toujours une exception."""
 
-    def interpret(self, texte, history):
+    def interpreter(self, texte, historique):
         """Simule une panne réseau ou une réponse illisible."""
         raise RuntimeError('LLM indisponible')
 
@@ -62,26 +62,26 @@ class PoseMock:
     approach_pose = object()
 
 
-def navigate_ok(pose):
+def naviguer_succes(pose):
     """Simule une navigation réussie."""
     return True, 'ok'
 
 
-def navigate_fail(pose):
+def naviguer_echec(pose):
     """Simule un échec de navigation."""
     return False, 'erreur de navigation'
 
 
-def cancel():
+def annuler():
     """Simule l'annulation de la navigation."""
 
 
-def resolve_pose_ok(name):
+def resoudre_pose_disponible(nom):
     """Simule la résolution de pose disponible pour tous les lieux."""
     return PoseMock()
 
 
-def resolve_pose_absent(name):
+def resoudre_pose_absente(nom):
     """Simule un lieu dont la pose n'est pas encore calculée."""
     return None
 
@@ -195,19 +195,19 @@ def test_analyseur_regles_inconnu(analyseur):
 
 
 # ---------------------------------------------------------------------------
-# Helpers dispatcher
+# Fonctions auxiliaires du répartiteur
 # ---------------------------------------------------------------------------
 
-def _dispatcher(intention_llm=None, navigate=navigate_ok,
-                resolve_pose=resolve_pose_ok):
-    """Construit un DispatcherAssistant avec LLM et fonctions mockés."""
+def _creer_repartiteur(intention_modele=None, naviguer=naviguer_succes,
+                       resoudre_pose=resoudre_pose_disponible):
+    """Construit un répartiteur avec le modèle de langage et les fonctions simulés."""
     registre = _construire_registre()
-    if intention_llm is None:
-        llm = LLMEchecMock()
+    if intention_modele is None:
+        modele_langage = ModeleLangageEnEchec()
     else:
-        llm = LLMMock(intention_llm)
-    return DispatcherAssistant(
-        CONFIG, registre, llm, navigate, cancel, resolve_pose)
+        modele_langage = ModeleLangageSimule(intention_modele)
+    return RepartiteurAssistant(
+        CONFIG, registre, modele_langage, naviguer, annuler, resoudre_pose)
 
 
 def _intention(intentions, lieux=None, confirmation='', reponse='', langue='fr'):
@@ -222,7 +222,7 @@ def _intention(intentions, lieux=None, confirmation='', reponse='', langue='fr')
 
 
 # ---------------------------------------------------------------------------
-# Tests de DispatcherAssistant
+# Tests du répartiteur de l'assistant
 # ---------------------------------------------------------------------------
 
 def test_dispatcher_navigation_directe():
@@ -233,41 +233,41 @@ def test_dispatcher_navigation_directe():
     # qui appelera _naviguer_vers sans confirmation (car le LLM dit 'navigation')
     # Note : confirmation_required=True dans la config réelle → état CONFIRMING d'abord
     intention = _intention(['navigation'], lieux=['accueil'])
-    disp = _dispatcher(intention_llm=intention, navigate=navigate_ok)
+    disp = _creer_repartiteur(intention_modele=intention, naviguer=naviguer_succes)
 
     # Premier appel : si confirmation_required → CONFIRMING
     resultat = disp.traiter("emmène-moi à l'accueil")
     if CONFIG.dialogue.confirmation_required:
-        assert resultat.state == 'CONFIRMING'
+        assert resultat.etat == 'CONFIRMING'
         # Confirmation oui
         intention_oui = _intention(['confirmation'], confirmation='oui')
-        disp._llm = LLMMock(intention_oui)
+        disp._modele_langage = ModeleLangageSimule(intention_oui)
         resultat = disp.traiter('oui')
-    assert resultat.state == 'ARRIVED'
+    assert resultat.etat == 'ARRIVED'
 
 
 def test_dispatcher_navigation_echec():
     """Navigation vers un lieu connu mais échec de déplacement → state ERROR."""
     intention = _intention(['navigation'], lieux=['toilettes'])
-    disp = _dispatcher(intention_llm=intention, navigate=navigate_fail)
+    disp = _creer_repartiteur(intention_modele=intention, naviguer=naviguer_echec)
 
     resultat = disp.traiter('amène-moi aux toilettes')
     if CONFIG.dialogue.confirmation_required:
-        assert resultat.state == 'CONFIRMING'
+        assert resultat.etat == 'CONFIRMING'
         intention_oui = _intention(['confirmation'], confirmation='oui')
-        disp._llm = LLMMock(intention_oui)
+        disp._modele_langage = ModeleLangageSimule(intention_oui)
         resultat = disp.traiter('oui')
-    assert resultat.state == 'ERROR'
+    assert resultat.etat == 'ERROR'
 
 
 def test_dispatcher_localiser_propose():
     """Intention 'localiser' avec lieu connu → state CONFIRMING et lieu mémorisé."""
     intention = _intention(['localiser'], lieux=['toilettes'])
-    disp = _dispatcher(intention_llm=intention)
+    disp = _creer_repartiteur(intention_modele=intention)
     resultat = disp.traiter('où sont les toilettes ?')
-    assert resultat.state == 'CONFIRMING'
-    assert disp._pending_location is not None
-    assert disp._pending_location.name == 'toilettes'
+    assert resultat.etat == 'CONFIRMING'
+    assert disp._lieu_en_attente is not None
+    assert disp._lieu_en_attente.name == 'toilettes'
 
 
 def test_dispatcher_confirmation_oui_puis_navigation():
@@ -275,48 +275,48 @@ def test_dispatcher_confirmation_oui_puis_navigation():
     registre = _construire_registre()
     # Étape 1 : localiser
     intention_loc = _intention(['localiser'], lieux=['buvette'])
-    llm = LLMMock(intention_loc)
-    disp = DispatcherAssistant(
-        CONFIG, registre, llm, navigate_ok, cancel, resolve_pose_ok)
+    modele_langage = ModeleLangageSimule(intention_loc)
+    disp = RepartiteurAssistant(
+        CONFIG, registre, modele_langage, naviguer_succes, annuler, resoudre_pose_disponible)
     resultat = disp.traiter('où est la buvette ?')
-    assert resultat.state == 'CONFIRMING'
+    assert resultat.etat == 'CONFIRMING'
 
     # Étape 2 : confirmation oui
     intention_oui = _intention(['confirmation'], confirmation='oui')
-    disp._llm = LLMMock(intention_oui)
+    disp._modele_langage = ModeleLangageSimule(intention_oui)
     resultat = disp.traiter('oui')
-    assert resultat.state == 'ARRIVED'
+    assert resultat.etat == 'ARRIVED'
 
 
 def test_dispatcher_confirmation_non():
     """Confirmation non annule la navigation en attente → state IDLE."""
     intention_loc = _intention(['localiser'], lieux=['toilettes'])
-    disp = _dispatcher(intention_llm=intention_loc)
+    disp = _creer_repartiteur(intention_modele=intention_loc)
     disp.traiter('où sont les toilettes ?')
 
     intention_non = _intention(['confirmation'], confirmation='non')
-    disp._llm = LLMMock(intention_non)
+    disp._modele_langage = ModeleLangageSimule(intention_non)
     resultat = disp.traiter('non merci')
-    assert resultat.state == 'IDLE'
-    assert disp._pending_location is None
+    assert resultat.etat == 'IDLE'
+    assert disp._lieu_en_attente is None
 
 
 def test_dispatcher_lieu_inconnu():
     """Un lieu non résolu par le registre retourne state IDLE et message unknown_location_reply."""
     intention = _intention(['navigation'], lieux=['bibliothèque inconnue'])
-    disp = _dispatcher(intention_llm=intention)
+    disp = _creer_repartiteur(intention_modele=intention)
     resultat = disp.traiter('emmène-moi à la bibliothèque')
-    assert resultat.state == 'IDLE'
-    assert resultat.response == CONFIG.dialogue.unknown_location_reply
+    assert resultat.etat == 'IDLE'
+    assert resultat.reponse == CONFIG.dialogue.unknown_location_reply
 
 
 def test_dispatcher_urgence():
     """Un mot d'urgence dans le texte déclenche la navigation vers emergency_location."""
     mot_urgence = CONFIG.mission.emergency_keywords[0]
-    disp = _dispatcher(navigate=navigate_ok)
+    disp = _creer_repartiteur(naviguer=naviguer_succes)
     resultat = disp.traiter(f"j'ai {mot_urgence} aidez-moi")
     # L'urgence court-circuite tout : navigation directe
-    assert resultat.state in ('ARRIVED', 'CONFIRMING', 'ERROR')
+    assert resultat.etat in ('ARRIVED', 'CONFIRMING', 'ERROR')
 
 
 def test_dispatcher_stop_annule():
@@ -328,43 +328,43 @@ def test_dispatcher_stop_annule():
 
     mot_stop = CONFIG.prompts.fallback_keywords['stop'][0]
     registre = _construire_registre()
-    disp = DispatcherAssistant(
-        CONFIG, registre, LLMEchecMock(), navigate_ok, cancel_spy, resolve_pose_ok)
+    disp = RepartiteurAssistant(
+        CONFIG, registre, ModeleLangageEnEchec(), naviguer_succes, cancel_spy, resoudre_pose_disponible)
     resultat = disp.traiter(mot_stop)
-    assert resultat.state == 'IDLE'
+    assert resultat.etat == 'IDLE'
     assert len(annulations) == 1
 
 
 def test_dispatcher_fallback_llm_indisponible():
     """Quand le LLM lève une exception, l'AnalyseurRegles prend le relais."""
-    disp = _dispatcher(intention_llm=None)  # LLMEchecMock par défaut
+    disp = _creer_repartiteur(intention_modele=None)  # Modèle simulé en échec par défaut
     # Texte contenant un mot-clé de localisation
     mot_loc = CONFIG.prompts.fallback_keywords['localization'][0]
     resultat = disp.traiter(f'{mot_loc} les toilettes')
     # Le fallback doit retourner une réponse cohérente (pas d'exception)
-    assert resultat.state in ('CONFIRMING', 'IDLE', 'ARRIVED', 'ERROR', 'ANSWERING')
+    assert resultat.etat in ('CONFIRMING', 'IDLE', 'ARRIVED', 'ERROR', 'ANSWERING')
 
 
 def test_dispatcher_information():
     """Intention 'information' → state ANSWERING."""
     intention = _intention(['information'])
-    disp = _dispatcher(intention_llm=intention)
+    disp = _creer_repartiteur(intention_modele=intention)
     resultat = disp.traiter("qu'est-ce que la buvette propose ?")
-    assert resultat.state == 'ANSWERING'
+    assert resultat.etat == 'ANSWERING'
 
 
-def test_dispatcher_pose_absente():
-    """Quand resolve_pose retourne None, la navigation échoue → state ERROR."""
+def test_repartiteur_pose_absente():
+    """Quand la pose est absente, la navigation échoue et l'état devient ERROR."""
     intention = _intention(['navigation'], lieux=['accueil'])
-    disp = _dispatcher(intention_llm=intention, resolve_pose=resolve_pose_absent)
+    disp = _creer_repartiteur(intention_modele=intention, resoudre_pose=resoudre_pose_absente)
 
     resultat = disp.traiter("emmène-moi à l'accueil")
     if CONFIG.dialogue.confirmation_required:
-        assert resultat.state == 'CONFIRMING'
+        assert resultat.etat == 'CONFIRMING'
         intention_oui = _intention(['confirmation'], confirmation='oui')
-        disp._llm = LLMMock(intention_oui)
+        disp._modele_langage = ModeleLangageSimule(intention_oui)
         resultat = disp.traiter('oui')
-    assert resultat.state == 'ERROR'
+    assert resultat.etat == 'ERROR'
 
 
 if __name__ == '__main__':

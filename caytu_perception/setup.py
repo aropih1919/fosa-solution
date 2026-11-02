@@ -19,10 +19,10 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
-            'tag_detector = caytu_perception.tag_detector:main',
-            'tag_calibrator = caytu_perception.tag_calibrator:main',
-            'obstacle_classifier = caytu_perception.obstacle_classifier:main',
-            'person_tracker = caytu_perception.person_tracker:main',
+            'tag_detector = caytu_perception.detecteur_tags:main',
+            'tag_calibrator = caytu_perception.calibrateur_tags:main',
+            'obstacle_classifier = caytu_perception.classificateur_obstacles:main',
+            'person_tracker = caytu_perception.suivi_personnes:main',
         ],
     },
 )

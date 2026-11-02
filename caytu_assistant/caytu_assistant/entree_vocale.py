@@ -30,11 +30,11 @@ class NoeudEntreeVocale(Node):
             String, self.get_parameter('transcript_topic').value, 10)
         mode = self.get_parameter('input_mode').value
         if mode == 'audio_file':
-            threading.Thread(target=self._transcribe_file, daemon=True).start()
+            threading.Thread(target=self._transcrire_fichier, daemon=True).start()
         elif mode == 'microphone':
-            threading.Thread(target=self._listen, daemon=True).start()
+            threading.Thread(target=self._ecouter_micro, daemon=True).start()
         elif mode == 'text':
-            threading.Thread(target=self._read_text, daemon=True).start()
+            threading.Thread(target=self._lire_texte, daemon=True).start()
         else:
             raise ValueError(f'Mode STT inconnu : {mode}')
 
@@ -65,10 +65,6 @@ class NoeudEntreeVocale(Node):
             except Exception as erreur:
                 erreurs.append(f'{fournisseur}: {erreur}')
         raise RuntimeError('; '.join(erreurs))
-
-    # Alias de compatibilité
-    _publish = _publier_texte
-    _transcribe = _transcrire_audio
 
     def _transcrire_api(self, chemin_audio):
         """Transcrit le fichier audio via une requête POST multipart vers l'API Whisper distante."""
@@ -188,14 +184,6 @@ class NoeudEntreeVocale(Node):
         finally:
             if chemin and os.path.exists(chemin):
                 os.unlink(chemin)
-
-    # Alias de compatibilité
-    _transcribe_api = _transcrire_api
-    _transcribe_file = _transcrire_fichier
-    _read_text = _lire_texte
-    _listen = _ecouter_micro
-    _transcribe_chunks = _transcrire_morceaux_audio
-
 
 def main(args=None):
     rclpy.init(args=args)

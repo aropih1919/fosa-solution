@@ -28,54 +28,77 @@ Le projet est conçu de façon modulaire et lisible :
 
 ## 2. Guide des commandes — Que lancer et comment ?
 
-### 2.1 Compilation du workspace
+### 2.1 Installation sur un nouveau PC
 ```bash
-cd ~/ros2_ws
-colcon build --symlink-install
-source install/setup.bash
+cd ~/ros2_ws/src/fosa-solution
+./install.sh
 ```
+L'installateur prépare Ubuntu 24.04, ROS 2 Jazzy, le dépôt de simulation PARC,
+les dépendances Python et tous les paquets du workspace. Il demande si les
+modèles IA locaux doivent être téléchargés immédiatement. Pour les récupérer
+plus tard : `./install.sh --models`.
+
+`run.sh` source automatiquement ROS, le workspace compilé et l'environnement Python.
 
 ---
 
-### 2.2 Phase 1 — Navigation autonome officielle
-Cette commande exécute la tâche de navigation complète en environnement encombré sans intervention manuelle :
+### 2.2 Solution complète — Simulation et assistant
+```bash
+./run.sh complet
+```
+Par défaut, l'assistant utilise le mode microphone configuré. Pour saisir le
+texte au clavier :
+```bash
+./run.sh complet input_mode:=text
+```
+
+### 2.3 Navigation autonome officielle
+La simulation doit d'abord être lancée dans un terminal :
 
 **Terminal 1 — Lancement de la simulation officielle :**
 ```bash
-ros2 launch parc_robot_bringup task.launch.py
+./run.sh gazebo
 ```
 
 **Terminal 2 — Lancement de la solution Fosa :**
 ```bash
-ros2 run caytu_nav_solution task_solution.py
+./run.sh navigation
 ```
 
 ---
 
-### 2.3 Phase 2 — Assistant vocal & Guidage interactif
+### 2.4 Assistant seul et test TTS
 
 **Mode interactif en console (Idéal pour tester sans microphone) :**
 ```bash
-ros2 launch caytu_assistant assistant.launch.py input_mode:=text
+./run.sh assistant input_mode:=text
 ```
 *Tapez directement vos phrases dans le terminal (`Où sont les toilettes ?`, `Oui`, `Stop`, `À quelle heure est la finale ?`, `J'ai mal`).*
 
 **Mode vocal complet (avec microphone et haut-parleur) :**
 ```bash
-ros2 launch caytu_assistant assistant.launch.py input_mode:=microphone
+./run.sh assistant input_mode:=microphone
+```
+
+**Essai direct de la synthèse vocale :**
+```bash
+./run.sh tts "Bonjour, ceci est un essai de synthèse vocale."
 ```
 
 ---
 
-### 2.4 Outil de diagnostic en direct
+### 2.5 Outil de diagnostic en direct
 Permet de mesurer en temps réel la dérive de localisation, les faux obstacles et les contacts :
 ```bash
-python3 tools/diag_nav.py --ros-args -p use_sim_time:=true
+./run.sh diagnostic --ros-args -p use_sim_time:=true
 ```
 
 ---
 
-### 2.5 Lancement des tests unitaires
+Les outils du laboratoire restent accessibles avec `./run.sh benchmark` et
+`./run.sh compare`.
+
+### 2.6 Lancement des tests unitaires
 Vérifie la robustesse de tous les modules sans nécessiter de simulateur :
 ```bash
 colcon test --packages-select caytu_config caytu_nav_bringup caytu_nav_solution caytu_semantic_map caytu_assistant caytu_perception

@@ -24,13 +24,13 @@ class CalibrateurTags(Node):
         self._subscription = self.create_subscription(
             TagDetectionArray,
             self._configuration.perception.tags_topic,
-            self._receive,
+            self._recevoir,
             10)
         self.get_logger().info(
             f'Calibration: {self._samples_required} observations/tag, '
             f'sortie {self._output_path}')
 
-    def _receive(self, message):
+    def _recevoir(self, message):
         for detection in message.detections:
             samples = self._samples.setdefault(detection.tag_id, [])
             if len(samples) >= self._samples_required:
@@ -51,9 +51,9 @@ class CalibrateurTags(Node):
         if self._samples and all(
                 len(values) >= self._samples_required
                 for values in self._samples.values()):
-            self._write()
+            self._ecrire()
 
-    def _write(self):
+    def _ecrire(self):
         data = {
             'frame': self._configuration.semantic_map.frame,
             'tags': {

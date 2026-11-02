@@ -1,4 +1,4 @@
-"""Client de chat structuré Ollama / API compatible OpenAI, sans tool moteur."""
+"""Client de chat structuré pour Ollama et les API compatibles OpenAI, sans commande moteur."""
 
 import json
 import os
@@ -38,47 +38,40 @@ class ClientLLM:
     """
 
     def __init__(self, configuration):
-        self._config = configuration.dialogue.llm
+        self._configuration_llm = configuration.dialogue.llm
         self._secrets = configuration.secrets
         self._prompts = configuration.prompts
-        self._locations = configuration.semantic_map.locations
+        self._lieux = configuration.semantic_map.locations
 
     def _construire_prompt_systeme(self):
         """Assemble les instructions, règles de sécurité et liste des lieux autorisés."""
         lieux = [
             {'name': item.name, 'aliases': list(item.aliases)}
-            for item in self._locations
+            for item in self._lieux
         ]
         return (self._prompts.system + '\n\n'
                 + '\n'.join(self._prompts.rules)
                 + '\nLieux autorisés (noms et alias seulement): '
                 + json.dumps(lieux, ensure_ascii=False))
 
-    def _system_prompt(self):
-        # Alias de compatibilité
-        return self._construire_prompt_systeme()
-
     def _appeler_local(self, texte, historique):
         """Interroge le serveur Ollama local via son API HTTP /api/chat."""
-        base = os.environ.get('FOSA_OLLAMA_URL', self._config.local_base)
-        url = base.rstrip('/') + '/api/chat'
+        adresse_base = os.environ.get(
+            'FOSA_OLLAMA_URL', self._configuration_llm.local_base)
+        url = adresse_base.rstrip('/') + '/api/chat'
         messages = [{'role': 'system', 'content': self._construire_prompt_systeme()}]
         messages.extend(historique)
         messages.append({'role': 'user', 'content': texte})
-        body = {
-            'model': self._config.local_model,
+        corps_json = {
+            'model': self._configuration_llm.local_model,
             'messages': messages,
             'format': SCHEMA_INTENT,
             'stream': False,
-            'options': {'temperature': self._config.temperature},
+            'options': {'temperature': self._configuration_llm.temperature},
         }
-        reponse = self._envoyer_requete_json(url, body, None)
+        reponse = self._envoyer_requete_json(url, corps_json, None)
         contenu = reponse.get('message', {}).get('content', '')
         return Intention.depuis_json(contenu)
-
-    def _local(self, text, history):
-        # Alias de compatibilité
-        return self._appeler_local(text, history)
 
     def _appeler_api(self, texte, historique):
         """Interroge une API compatible OpenAI (ChatGPT, Groq, etc.)."""
@@ -86,28 +79,24 @@ class ClientLLM:
                  or self._secrets.openai_api_key)
         if not token:
             raise LLMIndisponible('FOSA_LLM_API_KEY ou OPENAI_API_KEY absent.')
-        base = self._config.api_base
-        url = base.rstrip('/') + '/chat/completions'
+        adresse_base = self._configuration_llm.api_base
+        url = adresse_base.rstrip('/') + '/chat/completions'
         messages = [{'role': 'system', 'content': self._construire_prompt_systeme()}]
         messages.extend(historique)
         messages.append({'role': 'user', 'content': texte})
-        body = {
-            'model': self._config.api_model,
+        corps_json = {
+            'model': self._configuration_llm.api_model,
             'messages': messages,
-            'temperature': self._config.temperature,
+            'temperature': self._configuration_llm.temperature,
             'response_format': {
                 'type': 'json_schema',
                 'json_schema': {'name': 'intent', 'strict': True,
                                 'schema': SCHEMA_INTENT},
             },
         }
-        reponse = self._envoyer_requete_json(url, body, token)
+        reponse = self._envoyer_requete_json(url, corps_json, token)
         contenu = reponse['choices'][0]['message']['content']
         return Intention.depuis_json(contenu)
-
-    def _api(self, text, history):
-        # Alias de compatibilité
-        return self._appeler_api(text, history)
 
     def _envoyer_requete_json(self, url, corps_json, token):
         """Effectue une requête POST HTTP avec sérialisation/désérialisation JSON."""
@@ -118,15 +107,11 @@ class ClientLLM:
             url, data=json.dumps(corps_json).encode('utf-8'), headers=entetes)
         try:
             with urllib.request.urlopen(
-                    requete, timeout=self._config.timeout_sec) as reponse:
+                    requete, timeout=self._configuration_llm.timeout_sec) as reponse:
                 return json.loads(reponse.read().decode('utf-8'))
         except (OSError, urllib.error.URLError, TimeoutError,
                 json.JSONDecodeError, KeyError) as erreur:
             raise LLMIndisponible(str(erreur)) from erreur
-
-    def _post_json(self, url, body, token):
-        # Alias de compatibilité
-        return self._envoyer_requete_json(url, body, token)
 
     def interpreter(self, texte, historique=()):
         """Interprète la phrase de l'utilisateur et retourne une Intention structurée.
@@ -137,16 +122,13 @@ class ClientLLM:
             'local': [self._appeler_local],
             'api': [self._appeler_api],
             'auto': [self._appeler_local, self._appeler_api],
-        }.get(self._config.provider, [self._appeler_local])
+        }.get(self._configuration_llm.provider, [self._appeler_local])
         erreurs = []
         for fournisseur in fournisseurs:
-            for _ in range(self._config.max_retries + 1):
+            for _ in range(self._configuration_llm.max_retries + 1):
                 try:
                     return fournisseur(texte, historique)
                 except (LLMIndisponible, ErreurIntention) as erreur:
                     erreurs.append(str(erreur))
                     break
         raise LLMIndisponible('; '.join(erreurs) or 'Fournisseur indisponible.')
-
-    # Alias de compatibilité
-    interpret = interpreter

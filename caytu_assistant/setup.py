@@ -22,10 +22,9 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
-            'assistant_solution.py = caytu_assistant.assistant_solution:main',
-            'dialogue_manager = caytu_assistant.dialogue_manager:main',
-            'speech_input = caytu_assistant.speech_input:main',
-            'speech_output = caytu_assistant.speech_output:main',
+            'dialogue_manager = caytu_assistant.gestionnaire_dialogue:main',
+            'speech_input = caytu_assistant.entree_vocale:main',
+            'speech_output = caytu_assistant.sortie_vocale:main',
         ],
     },
 )

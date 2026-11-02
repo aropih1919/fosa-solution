@@ -20,16 +20,16 @@ from caytu_config.loader import config_directory
 from caytu_interfaces.msg import DetectedEntity, DetectedEntityArray
 
 
-def _rotate(q, vector):
-    x, y, z, w = q
-    vx, vy, vz = vector
+def _tourner_quaternion(quaternion, vecteur):
+    x, y, z, w = quaternion
+    vx, vy, vz = vecteur
     uv = (y * vz - z * vy, z * vx - x * vz, x * vy - y * vx)
     uuv = (y * uv[2] - z * uv[1], z * uv[0] - x * uv[2],
            x * uv[1] - y * uv[0])
-    return tuple(vector[i] + 2.0 * (w * uv[i] + uuv[i]) for i in range(3))
+    return tuple(vecteur[i] + 2.0 * (w * uv[i] + uuv[i]) for i in range(3))
 
 
-def _components(points, tolerance):
+def _composantes(points, tolerance):
     """Regroupe les points sur une grille XY sans dépendance à scikit-learn."""
     cells = {}
     for point in points:
@@ -78,16 +78,16 @@ class ClassificateurObstacles(Node):
             DetectedEntityArray, self.get_parameter('output_topic').value, 10)
         self._camera_info_sub = self.create_subscription(
             CameraInfo, self.get_parameter('camera_info_topic').value,
-            self._receive_camera_info, 10)
+            self._recevoir_infos_camera, 10)
         self._cloud_sub = self.create_subscription(
             PointCloud2, self.get_parameter('cloud_topic').value,
-            self._receive_cloud, 5)
+            self._recevoir_nuage, 5)
         self._image_sub = self.create_subscription(
             Image, self.get_parameter('image_topic').value,
-            self._receive_image, 5)
-        self._load_yolo()
+            self._recevoir_image, 5)
+        self._charger_yolo()
 
-    def _load_yolo(self):
+    def _charger_yolo(self):
         yolo = self._configuration.perception.yolo
         if not yolo.enabled:
             return
@@ -104,10 +104,10 @@ class ClassificateurObstacles(Node):
             self.get_logger().warning(
                 f'YOLO indisponible ({error}); la géométrie reste active.')
 
-    def _receive_camera_info(self, message):
+    def _recevoir_infos_camera(self, message):
         self._camera_matrix = np.asarray(message.k, dtype=np.float32).reshape(3, 3)
 
-    def _receive_image(self, message):
+    def _recevoir_image(self, message):
         if self._yolo is None or self._camera_matrix is None:
             return
         config = self._configuration.perception.yolo
@@ -117,12 +117,12 @@ class ClassificateurObstacles(Node):
         self._last_yolo_time = maintenant
         try:
             image = self._bridge.imgmsg_to_cv2(message, desired_encoding='bgr8')
-            self._yolo_bearings = self._detect_person_bearings(image)
-            self._fuse_and_publish(message.header)
+            self._yolo_bearings = self._detecter_directions_personnes(image)
+            self._fusionner_et_publier(message.header)
         except (cv2.error, ValueError) as error:
             self.get_logger().warning(f'Image YOLO ignorée : {error}')
 
-    def _detect_person_bearings(self, image):
+    def _detecter_directions_personnes(self, image):
         height, width = image.shape[:2]
         blob = cv2.dnn.blobFromImage(
             image, scalefactor=1.0 / 255.0,
@@ -150,7 +150,7 @@ class ClassificateurObstacles(Node):
             results.append((bearing, confidence))
         return results
 
-    def _receive_cloud(self, message):
+    def _recevoir_nuage(self, message):
         try:
             transform = self._tf_buffer.lookup_transform(
                 self._configuration.system.base_frame,
@@ -165,18 +165,18 @@ class ClassificateurObstacles(Node):
         try:
             for point in point_cloud2.read_points(
                     message, field_names=('x', 'y', 'z'), skip_nans=True):
-                rotated = _rotate(quaternion, (float(point[0]),
-                                               float(point[1]),
-                                               float(point[2])))
-                points.append((rotated[0] + translation.x,
-                               rotated[1] + translation.y,
-                               rotated[2] + translation.z))
+                point_tourne = _tourner_quaternion(quaternion, (float(point[0]),
+                                                               float(point[1]),
+                                                               float(point[2])))
+                points.append((point_tourne[0] + translation.x,
+                               point_tourne[1] + translation.y,
+                               point_tourne[2] + translation.z))
         except (ValueError, TypeError) as error:
             self.get_logger().warning(f'Nuage de points ignoré : {error}')
             return
         config = self._configuration.perception.person
         candidates = []
-        for cluster in _components(points, config.cluster_tolerance_m):
+        for cluster in _composantes(points, config.cluster_tolerance_m):
             if len(cluster) < config.min_cluster_points:
                 continue
             xs, ys, zs = zip(*cluster)
@@ -197,10 +197,10 @@ class ClassificateurObstacles(Node):
             entity.is_person = is_person
             entity.source = 'geometry'
             candidates.append(entity)
-        self._last_entities = self._assign_tracks(candidates)
-        self._fuse_and_publish(message.header)
+        self._last_entities = self._attribuer_suivis(candidates)
+        self._fusionner_et_publier(message.header)
 
-    def _assign_tracks(self, candidates):
+    def _attribuer_suivis(self, candidates):
         now = time.monotonic()
         elapsed = max(now - self._last_cloud_time, 1e-3)
         self._last_cloud_time = now
@@ -238,7 +238,7 @@ class ClassificateurObstacles(Node):
         self._previous_tracks = tracks
         return candidates
 
-    def _fuse_and_publish(self, header):
+    def _fusionner_et_publier(self, header):
         config = self._configuration.perception.person
         entities = list(self._last_entities)
         for bearing, confidence in self._yolo_bearings:

@@ -40,7 +40,7 @@ class TaskTimer:
         self._start = None
 
     def start(self):
-        """Start the timer; return False while the clock is not ready."""
+        """Démarre le chronomètre et retourne False si l'horloge n'est pas prête."""
         self._start = self._now()
         return self._start.nanoseconds != 0
 
@@ -118,7 +118,7 @@ class BringupManager:
         self._process = self._popen(command, start_new_session=True)
 
     def alive(self):
-        """Return whether the bringup is running or has not been started here."""
+        """Indique si le bringup tourne ou n'a pas été démarré ici."""
         return self._process is None or self._process.poll() is None
 
     def stop(self):

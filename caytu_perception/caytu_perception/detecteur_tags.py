@@ -41,10 +41,6 @@ def _quaternion_depuis_matrice(matrice):
     return tuple(float(valeur) for valeur in resultat)
 
 
-# Alias de compatibilité
-_quaternion_from_matrix = _quaternion_depuis_matrice
-
-
 def _multiplier_quaternions(gauche, droite):
     """Produit de deux quaternions de rotation."""
     gx, gy, gz, gw = gauche
@@ -55,10 +51,6 @@ def _multiplier_quaternions(gauche, droite):
         gw * dz + gx * dy - gy * dx + gz * dw,
         gw * dw - gx * dx - gy * dy - gz * dz,
     )
-
-
-# Alias de compatibilité
-_multiply_quaternions = _multiplier_quaternions
 
 
 def _tourner_vecteur(quaternion, vecteur):
@@ -74,10 +66,6 @@ def _tourner_vecteur(quaternion, vecteur):
               qv[0] * cross1[1] - qv[1] * cross1[0])
     return tuple(vecteur[i] + 2.0 * (w * cross1[i] + cross2[i])
                  for i in range(3))
-
-
-# Alias de compatibilité
-_rotate_vector = _tourner_vecteur
 
 
 class DetecteurTags(Node):
@@ -128,10 +116,6 @@ class DetecteurTags(Node):
         self._camera_matrix = np.asarray(message.k, dtype=np.float64).reshape(3, 3)
         self._distortion = np.asarray(message.d, dtype=np.float64)
 
-    def _receive_camera_info(self, message):
-        # Alias compatibilité
-        return self._recevoir_camera_info(message)
-
     def _detecter_marqueurs(self, image):
         """Exécute l'algorithme ArUco/AprilTag d'OpenCV sur l'image en niveaux de gris."""
         if hasattr(cv2.aruco, 'DetectorParameters'):
@@ -145,10 +129,6 @@ class DetecteurTags(Node):
             corners, ids, _ = cv2.aruco.detectMarkers(
                 image, self._dictionary, parameters=parameters)
         return corners, ids
-
-    def _detect(self, image):
-        # Alias compatibilité
-        return self._detecter_marqueurs(image)
 
     def _recevoir_image(self, message):
         """Traite une nouvelle image caméra, extrait les tags et publie leurs poses."""
@@ -180,7 +160,7 @@ class DetecteurTags(Node):
                 if distance > self._configuration.perception.apriltag.max_distance_m:
                     continue
                 try:
-                    detection = self._to_map_detection(
+                    detection = self._convertir_en_detection_carte(
                         message, int(tag_id), rotation_vector,
                         translation.reshape(3), distance)
                 except TransformException:
@@ -188,7 +168,7 @@ class DetecteurTags(Node):
                 output.detections.append(detection)
         self._publisher.publish(output)
 
-    def _convertir_en_detection_map(self, image, tag_id, rotation_vector,
+    def _convertir_en_detection_carte(self, image, tag_id, rotation_vector,
                                      translation, distance):
         """Transforme la pose relative caméra vers le repère global `map` via TF2."""
         transform = self._tf_buffer.lookup_transform(
@@ -217,10 +197,6 @@ class DetecteurTags(Node):
         detection.distance_m = distance
         detection.confidence = 1.0
         return detection
-
-    # Alias de compatibilité
-    _to_map_detection = _convertir_en_detection_map
-
 
 def main(args=None):
     rclpy.init(args=args)

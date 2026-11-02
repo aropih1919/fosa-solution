@@ -19,7 +19,7 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
-            'semantic_map_node = caytu_semantic_map.semantic_map_node:main',
+            'semantic_map_node = caytu_semantic_map.noeud_carte_semantique:main',
         ],
     },
 )

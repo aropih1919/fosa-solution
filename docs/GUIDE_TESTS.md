@@ -6,21 +6,19 @@ Ce guide décrit l'ensemble des étapes et commandes à exécuter pour valider l
 
 ## 1. Préparation de l'environnement
 
-### 1.1 Source des espaces de travail
-Dans chaque terminal :
+### 1.1 Installation et préparation des espaces de travail
+Sur un nouveau poste Ubuntu 24.04 :
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
+cd ~/ros2_ws/src/fosa-solution
+./install.sh
 ```
+Les commandes `run.sh` sourcent automatiquement ROS 2 Jazzy, le workspace et
+l'environnement Python. Le téléchargement des modèles IA est proposé lors de
+l'installation et peut être fait plus tard avec `./install.sh --models`.
 
-### 1.2 Modèles de langage et voix (si test local)
-Si vous utilisez les fournisseurs locaux configurés par défaut :
+### 1.2 Essai de la synthèse vocale
 ```bash
-# Vérifier qu'Ollama tourne et télécharger le modèle recommandé :
-ollama pull qwen2.5:3b
-
-# Vérifier que le lecteur audio et Piper sont présents (si test avec haut-parleur) :
-which aplay piper
+./run.sh tts "Bonjour, essai de synthèse vocale."
 ```
 
 ---
@@ -31,12 +29,12 @@ Ce test vérifie que le robot atteint le but officiel dans le restaurant du stad
 
 **Terminal 1 — Lancement de la simulation officielle :**
 ```bash
-ros2 launch parc_robot_bringup task.launch.py
+./run.sh gazebo
 ```
 
 **Terminal 2 — Lancement de la solution de navigation Fosa :**
 ```bash
-ros2 run caytu_nav_solution task_solution.py
+./run.sh navigation
 ```
 
 **Critères de succès :**
@@ -53,7 +51,7 @@ ros2 run caytu_nav_solution task_solution.py
 Permet de valider immédiatement toute la chaîne de décision, la perception et Nav2 sans dépendre d'un micro :
 
 ```bash
-ros2 launch caytu_assistant assistant.launch.py input_mode:=text
+./run.sh assistant input_mode:=text
 ```
 
 Dans l'invite `Vous>`, saisissez successivement les scénarios suivants pour valider le comportement :
@@ -70,7 +68,7 @@ Dans l'invite `Vous>`, saisissez successivement les scénarios suivants pour val
 
 ### 3.2 Test avec microphone et haut-parleur réels
 ```bash
-ros2 launch caytu_assistant assistant.launch.py input_mode:=microphone
+./run.sh assistant input_mode:=microphone
 ```
 Parlez distinctement devant le micro. Le VAD détecte la parole, Whisper transcrit la phrase, le LLM extrait l'intention, le dispatcher planifie l'action et Piper répond vocalement.
 
@@ -81,7 +79,7 @@ Parlez distinctement devant le micro. Le VAD détecte la parole, Whisper transcr
 Pendant que la navigation ou l'assistant tourne, vous pouvez observer les grandeurs critiques du robot en temps réel dans un autre terminal :
 
 ```bash
-python3 tools/diag_nav.py --ros-args -p use_sim_time:=true
+./run.sh diagnostic --ros-args -p use_sim_time:=true
 ```
 
 Colonnes affichées toutes les 2 secondes :

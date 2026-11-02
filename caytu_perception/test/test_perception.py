@@ -47,14 +47,14 @@ sys.modules['numpy'] = np
 # ---------------------------------------------------------------------------
 # Import des fonctions pures après le mock
 # ---------------------------------------------------------------------------
-from caytu_perception.tag_detector import (  # noqa: E402
-    _multiply_quaternions,
-    _quaternion_from_matrix,
-    _rotate_vector,
+from caytu_perception.detecteur_tags import (  # noqa: E402
+    _multiplier_quaternions,
+    _quaternion_depuis_matrice,
+    _tourner_vecteur,
 )
-from caytu_perception.obstacle_classifier import (  # noqa: E402
-    _components,
-    _rotate,
+from caytu_perception.classificateur_obstacles import (  # noqa: E402
+    _composantes,
+    _tourner_quaternion,
 )
 
 
@@ -74,12 +74,12 @@ def _proches(a, b, tol=TOLERANCE):
 # ===========================================================================
 
 class TestQuaternionDepuisMatrice:
-    """Tests de `_quaternion_from_matrix`."""
+    """Tests de `_quaternion_depuis_matrice`."""
 
     def test_quaternion_depuis_matrice_identite(self):
         """Matrice identité 3×3 → quaternion unité (0, 0, 0, 1)."""
         identite = np.eye(3)
-        qx, qy, qz, qw = _quaternion_from_matrix(identite)
+        qx, qy, qz, qw = _quaternion_depuis_matrice(identite)
         assert abs(qx) < TOLERANCE
         assert abs(qy) < TOLERANCE
         assert abs(qz) < TOLERANCE
@@ -96,7 +96,7 @@ class TestQuaternionDepuisMatrice:
             [sin_a,  cos_a, 0.0],
             [0.0,    0.0,   1.0],
         ])
-        qx, qy, qz, qw = _quaternion_from_matrix(matrice)
+        qx, qy, qz, qw = _quaternion_depuis_matrice(matrice)
         demi = math.sqrt(2.0) / 2.0
         assert abs(qx) < 1e-7
         assert abs(qy) < 1e-7
@@ -110,7 +110,7 @@ class TestQuaternionDepuisMatrice:
             [0.0, -1.0,  0.0],
             [0.0,  0.0, -1.0],
         ])
-        qx, qy, qz, qw = _quaternion_from_matrix(matrice)
+        qx, qy, qz, qw = _quaternion_depuis_matrice(matrice)
         assert abs(qx - 1.0) < 1e-7
         assert abs(qy) < 1e-7
         assert abs(qz) < 1e-7
@@ -118,27 +118,27 @@ class TestQuaternionDepuisMatrice:
 
 
 class TestMultiplicationQuaternions:
-    """Tests de `_multiply_quaternions`."""
+    """Tests de `_multiplier_quaternions`."""
 
     def test_multiplication_quaternions_identite_droite(self):
         """q * identité = q."""
         q = (0.1, 0.2, 0.3, math.sqrt(1.0 - 0.1**2 - 0.2**2 - 0.3**2))
         identite = (0.0, 0.0, 0.0, 1.0)
-        resultat = _multiply_quaternions(q, identite)
+        resultat = _multiplier_quaternions(q, identite)
         assert _proches(resultat, q)
 
     def test_multiplication_quaternions_identite_gauche(self):
         """identité * q = q."""
         q = (0.1, 0.2, 0.3, math.sqrt(1.0 - 0.1**2 - 0.2**2 - 0.3**2))
         identite = (0.0, 0.0, 0.0, 1.0)
-        resultat = _multiply_quaternions(identite, q)
+        resultat = _multiplier_quaternions(identite, q)
         assert _proches(resultat, q)
 
     def test_multiplication_quaternions_norme_preservee(self):
         """Le produit de deux quaternions unitaires est unitaire."""
         q1 = (0.0, 0.0, math.sqrt(2.0) / 2.0, math.sqrt(2.0) / 2.0)  # Rz(90°)
         q2 = (0.0, 0.0, math.sqrt(2.0) / 2.0, math.sqrt(2.0) / 2.0)  # Rz(90°)
-        resultat = _multiply_quaternions(q1, q2)
+        resultat = _multiplier_quaternions(q1, q2)
         norme = math.sqrt(sum(c * c for c in resultat))
         assert abs(norme - 1.0) < 1e-9
 
@@ -146,7 +146,7 @@ class TestMultiplicationQuaternions:
         """Rz(90°) * Rz(90°) = Rz(180°) ≙ (0, 0, 1, 0)."""
         demi = math.sqrt(2.0) / 2.0
         rz90 = (0.0, 0.0, demi, demi)
-        qx, qy, qz, qw = _multiply_quaternions(rz90, rz90)
+        qx, qy, qz, qw = _multiplier_quaternions(rz90, rz90)
         assert abs(qx) < 1e-9
         assert abs(qy) < 1e-9
         assert abs(qz - 1.0) < 1e-9
@@ -154,20 +154,20 @@ class TestMultiplicationQuaternions:
 
 
 class TestRotationVecteur:
-    """Tests de `_rotate_vector` (tag_detector)."""
+    """Tests de `_tourner_vecteur` (tag_detector)."""
 
     def test_rotation_vecteur_identite(self):
         """Quaternion identité → vecteur inchangé."""
         q_identite = (0.0, 0.0, 0.0, 1.0)
         vecteur = (1.0, 2.0, 3.0)
-        assert _proches(_rotate_vector(q_identite, vecteur), vecteur)
+        assert _proches(_tourner_vecteur(q_identite, vecteur), vecteur)
 
     def test_rotation_vecteur_rz90_axe_x_vers_y(self):
         """Rotation 90° autour de Z : X → Y."""
         demi = math.sqrt(2.0) / 2.0
         q_rz90 = (0.0, 0.0, demi, demi)
         vecteur_x = (1.0, 0.0, 0.0)
-        rx, ry, rz = _rotate_vector(q_rz90, vecteur_x)
+        rx, ry, rz = _tourner_vecteur(q_rz90, vecteur_x)
         assert abs(rx) < 1e-9
         assert abs(ry - 1.0) < 1e-9
         assert abs(rz) < 1e-9
@@ -176,7 +176,7 @@ class TestRotationVecteur:
         """Rotation 180° autour de Z : X → -X."""
         q_rz180 = (0.0, 0.0, 1.0, 0.0)
         vecteur_x = (1.0, 0.0, 0.0)
-        rx, ry, rz = _rotate_vector(q_rz180, vecteur_x)
+        rx, ry, rz = _tourner_vecteur(q_rz180, vecteur_x)
         assert abs(rx + 1.0) < 1e-9
         assert abs(ry) < 1e-9
         assert abs(rz) < 1e-9
@@ -187,35 +187,35 @@ class TestRotationVecteur:
 # ===========================================================================
 
 class TestRotationVecteurClassifier:
-    """Tests de `_rotate` (obstacle_classifier)."""
+    """Tests de `_tourner_quaternion` (classificateur d'obstacles)."""
 
     def test_rotation_vecteur_classifier_identite(self):
         """Quaternion identité → vecteur inchangé."""
         q = (0.0, 0.0, 0.0, 1.0)
         vecteur = (3.0, -1.0, 2.0)
-        assert _proches(_rotate(q, vecteur), vecteur)
+        assert _proches(_tourner_quaternion(q, vecteur), vecteur)
 
     def test_rotation_vecteur_classifier_rz90(self):
-        """Rotation 90° autour de Z : X → Y (cohérent avec tag_detector)."""
+        """Rotation 90° autour de Z : X → Y (cohérente avec le détecteur de tags)."""
         demi = math.sqrt(2.0) / 2.0
         q = (0.0, 0.0, demi, demi)
-        rx, ry, rz = _rotate(q, (1.0, 0.0, 0.0))
+        rx, ry, rz = _tourner_quaternion(q, (1.0, 0.0, 0.0))
         assert abs(rx) < 1e-9
         assert abs(ry - 1.0) < 1e-9
         assert abs(rz) < 1e-9
 
 
 class TestComposantesConnexes:
-    """Tests de `_components` (clustering grille XY)."""
+    """Tests des composantes connexes sur la grille XY."""
 
     def test_composantes_connexes_vide(self):
         """Liste vide → aucune composante."""
-        composantes = list(_components([], tolerance=0.5))
+        composantes = list(_composantes([], tolerance=0.5))
         assert composantes == []
 
     def test_composantes_connexes_un_point(self):
         """Un seul point → une composante avec ce point."""
-        composantes = list(_components([(1.0, 2.0, 0.0)], tolerance=0.5))
+        composantes = list(_composantes([(1.0, 2.0, 0.0)], tolerance=0.5))
         assert len(composantes) == 1
         assert len(composantes[0]) == 1
         assert composantes[0][0] == (1.0, 2.0, 0.0)
@@ -225,7 +225,7 @@ class TestComposantesConnexes:
         groupe_a = [(0.0, 0.0, 1.0), (0.1, 0.0, 1.0), (0.0, 0.1, 1.0)]
         groupe_b = [(10.0, 10.0, 1.0), (10.1, 10.0, 1.0)]
         points = groupe_a + groupe_b
-        composantes = list(_components(points, tolerance=0.5))
+        composantes = list(_composantes(points, tolerance=0.5))
         assert len(composantes) == 2
         tailles = sorted(len(c) for c in composantes)
         assert tailles == [2, 3]
@@ -234,7 +234,7 @@ class TestComposantesConnexes:
         """Points voisins dans la grille → une seule composante."""
         # Deux points séparés de 0.4 m avec tolérance 0.5 m → même cellule ou adjacents
         points = [(0.0, 0.0, 0.0), (0.4, 0.0, 0.0), (0.8, 0.0, 0.0)]
-        composantes = list(_components(points, tolerance=0.5))
+        composantes = list(_composantes(points, tolerance=0.5))
         # Tous dans des cellules voisines → une seule composante
         assert len(composantes) == 1
         assert len(composantes[0]) == 3
@@ -242,7 +242,7 @@ class TestComposantesConnexes:
     def test_composantes_connexes_tolerance_separe_groupes(self):
         """Avec une tolérance fine, deux points distants restent séparés."""
         points = [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0)]
-        composantes = list(_components(points, tolerance=0.5))
+        composantes = list(_composantes(points, tolerance=0.5))
         assert len(composantes) == 2
 
 
@@ -267,13 +267,13 @@ class TestIntegrationSynthetique:
         q_rz90 = (0.0, 0.0, demi, demi)
         vecteur = (1.0, 0.0, 2.0)
         norme_avant = math.sqrt(sum(c * c for c in vecteur))
-        tourne = _rotate_vector(q_rz90, vecteur)
+        tourne = _tourner_vecteur(q_rz90, vecteur)
         norme_apres = math.sqrt(sum(c * c for c in tourne))
         assert abs(norme_avant - norme_apres) < 1e-9
 
     def test_personne_non_detectee_sans_profondeur(self):
-        """Sans points dans le nuage, _components retourne une liste vide."""
-        composantes = list(_components([], tolerance=0.3))
+        """Sans points dans le nuage, aucune composante n'est retournée."""
+        composantes = list(_composantes([], tolerance=0.3))
         # Aucun cluster → aucune entité détectée
         assert composantes == []
 

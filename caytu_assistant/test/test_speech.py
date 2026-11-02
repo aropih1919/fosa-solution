@@ -30,11 +30,8 @@ for _module in _MODULES_MOCKS:
 # ---------------------------------------------------------------------------
 # Import des modules après mock
 # ---------------------------------------------------------------------------
-import caytu_assistant.speech_input as _speech_input_mod  # noqa: E402
-import caytu_assistant.speech_output as _speech_output_mod  # noqa: E402
-
-NoeudEntreeVocale = _speech_input_mod.NoeudEntreeVocale
-NoeudSortieVocale = _speech_output_mod.NoeudSortieVocale
+from caytu_assistant.entree_vocale import NoeudEntreeVocale  # noqa: E402
+from caytu_assistant.sortie_vocale import NoeudSortieVocale  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +42,7 @@ def _creer_entree(configuration):
     """Crée une instance de NoeudEntreeVocale sans appeler super().__init__."""
     instance = object.__new__(NoeudEntreeVocale)
     instance._configuration = configuration
-    # Attributs minimum utilisés par _transcribe / _publish
+    # Attributs minimum utilisés par _transcrire_audio / _publier_texte
     instance._publisher = MagicMock()
     # Logger muet
     instance.get_logger = MagicMock(return_value=MagicMock(
@@ -141,7 +138,7 @@ class TestModeEntreeVocale:
 
 
 class TestTranscriptionLocale:
-    """Teste le comportement de _transcribe selon le provider."""
+    """Teste le comportement de _transcrire_audio selon le provider."""
 
     def test_provider_local_seul_appelle_whisper(self):
         """Provider 'local' → tente uniquement faster_whisper."""
@@ -155,17 +152,17 @@ class TestTranscriptionLocale:
 
         with patch.dict(sys.modules, {'faster_whisper': MagicMock(
                 WhisperModel=MagicMock(return_value=modele_mock))}):
-            resultat = instance._transcribe('/tmp/audio.wav')
+            resultat = instance._transcrire_audio('/tmp/audio.wav')
 
         assert resultat == 'bonjour'
 
     def test_provider_api_seul_appelle_transcribe_api(self):
-        """Provider 'api' → appelle directement _transcribe_api."""
+        """Provider 'api' → appelle directement _transcrire_api."""
         config = _config_stt(provider='api')
         instance = _creer_entree(config)
 
-        with patch.object(instance, '_transcribe_api', return_value='texte api') as mock_api:
-            resultat = instance._transcribe('/tmp/audio.wav')
+        with patch.object(instance, '_transcrire_api', return_value='texte api') as mock_api:
+            resultat = instance._transcrire_audio('/tmp/audio.wav')
 
         mock_api.assert_called_once_with('/tmp/audio.wav')
         assert resultat == 'texte api'
@@ -180,9 +177,9 @@ class TestTranscriptionLocale:
         whisper_indispo.WhisperModel.side_effect = ImportError('pas installé')
 
         with patch.dict(sys.modules, {'faster_whisper': whisper_indispo}):
-            with patch.object(instance, '_transcribe_api',
+            with patch.object(instance, '_transcrire_api',
                               return_value='texte api') as mock_api:
-                resultat = instance._transcribe('/tmp/audio.wav')
+                resultat = instance._transcrire_audio('/tmp/audio.wav')
 
         mock_api.assert_called_once()
         assert resultat == 'texte api'
@@ -196,30 +193,30 @@ class TestTranscriptionLocale:
         whisper_indispo.WhisperModel.side_effect = RuntimeError('GPU absent')
 
         with patch.dict(sys.modules, {'faster_whisper': whisper_indispo}):
-            with patch.object(instance, '_transcribe_api',
+            with patch.object(instance, '_transcrire_api',
                               return_value='api ok') as mock_api:
-                resultat = instance._transcribe('/tmp/audio.wav')
+                resultat = instance._transcrire_audio('/tmp/audio.wav')
 
         mock_api.assert_called_once()
         assert resultat == 'api ok'
 
 
 class TestPublicationVocale:
-    """Teste la méthode _publish."""
+    """Teste la méthode _publier_texte."""
 
     def test_speak_texte_vide_ne_publie_pas(self):
-        """_publish avec texte vide → aucun appel au publisher."""
+        """_publier_texte avec texte vide → aucun appel au publisher."""
         config = _config_stt()
         instance = _creer_entree(config)
-        instance._publish('')
+        instance._publier_texte('')
         instance._publisher.publish.assert_not_called()
 
     def test_speak_texte_non_vide_publie(self):
-        """_publish avec texte → publisher.publish appelé une fois."""
+        """_publier_texte avec texte → publisher.publish appelé une fois."""
         config = _config_stt()
         instance = _creer_entree(config)
         # std_msgs.msg.String mocké retourne un MagicMock
-        instance._publish('bonjour le monde')
+        instance._publier_texte('bonjour le monde')
         instance._publisher.publish.assert_called_once()
 
 
@@ -228,7 +225,7 @@ class TestPublicationVocale:
 # ===========================================================================
 
 class TestSortieVocale:
-    """Teste NoeudSortieVocale._speak et ses méthodes internes."""
+    """Teste NoeudSortieVocale._parler et ses méthodes internes."""
 
     def test_speak_texte_vide_ignore(self):
         """Message vide → retour immédiat sans appel subprocess ni API."""
@@ -239,7 +236,7 @@ class TestSortieVocale:
         message.data = '   '  # texte vide après strip
 
         with patch('subprocess.run') as mock_subprocess:
-            instance._speak(message)
+            instance._parler(message)
 
         mock_subprocess.assert_not_called()
 
@@ -251,41 +248,41 @@ class TestSortieVocale:
         message = MagicMock()
         message.data = 'texte à synthétiser'
 
-        with patch.object(instance, '_speak_local',
+        with patch.object(instance, '_parler_local',
                           side_effect=RuntimeError('piper absent')):
-            with patch.object(instance, '_speak_api',
+            with patch.object(instance, '_parler_api',
                               side_effect=RuntimeError('api absente')):
                 # Ne doit pas lever d'exception
-                instance._speak(message)
+                instance._parler(message)
 
         instance.get_logger().warning.assert_called_once()
 
     def test_provider_local_seul_appelle_speak_local(self):
-        """Provider 'local' → uniquement _speak_local, jamais _speak_api."""
+        """Provider 'local' → uniquement _parler_local, jamais _parler_api."""
         config = _config_tts(provider='local')
         instance = _creer_sortie(config)
 
         message = MagicMock()
         message.data = 'bonjour'
 
-        with patch.object(instance, '_speak_local') as mock_local, \
-             patch.object(instance, '_speak_api') as mock_api:
-            instance._speak(message)
+        with patch.object(instance, '_parler_local') as mock_local, \
+             patch.object(instance, '_parler_api') as mock_api:
+            instance._parler(message)
 
         mock_local.assert_called_once_with('bonjour')
         mock_api.assert_not_called()
 
     def test_provider_api_seul_appelle_speak_api(self):
-        """Provider 'api' → uniquement _speak_api, jamais _speak_local."""
+        """Provider 'api' → uniquement _parler_api, jamais _parler_local."""
         config = _config_tts(provider='api')
         instance = _creer_sortie(config)
 
         message = MagicMock()
         message.data = 'salut'
 
-        with patch.object(instance, '_speak_local') as mock_local, \
-             patch.object(instance, '_speak_api') as mock_api:
-            instance._speak(message)
+        with patch.object(instance, '_parler_local') as mock_local, \
+             patch.object(instance, '_parler_api') as mock_api:
+            instance._parler(message)
 
         mock_api.assert_called_once_with('salut')
         mock_local.assert_not_called()
@@ -298,16 +295,16 @@ class TestSortieVocale:
         message = MagicMock()
         message.data = 'test'
 
-        with patch.object(instance, '_speak_local',
+        with patch.object(instance, '_parler_local',
                           side_effect=RuntimeError('piper absent')) as mock_local, \
-             patch.object(instance, '_speak_api') as mock_api:
-            instance._speak(message)
+             patch.object(instance, '_parler_api') as mock_api:
+            instance._parler(message)
 
         mock_local.assert_called_once_with('test')
         mock_api.assert_called_once_with('test')
 
     def test_speak_local_appelle_subprocess_piper(self):
-        """_speak_local doit appeler subprocess.run avec l'exécutable Piper."""
+        """_parler_local doit appeler subprocess.run avec l'exécutable Piper."""
         import os
         import tempfile
 
@@ -329,7 +326,7 @@ class TestSortieVocale:
             mock_file.name = '/tmp/fosa_test.wav'
             mock_tmp.return_value = mock_file
 
-            instance._speak_local('bonjour')
+            instance._parler_local('bonjour')
 
         # subprocess.run appelé au moins une fois (Piper + lecteur audio)
         assert mock_run.call_count >= 1

@@ -13,7 +13,7 @@ from caytu_interfaces.msg import (
     TagDetectionArray,
 )
 from caytu_interfaces.srv import GetLocationByTag, ResolveLocation
-from caytu_semantic_map.registry import (
+from caytu_semantic_map.registre import (
     RegistreLieux,
     pose_approche_depuis_tag,
 )
@@ -33,7 +33,7 @@ class NoeudCarteSemantique(Node):
     def __init__(self, configuration=None):
         super().__init__('semantic_map')
         self._configuration = configuration or load_config()
-        self._registry = RegistreLieux(self._configuration.semantic_map)
+        self._registre = RegistreLieux(self._configuration.semantic_map)
         self._latest_tag_pose = {}
         self._publisher = self.create_publisher(
             SemanticLocationArray,
@@ -71,7 +71,7 @@ class NoeudCarteSemantique(Node):
         pose = record.approach_pose
         if pose is not None:
             message.has_approach_pose = True
-            message.approach_pose.header.frame_id = self._registry.frame
+            message.approach_pose.header.frame_id = self._registre.frame
             message.approach_pose.pose.position.x = pose.x
             message.approach_pose.pose.position.y = pose.y
             message.approach_pose.pose.orientation.z = math.sin(pose.yaw / 2.0)
@@ -87,20 +87,20 @@ class NoeudCarteSemantique(Node):
             message.approach_pose.pose.orientation.z = math.sin(yaw / 2.0)
             message.approach_pose.pose.orientation.w = math.cos(yaw / 2.0)
         else:
-            message.approach_pose.header.frame_id = self._registry.frame
+            message.approach_pose.header.frame_id = self._registre.frame
         return message
 
     def _publier_lieux(self):
         """Publie l'ensemble des lieux sémantiques avec leur statut d'approche mis à jour."""
         message = SemanticLocationArray()
         message.header.stamp = self.get_clock().now().to_msg()
-        message.header.frame_id = self._registry.frame
-        message.locations = [self._vers_message(record) for record in self._registry.tous()]
+        message.header.frame_id = self._registre.frame
+        message.locations = [self._vers_message(record) for record in self._registre.tous()]
         self._publisher.publish(message)
 
     def _resoudre_lieu(self, request, response):
         """Service ROS : cherche un lieu par son nom ou l'un de ses synonymes."""
-        record = self._registry.resoudre(request.query)
+        record = self._registre.resoudre(request.query)
         if record is None:
             response.success = False
             response.error = f'Lieu inconnu : {request.query}'
@@ -115,7 +115,7 @@ class NoeudCarteSemantique(Node):
 
     def _obtenir_lieu_par_tag(self, request, response):
         """Service ROS : retrouve le lieu associé au numéro de balise AprilTag."""
-        record = self._registry.par_tag(request.tag_id)
+        record = self._registre.par_tag(request.tag_id)
         if record is None:
             response.success = False
             response.error = f'Tag inconnu : {request.tag_id}'
@@ -125,18 +125,6 @@ class NoeudCarteSemantique(Node):
             record, self._latest_tag_pose.get(request.tag_id))
         response.error = ''
         return response
-
-    # Alias de compatibilité pour le code externe ou les tests
-    _receive_tags = _recevoir_tags
-    _to_message = _vers_message
-    _publish_locations = _publier_lieux
-    _resolve_location = _resoudre_lieu
-    _get_location_by_tag = _obtenir_lieu_par_tag
-
-
-# Alias de classe pour compatibilité
-SemanticMapNode = NoeudCarteSemantique
-
 
 def main(args=None):
     rclpy.init(args=args)

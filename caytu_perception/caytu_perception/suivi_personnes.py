@@ -30,13 +30,13 @@ class SuiviPersonnes(Node):
             String, self.get_parameter('events_topic').value, 10)
         self._entities_sub = self.create_subscription(
             DetectedEntityArray, self.get_parameter('entities_topic').value,
-            self._receive_entities, 10)
+            self._recevoir_entites, 10)
         self._velocity_sub = self.create_subscription(
             Twist, self._configuration.navigation.cmd_vel_topic,
-            self._receive_velocity, 10)
+            self._recevoir_vitesse, 10)
         self._state_sub = self.create_subscription(
             DialogueState, self._configuration.dialogue.state_topic,
-            self._receive_state, 10)
+            self._recevoir_etat, 10)
 
     def _recevoir_vitesse(self, message):
         """Surveille la commande de vitesse pour savoir si le robot est à l'arrêt complet."""
@@ -92,12 +92,6 @@ class SuiviPersonnes(Node):
             self._last_event = maintenant
             self._counts = {}
             break
-
-    # Alias de compatibilité
-    _receive_velocity = _recevoir_vitesse
-    _receive_state = _recevoir_etat
-    _receive_entities = _recevoir_entites
-
 
 def main(args=None):
     rclpy.init(args=args)

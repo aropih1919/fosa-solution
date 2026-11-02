@@ -57,7 +57,7 @@ class FiltreSolLidar(Node):
             f'Inclinaison par défaut {math.degrees(self._tangage):.2f}° '
             '(géométrie du URDF) en attendant la mesure IMU.')
 
-    # ------------------------------------------------------------ réglages
+    #  réglages
     def _declarer_parametres(self):
         self.declare_parameter('scan_in', '/scan_filtered')
         self.declare_parameter('scan_mark', '/scan_clean')
@@ -124,7 +124,7 @@ class FiltreSolLidar(Node):
             Imu, self.get_parameter('imu_topic').value, self.recevoir_imu,
             qos_profile_sensor_data)
 
-    # ------------------------------------------------------------------ IMU
+    #  IMU
     def recevoir_imu(self, message):
         if self._inclinaison_figee:
             return
@@ -176,7 +176,7 @@ class FiltreSolLidar(Node):
             + (f'ligne de sol à {ligne:.2f} m devant le lidar.' if math.isfinite(ligne)
                else 'aucun rayon ne touche le sol.'))
 
-    # ----------------------------------------------------------- géométrie
+    #  géométrie
     def hauteur_lidar_actuelle(self):
         return hauteur_lidar(self._tangage, self._hauteur_fixation, self._bras_x)
 
@@ -212,7 +212,7 @@ class FiltreSolLidar(Node):
         inclinaison.vector.z = self.tangage_plan_lidar()
         self._publicateur_inclinaison.publish(inclinaison)
 
-    # ----------------------------------------------------------------- scan
+    #  scan
     def recevoir_scan(self, message):
         # Les distances du sol ne dépendent que de la géométrie du scan : on les
         # recalcule seulement quand le nombre de rayons ou leur pas change.
@@ -234,8 +234,7 @@ class FiltreSolLidar(Node):
             message.ranges, self._cache_sol[1], message.range_max,
             self._ratio_sol, self._ratio_effacement)
 
-        # Premier scan : on retire les retours du sol pour ne pas marquer de
-        # faux obstacles.
+        # Premier scan : on retire les retours du sol pour ne pas marquer de faux obstacles.
         scan_marquage = LaserScan()
         scan_marquage.header = message.header
         scan_marquage.angle_min = message.angle_min

@@ -65,4 +65,4 @@ export FOSA_OLLAMA_URL="http://127.0.0.1:11434" # URL Ollama local
 Le code est structuré pour être accessible à tout développeur :
 - Les noms de variables métier, méthodes, classes et commentaires sont écrits en français avec des verbes clairs (`_recevoir_lieux`, `_resoudre_lieu`, `_detecter_marqueurs`, `_recevoir_entites`, `_parler_local`, `_transcrire_audio`, `interpreter`).
 - Les termes consacrés par ROS 2, Python et les protocoles restent en anglais (`Node`, `Pose2D`, `Topic`, `QoSProfile`, `callback`, types de messages).
-- Les classes et méthodes disposent d'alias systématiques garantissant une compatibilité totale sans régression de performance.
+- Chaque classe et méthode métier possède un nom français unique. Les noms imposés par ROS 2, les messages et les API externes restent inchangés.

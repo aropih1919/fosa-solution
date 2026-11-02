@@ -1,4 +1,4 @@
-"""Tests unitaires du module caytu_semantic_map.registry (sans dépendance ROS).
+"""Tests unitaires du module caytu_semantic_map.registre (sans dépendance ROS).
 
 Couverture :
   - normaliser : accents, casse, tirets, espaces multiples
@@ -17,7 +17,7 @@ import types
 import pytest
 
 from caytu_config.models import SemanticMapConfig
-from caytu_semantic_map.registry import (
+from caytu_semantic_map.registre import (
     LieuRegistre,
     RegistreLieux,
     normaliser,

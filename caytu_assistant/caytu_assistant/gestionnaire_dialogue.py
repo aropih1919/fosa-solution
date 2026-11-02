@@ -14,7 +14,7 @@ from rclpy.time import Time
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 
-from caytu_assistant.dispatcher import DispatcherAssistant
+from caytu_assistant.dispatcher import RepartiteurAssistant
 from caytu_assistant.llm_client import ClientLLM
 from caytu_config import load_config
 from caytu_interfaces.msg import (
@@ -27,7 +27,7 @@ from caytu_nav_solution.navigation_runtime import (
     TaskTimer,
 )
 from caytu_nav_solution.nav_math import Pose2D, lacet_depuis_quaternion
-from caytu_semantic_map.registry import RegistreLieux, normaliser
+from caytu_semantic_map.registre import RegistreLieux, normaliser
 
 
 class GestionnaireDialogue(Node):
@@ -41,9 +41,9 @@ class GestionnaireDialogue(Node):
             'response_topic', self._configuration.dialogue.response_topic)
         self.declare_parameter(
             'state_topic', self._configuration.dialogue.state_topic)
-        self._locations = {}
-        self._dialogue_state = 'IDLE'
-        self._registry = RegistreLieux(self._configuration.semantic_map)
+        self._lieux = {}
+        self._etat_dialogue = 'IDLE'
+        self._registre = RegistreLieux(self._configuration.semantic_map)
         self._timer = TaskTimer(
             navigation_node.get_clock().now,
             self._configuration.navigation.time_limit_sec,
@@ -56,21 +56,21 @@ class GestionnaireDialogue(Node):
         self._amcl_subscription = navigation_node.create_subscription(
             PoseWithCovarianceStamped,
             self._configuration.navigation.amcl_pose_topic,
-            self._receive_amcl_pose, 10)
+            self._recevoir_pose_amcl, 10)
         bringup = BringupManager(
             self._configuration.navigation, navigation_node.get_logger())
         self._navigator = Nav2Navigator(
             navigation_node, self._configuration.navigation, self._timer,
-            bringup, self._robot_pose,
+            bringup, self._pose_robot,
             spin_once=lambda duration: time.sleep(duration),
             is_ok=rclpy.ok)
-        self._dispatcher = DispatcherAssistant(
+        self._dispatcher = RepartiteurAssistant(
             self._configuration,
-            self._registry,
+            self._registre,
             ClientLLM(self._configuration),
-            self._navigate,
-            self._cancel,
-            self._resolve_location_message,
+            self._naviguer,
+            self._annuler,
+            self._resoudre_message_lieu,
         )
         self._response_publisher = self.create_publisher(
             String, self.get_parameter('response_topic').value, 10)
@@ -79,7 +79,7 @@ class GestionnaireDialogue(Node):
         self._location_subscription = self.create_subscription(
             SemanticLocationArray,
             self._configuration.semantic_map.locations_topic,
-            self._receive_locations,
+            self._recevoir_lieux,
             QoSProfile(
                 depth=1,
                 reliability=ReliabilityPolicy.RELIABLE,
@@ -87,13 +87,13 @@ class GestionnaireDialogue(Node):
         )
         self._transcript_subscription = self.create_subscription(
             String, self.get_parameter('transcript_topic').value,
-            self._receive_transcript, 10)
+            self._recevoir_transcript, 10)
         self._person_event_subscription = self.create_subscription(
             String, self._configuration.perception.person_events_topic,
-            self._receive_person_event, 10)
+            self._recevoir_evenement_personne, 10)
         if self.get_parameter('input_mode').value == 'text':
             threading.Thread(
-                target=self._read_stdin, daemon=True,
+                target=self._lire_entree_standard, daemon=True,
                 name='assistant-text-input').start()
         self.get_logger().info(
             f"Dialogue prêt (mode {self.get_parameter('input_mode').value}).")
@@ -104,14 +104,14 @@ class GestionnaireDialogue(Node):
 
     def _recevoir_lieux(self, message):
         """Met à jour le cache local des lieux sémantiques (noms et synonymes)."""
-        for location in message.locations:
-            self._locations[normaliser(location.name)] = location
-            for alias in location.aliases:
-                self._locations[normaliser(alias)] = location
+        for lieu in message.locations:
+            self._lieux[normaliser(lieu.name)] = lieu
+            for alias in lieu.aliases:
+                self._lieux[normaliser(alias)] = lieu
 
     def _resoudre_message_lieu(self, nom):
         """Retrouve le message SemanticLocation correspondant à un nom ou alias."""
-        return self._locations.get(normaliser(nom))
+        return self._lieux.get(normaliser(nom))
 
     def _pose_robot(self):
         """Interroge TF2 pour obtenir la position (x, y) et l'orientation (lacet) actuelles du robot."""
@@ -177,18 +177,18 @@ class GestionnaireDialogue(Node):
         if not texte:
             return
         self._publier_etat('THINKING', texte)
-        self._dialogue_state = 'THINKING'
+        self._etat_dialogue = 'THINKING'
         resultat = self._dispatcher.traiter(texte)
-        self._response_publisher.publish(String(data=resultat.response))
-        self._dialogue_state = resultat.state
-        self._publier_etat(resultat.state, resultat.detail)
+        self._response_publisher.publish(String(data=resultat.reponse))
+        self._etat_dialogue = resultat.etat
+        self._publier_etat(resultat.etat, resultat.detail)
         self.get_logger().info(f'Visiteur : {texte}')
-        self.get_logger().info(f'Assistant : {resultat.response}')
+        self.get_logger().info(f'Assistant : {resultat.reponse}')
 
     def _recevoir_evenement_personne(self, message):
         """Salue automatiquement un visiteur qui s'arrête devant le robot."""
         if (not self._configuration.mission.greeting_enabled
-                or self._dialogue_state not in {'IDLE', 'LISTENING'}):
+                or self._etat_dialogue not in {'IDLE', 'LISTENING'}):
             return
         try:
             evenement = json.loads(message.data)
@@ -197,7 +197,7 @@ class GestionnaireDialogue(Node):
             return
         reponse = self._configuration.dialogue.greeting_reply
         self._response_publisher.publish(String(data=reponse))
-        self._dialogue_state = 'LISTENING'
+        self._etat_dialogue = 'LISTENING'
         self._publier_etat('LISTENING', str(evenement.get('track_id', '')))
 
     def _lire_entree_standard(self):
@@ -209,19 +209,6 @@ class GestionnaireDialogue(Node):
             except EOFError:
                 return
             self._recevoir_transcript(String(data=texte))
-
-    # Alias de compatibilité
-    _receive_amcl_pose = _recevoir_pose_amcl
-    _receive_locations = _recevoir_lieux
-    _resolve_location_message = _resoudre_message_lieu
-    _robot_pose = _pose_robot
-    _navigate = _naviguer
-    _cancel = _annuler
-    _publish_state = _publier_etat
-    _receive_transcript = _recevoir_transcript
-    _receive_person_event = _recevoir_evenement_personne
-    _read_stdin = _lire_entree_standard
-
 
 def main(args=None):
     rclpy.init(args=args)
@@ -245,7 +232,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        dialogue_node._cancel()
+        dialogue_node._annuler()
         dialogue_node.destroy_node()
         navigation_executor.shutdown()
         navigation_node.destroy_node()
