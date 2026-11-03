@@ -137,6 +137,8 @@ class AlignmentConfig:
     angular_gain: float
     max_linear_mps: float
     max_angular_rps: float
+    min_linear_mps: float
+    min_angular_rps: float
     timeout_sec: float
     max_renavigations: int
 
@@ -145,8 +147,9 @@ class AlignmentConfig:
         data = _section(data, path)
         _check_keys(data, (
             "linear_gain", "angular_gain", "max_linear_mps", "max_angular_rps",
-            "timeout_sec", "max_renavigations"), path)
-        return cls(
+            "min_linear_mps", "min_angular_rps", "timeout_sec",
+            "max_renavigations"), path)
+        alignement = cls(
             linear_gain=_as_number(
                 _get(data, "linear_gain", path), f"{path}.linear_gain",
                 positive=True),
@@ -159,6 +162,13 @@ class AlignmentConfig:
             max_angular_rps=_as_number(
                 _get(data, "max_angular_rps", path), f"{path}.max_angular_rps",
                 positive=True, maximum=1.0),
+            # Vitesses minimales : la base réelle ne bouge pas sous un seuil.
+            min_linear_mps=_as_number(
+                _get(data, "min_linear_mps", path), f"{path}.min_linear_mps",
+                minimum=0.0),
+            min_angular_rps=_as_number(
+                _get(data, "min_angular_rps", path), f"{path}.min_angular_rps",
+                minimum=0.0),
             timeout_sec=_as_number(
                 _get(data, "timeout_sec", path), f"{path}.timeout_sec",
                 positive=True),
@@ -166,6 +176,11 @@ class AlignmentConfig:
                 _get(data, "max_renavigations", path),
                 f"{path}.max_renavigations", 0),
         )
+        if (alignement.min_linear_mps > alignement.max_linear_mps
+                or alignement.min_angular_rps > alignement.max_angular_rps):
+            raise ConfigurationError(
+                f"{path}: les vitesses minimales dépassent les maximales.")
+        return alignement
 
 
 # (clé, bornes) des réglages numériques de la course.

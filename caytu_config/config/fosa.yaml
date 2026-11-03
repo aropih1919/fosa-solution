@@ -279,6 +279,8 @@ course:
     angular_gain: 1.2
     max_linear_mps: 0.08
     max_angular_rps: 0.35
+    min_linear_mps: 0.03          # À AJUSTER : seuil de démarrage de la base
+    min_angular_rps: 0.10
     timeout_sec: 20.0
     max_renavigations: 2
   # Vide = cartographie en direct. Sinon : posegraph slam_toolbox sérialisé
