@@ -32,6 +32,8 @@ class CalibrateurTags(Node):
 
     def _recevoir(self, message):
         for detection in message.detections:
+            if not detection.has_pose_map:
+                continue
             samples = self._samples.setdefault(detection.tag_id, [])
             if len(samples) >= self._samples_required:
                 continue

@@ -57,7 +57,8 @@ class NoeudCarteSemantique(Node):
     def _recevoir_tags(self, message):
         """Met à jour les dernières poses connues pour chaque balise AprilTag détectée."""
         for detection in message.detections:
-            self._latest_tag_pose[detection.tag_id] = detection.pose_map
+            if detection.has_pose_map:
+                self._latest_tag_pose[detection.tag_id] = detection.pose_map
         self._publier_lieux()
 
     def _vers_message(self, record, tag_pose=None):

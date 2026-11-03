@@ -116,7 +116,8 @@ perception:
     # Évite le rejet d'un tag à marge blanche d'un bit posé sur un fond sombre.
     min_marker_distance_rate: 0.01
     max_rate_hz: 10.0             # cadence max de détection par caméra
-    detection_image_topic: /perception/tags/image
+    detection_image_topic: /perception/tags/image   # image de preuve pour le statut
+    detection_image_rate_hz: 2.0
     tf_timeout_sec: 0.1
     # Les deux RealSense détectent ; la caméra haute est à confirmer sur place.
     cameras:

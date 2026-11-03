@@ -299,6 +299,7 @@ class AprilTagConfig:
     min_marker_distance_rate: float
     max_rate_hz: float
     detection_image_topic: str
+    detection_image_rate_hz: float
     tf_timeout_sec: float
     cameras: tuple
 
@@ -309,7 +310,8 @@ class AprilTagConfig:
             "family", "size_m", "max_distance_m", "detector",
             "calibration_samples", "calibration_file", "ids",
             "min_marker_distance_rate", "max_rate_hz",
-            "detection_image_topic", "tf_timeout_sec", "cameras"), path)
+            "detection_image_topic", "detection_image_rate_hz",
+            "tf_timeout_sec", "cameras"), path)
         cameras = tuple(
             TagCameraConfig.from_mapping(camera, f"{path}.cameras[{index}]")
             for index, camera in enumerate(
@@ -329,6 +331,9 @@ class AprilTagConfig:
             detection_image_topic=_as_str(
                 _get(data, "detection_image_topic", path),
                 f"{path}.detection_image_topic"),
+            detection_image_rate_hz=_as_number(
+                _get(data, "detection_image_rate_hz", path),
+                f"{path}.detection_image_rate_hz", positive=True),
             tf_timeout_sec=_as_number(
                 _get(data, "tf_timeout_sec", path), f"{path}.tf_timeout_sec",
                 positive=True),

@@ -1,60 +1,37 @@
-"""Tests des fonctions pures de caytu_perception (sans ROS).
+"""Tests des fonctions pures de caytu_perception.
 
-Les imports ROS/interfaces sont mockés avant tout import du paquet,
-ce qui permet d'exécuter ces tests dans un environnement CI sans ROS installé.
+NumPy et OpenCV sont réels. Seuls les modules ROS absents de l'environnement
+sont remplacés par des mocks, avant l'import du classificateur d'obstacles.
 """
 
+import importlib
 import math
 import sys
 from unittest.mock import MagicMock
 
-# ---------------------------------------------------------------------------
-# Mock de tous les modules ROS et dépendances avant tout import du paquet
-# ---------------------------------------------------------------------------
-_MODULES_MOCKS = [
-    'rclpy',
-    'rclpy.node',
-    'rclpy.time',
-    'cv2',
-    'cv2.aruco',
-    'cv_bridge',
-    'sensor_msgs',
-    'sensor_msgs.msg',
-    'sensor_msgs_py',
-    'sensor_msgs_py.point_cloud2',
-    'tf2_ros',
-    'geometry_msgs',
-    'geometry_msgs.msg',
-    'caytu_interfaces',
-    'caytu_interfaces.msg',
-    'caytu_interfaces.srv',
-    'std_msgs',
-    'std_msgs.msg',
-    'caytu_config',
-    'caytu_config.loader',
-    'numpy',
+import numpy as np
+
+_MODULES_ROS = [
+    'rclpy', 'rclpy.node', 'rclpy.time', 'cv_bridge', 'sensor_msgs',
+    'sensor_msgs.msg', 'sensor_msgs_py', 'sensor_msgs_py.point_cloud2',
+    'tf2_ros', 'geometry_msgs', 'geometry_msgs.msg', 'caytu_interfaces',
+    'caytu_interfaces.msg', 'caytu_config', 'caytu_config.loader',
 ]
+for _module in _MODULES_ROS:
+    try:
+        importlib.import_module(_module)
+    except ImportError:
+        sys.modules[_module] = MagicMock()
 
-for _module in _MODULES_MOCKS:
-    sys.modules.setdefault(_module, MagicMock())
-
-# numpy doit se comporter suffisamment pour les fonctions pures qui l'utilisent
-import numpy as np  # noqa: E402 — numpy réel, pas mocké
-
-# Remplacer le mock numpy par le vrai numpy
-sys.modules['numpy'] = np
-
-# ---------------------------------------------------------------------------
-# Import des fonctions pures après le mock
-# ---------------------------------------------------------------------------
-from caytu_perception.detecteur_tags import (  # noqa: E402
-    _multiplier_quaternions,
-    _quaternion_depuis_matrice,
-    _tourner_vecteur,
-)
 from caytu_perception.classificateur_obstacles import (  # noqa: E402
     _composantes,
     _tourner_quaternion,
+)
+from caytu_perception.transformations import (  # noqa: E402
+    composer,
+    multiplier_quaternions as _multiplier_quaternions,
+    quaternion_depuis_matrice as _quaternion_depuis_matrice,
+    tourner_vecteur as _tourner_vecteur,
 )
 
 
@@ -306,3 +283,13 @@ class TestIntegrationSynthetique:
         front_fov_rad = math.pi / 2.0
         hors_fov = abs(bearing_rad) > front_fov_rad / 2.0
         assert not hors_fov
+
+
+def test_composer_change_de_repere():
+    """Pose (1, 0, 0) dans B, B tourné de 90° et décalé de (2, 0, 0) dans A."""
+    demi = math.sqrt(2.0) / 2.0
+    position, orientation = composer(
+        (2.0, 0.0, 0.0), (0.0, 0.0, demi, demi), (1.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0))
+    assert _proches(position, (2.0, 1.0, 0.0), 1e-9)
+    assert _proches(orientation, (0.0, 0.0, demi, demi), 1e-9)
