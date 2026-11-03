@@ -40,7 +40,8 @@ def _course_minimale(**surcharges):
         "min_tag_budget_sec": 45.0, "detection_max_age_sec": 0.6,
         "search_spin_time_sec": 25.0, "search_grid_step_m": 0.8,
         "search_clearance_m": 0.45, "search_visited_radius_m": 0.8,
-        "front_guard_m": 0.10,
+        "front_guard_m": 0.10, "goal_xy_tolerance_m": 0.08,
+        "goal_yaw_tolerance_deg": 7.0,
         "alignment": {
             "linear_gain": 0.6, "angular_gain": 1.2, "max_linear_mps": 0.08,
             "max_angular_rps": 0.35, "min_linear_mps": 0.03,

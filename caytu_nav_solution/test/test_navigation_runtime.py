@@ -364,3 +364,75 @@ def test_le_navigateur_signale_un_but_refuse_par_nav2():
     navigateur = _navigateur_pour_resultat(handle, Pose2D(0, 0, 0))
 
     assert navigateur.naviguer_une_fois(0.0, 0.0, 'map', Pose2D(0, 0, 0)) == 'refuse'
+
+
+def test_le_but_peut_imposer_un_cap():
+    but = construire_but(
+        1.0, 0.0, 'map', None, Pose2D(0.0, 0.0, 0.0), None, cap=1.0)
+    assert but.pose.pose.orientation.z == pytest.approx(math.sin(0.5))
+    assert but.pose.pose.orientation.w == pytest.approx(math.cos(0.5))
+
+
+class _FakeGoalHandleEnCours(_FakeGoalHandle):
+    """But accepté dont le résultat n'arrive jamais."""
+
+    def get_result_async(self):
+        return _FakeFuture(False)
+
+
+def test_le_navigateur_s_interrompt_et_annule_le_but():
+    handle = _FakeGoalHandleEnCours()
+    navigateur = _navigateur_pour_resultat(handle, Pose2D(3.0, 0.0, 0.0))
+
+    resultat = navigateur.naviguer_une_fois(
+        0.0, 0.0, 'map', Pose2D(0, 0, 0), interrompre=lambda: True)
+
+    assert resultat == 'interrompu'
+    assert handle.cancelled is True
+
+
+def test_le_navigateur_transmet_le_cap_au_message():
+    handle = _FakeGoalHandle(result=SimpleNamespace(status=4))
+    navigateur = _navigateur_pour_resultat(handle, Pose2D(0.0, 0.0, 0.0))
+    recus = []
+    navigateur.message_but = lambda *args: recus.append(args) or object()
+
+    navigateur.naviguer_une_fois(1.0, 2.0, 'map', Pose2D(0, 0, 0), cap=0.5)
+
+    assert recus[0][-1] == 0.5
+
+
+class _FakeSpinClient(_FakeNavClient):
+    def __init__(self, handle, pret=True):
+        super().__init__(handle)
+        self.pret = pret
+
+    def server_is_ready(self):
+        return self.pret
+
+
+def _navigateur_rotation(handle, pret=True):
+    navigateur = _navigateur_pour_resultat(handle, Pose2D(0, 0, 0))
+    navigateur._client_rotation = _FakeSpinClient(handle, pret)
+    return navigateur
+
+
+def test_la_rotation_nav2_reussit_ou_echoue_selon_le_statut():
+    reussie = _navigateur_rotation(_FakeGoalHandle(result=SimpleNamespace(status=4)))
+    assert reussie.tourner(6.28, 20.0) == 'succes'
+    goal = reussie._client_rotation.sent[0][0]
+    assert goal.target_yaw == pytest.approx(6.28)
+    assert goal.time_allowance.sec == 20
+
+    echouee = _navigateur_rotation(_FakeGoalHandle(result=SimpleNamespace(status=6)))
+    assert echouee.tourner(6.28, 20.0) == 'echec'
+
+
+def test_la_rotation_s_interrompt_et_signale_un_serveur_absent():
+    handle = _FakeGoalHandleEnCours()
+    navigateur = _navigateur_rotation(handle)
+    assert navigateur.tourner(6.28, 20.0, interrompre=lambda: True) == 'interrompu'
+    assert handle.cancelled is True
+
+    absent = _navigateur_rotation(_FakeGoalHandle(), pret=False)
+    assert absent.tourner(6.28, 20.0) == 'indisponible'

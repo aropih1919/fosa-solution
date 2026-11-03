@@ -2,7 +2,8 @@
 
 - `TaskTimer` : chronomètre officiel (horloge ROS, marge de sécurité) ;
 - `BringupManager` : lancement et arrêt propre du bringup ROS ;
-- `Nav2Navigator` : client Nav2 (but, retour d'état, annulation, costmaps).
+- `Nav2Navigator` : client Nav2 (but, rotation sur place, retour d'état,
+  annulation, interruption, costmaps).
 
 Aucune valeur métier n'est codée ici : tout vient de `caytu_config`.
 """
@@ -16,6 +17,7 @@ import tempfile
 import time
 
 from action_msgs.msg import GoalStatus
+from builtin_interfaces.msg import Duration
 from caytu_config import ConfigurationError
 from caytu_nav_solution.benchmark_config import (
     build_experiment_config,
@@ -24,7 +26,7 @@ from caytu_nav_solution.benchmark_config import (
 )
 from caytu_nav_solution.nav_math import quaternion_depuis_lacet
 from geometry_msgs.msg import PoseStamped
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import NavigateToPose, Spin
 from nav2_msgs.srv import ClearEntireCostmap
 import rclpy
 from rclpy.action import ActionClient
@@ -147,10 +149,11 @@ class BringupManager:
             self._config_dir = None
 
 
-def construire_but(goal_x, goal_y, frame, stamp, pose, spawn):
-    """Message NavigateToPose orienté du robot vers le but."""
-    reference = pose or spawn
-    cap = math.atan2(goal_y - reference.y, goal_x - reference.x)
+def construire_but(goal_x, goal_y, frame, stamp, pose, spawn, cap=None):
+    """Message NavigateToPose ; sans cap imposé, orienté du robot vers le but."""
+    if cap is None:
+        reference = pose or spawn
+        cap = math.atan2(goal_y - reference.y, goal_x - reference.x)
 
     but = PoseStamped()
     but.header.frame_id = frame
@@ -198,6 +201,7 @@ class Nav2Navigator:
         self._is_ok = is_ok or rclpy.ok
 
         self._client = ActionClient(node, NavigateToPose, 'navigate_to_pose')
+        self._client_rotation = ActionClient(node, Spin, 'spin')
         self._clear_clients = [
             node.create_client(
                 ClearEntireCostmap,
@@ -259,11 +263,11 @@ class Nav2Navigator:
 
         return False
 
-    def message_but(self, goal_x, goal_y, frame, spawn):
+    def message_but(self, goal_x, goal_y, frame, spawn, cap=None):
         return construire_but(
             goal_x, goal_y, frame,
             self._node.get_clock().now().to_msg(),
-            self._pose_robot(), spawn)
+            self._pose_robot(), spawn, cap)
 
     def est_arrive(self, goal_x, goal_y):
         return est_arrive(
@@ -299,10 +303,10 @@ class Nav2Navigator:
             self._spin(0.05)
         self._but_en_cours = None
 
-    def _attendre_future(self, future):
+    def _attendre_future(self, future, interrompre=None):
         """Traite les messages jusqu'à la fin de `future`.
 
-        Retourne 'ok', 'temps_ecoule' ou 'arret'.
+        Retourne 'ok', 'temps_ecoule', 'arret' ou 'interrompu'.
         """
         while self._is_ok() and not future.done():
             self._spin(0.05)
@@ -310,12 +314,19 @@ class Nav2Navigator:
                 return 'temps_ecoule'
             if not self._bringup.alive():
                 return 'arret'
+            if interrompre is not None and interrompre():
+                return 'interrompu'
         return 'ok'
 
-    def naviguer_une_fois(self, goal_x, goal_y, frame, spawn):
-        """Un envoi du but et l'interprétation de son résultat."""
+    def naviguer_une_fois(self, goal_x, goal_y, frame, spawn, cap=None,
+                          interrompre=None):
+        """Un envoi du but et l'interprétation de son résultat.
+
+        `cap` impose l'orientation finale ; `interrompre()` vrai annule le but
+        en cours (cible trouvée pendant une recherche, budget épuisé...).
+        """
         future_envoi = self._client.send_goal_async(
-            self.message_but(goal_x, goal_y, frame, spawn),
+            self.message_but(goal_x, goal_y, frame, spawn, cap),
             feedback_callback=self.recevoir_feedback)
         resultat = self._attendre_future(future_envoi)
         if resultat != 'ok':
@@ -327,12 +338,15 @@ class Nav2Navigator:
         self._but_en_cours = but
 
         future_resultat = but.get_result_async()
-        resultat = self._attendre_future(future_resultat)
+        resultat = self._attendre_future(future_resultat, interrompre)
         if resultat == 'temps_ecoule':
             self._node.get_logger().error(
                 'Limite de temps atteinte : annulation du but.')
             self.annuler_but()
             return 'temps_ecoule'
+        if resultat == 'interrompu':
+            self.annuler_but()
+            return 'interrompu'
         if resultat == 'arret':
             return 'arret'
 
@@ -360,3 +374,40 @@ class Nav2Navigator:
         self._node.get_logger().warn(
             f'Nav2 a interrompu la navigation (statut {statut}).')
         return 'reessayer'
+
+    def tourner(self, angle, delai_sec, interrompre=None):
+        """Rotation sur place par le behavior Spin de Nav2 (collisions vérifiées).
+
+        Retourne 'succes', 'echec', 'interrompu', 'temps_ecoule', 'arret'
+        ou 'indisponible'.
+        """
+        fin = time.monotonic() + 2.0
+        while not self._client_rotation.server_is_ready():
+            if time.monotonic() > fin or not self._is_ok():
+                return 'indisponible'
+            self._spin(0.05)
+
+        but = Spin.Goal()
+        but.target_yaw = float(angle)
+        but.time_allowance = Duration(
+            sec=int(delai_sec), nanosec=int((delai_sec % 1.0) * 1e9))
+        future_envoi = self._client_rotation.send_goal_async(but)
+        resultat = self._attendre_future(future_envoi)
+        if resultat != 'ok':
+            return resultat
+        poignee = future_envoi.result() if future_envoi.done() else None
+        if poignee is None or not poignee.accepted:
+            return 'echec'
+
+        self._but_en_cours = poignee
+        future_resultat = poignee.get_result_async()
+        resultat = self._attendre_future(future_resultat, interrompre)
+        if resultat in ('interrompu', 'temps_ecoule'):
+            self.annuler_but()
+            return resultat
+        self._but_en_cours = None
+        if resultat == 'arret':
+            return 'arret'
+        final = future_resultat.result() if future_resultat.done() else None
+        statut = final.status if final is not None else GoalStatus.STATUS_UNKNOWN
+        return 'succes' if statut == GoalStatus.STATUS_SUCCEEDED else 'echec'

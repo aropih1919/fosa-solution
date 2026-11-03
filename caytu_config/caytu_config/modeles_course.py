@@ -202,6 +202,8 @@ _NOMBRES_COURSE = (
     ("search_clearance_m", {"positive": True}),
     ("search_visited_radius_m", {"positive": True}),
     ("front_guard_m", {"minimum": 0.0}),
+    ("goal_xy_tolerance_m", {"positive": True}),
+    ("goal_yaw_tolerance_deg", {"positive": True}),
 )
 _TEXTES_COURSE = ("order_topic", "start_topic", "state_topic")
 _CHEMINS_COURSE = ("slam_map_file", "memorized_tags_file", "tags_output_file")
@@ -234,6 +236,8 @@ class CourseConfig:
     search_clearance_m: float
     search_visited_radius_m: float
     front_guard_m: float
+    goal_xy_tolerance_m: float
+    goal_yaw_tolerance_deg: float
     alignment: AlignmentConfig
     slam_map_file: str
     memorized_tags_file: str

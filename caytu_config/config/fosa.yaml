@@ -274,6 +274,8 @@ course:
   search_clearance_m: 0.45
   search_visited_radius_m: 0.8
   front_guard_m: 0.10
+  goal_xy_tolerance_m: 0.08       # arrivée Nav2 avant l'alignement visuel
+  goal_yaw_tolerance_deg: 7.0
   alignment:
     linear_gain: 0.6
     angular_gain: 1.2
