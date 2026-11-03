@@ -287,6 +287,9 @@ course:
     max_angular_rps: 0.35
     min_linear_mps: 0.03          # À AJUSTER : seuil de démarrage de la base
     min_angular_rps: 0.10
+    # Objectif d'arrêt (plus strict que les tolérances d'acceptation ci-dessus).
+    precision_distance_m: 0.015
+    precision_heading_deg: 2.0
     timeout_sec: 20.0
     max_renavigations: 2
   # Vide = cartographie en direct. Sinon : posegraph slam_toolbox sérialisé

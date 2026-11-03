@@ -35,7 +35,7 @@ from caytu_course.alignement import (
     obstacle_devant,
 )
 from caytu_course.entrees_course import EntreesCourse
-from caytu_course.geometrie_tags import erreurs_visite, pose_approche
+from caytu_course.geometrie_tags import erreurs_visite, pose_approche, visite_valide
 from caytu_course.memoire_tags import MemoireTags
 from caytu_course.recherche import points_recherche
 from caytu_course.sequence import SequenceTags, budget_pour_tag
@@ -114,7 +114,9 @@ class NoeudCourse(Node):
             max_lineaire=alignement.max_linear_mps,
             max_angulaire=alignement.max_angular_rps,
             min_lineaire=alignement.min_linear_mps,
-            min_angulaire=alignement.min_angular_rps)
+            min_angulaire=alignement.min_angular_rps,
+            precision_distance=alignement.precision_distance_m,
+            precision_cap=math.radians(alignement.precision_heading_deg))
 
     def publier_etat(self, etat, cible=None, detail=''):
         if (etat, cible, detail) == self._etat:
@@ -352,6 +354,7 @@ class NoeudCourse(Node):
         demi_largeur = max(abs(y) for _, y in self._navigation.footprint)
         debut = dernier_vu = dernier_journal = self._temps()
         stables = 0
+        erreurs = None
         self.publier_etat('ALIGNEMENT', tag_id)
         while rclpy.ok():
             maintenant = self._temps()
@@ -360,7 +363,7 @@ class NoeudCourse(Node):
                 return 'temps_ecoule'
             if maintenant > echeance or maintenant - debut > course.alignment.timeout_sec:
                 self.arreter_robot()
-                return 'echec'
+                return 'aligne' if self._position_acceptable(erreurs) else 'echec'
             vue = self._entrees.detection_recente(tag_id, course.detection_max_age_sec)
             if vue is None:
                 self.publier_vitesse(0.0, 0.0)
@@ -403,6 +406,20 @@ class NoeudCourse(Node):
                 self.publier_vitesse(lineaire, commande.angulaire)
             self.traiter_pendant(PERIODE_BOUCLE)
         return 'echec'
+
+    def _position_acceptable(self, erreurs):
+        """Objectif de précision non atteint à temps : tolérances d'acceptation."""
+        if erreurs is None:
+            return False
+        course = self._course
+        acceptable = visite_valide(
+            erreurs, course.distance_tolerance_m, 2.0 * course.lateral_tolerance_m,
+            math.radians(course.heading_tolerance_deg))
+        if acceptable:
+            self.get_logger().warning(
+                'Précision non atteinte à temps : position acceptée '
+                f'(distance {erreurs.distance:+.3f} m, cap {math.degrees(erreurs.cap):+.1f}°).')
+        return acceptable
 
     def _valider_visite(self, tag_id):
         self.arreter_robot()

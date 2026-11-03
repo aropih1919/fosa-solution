@@ -45,7 +45,8 @@ def _course_minimale(**surcharges):
         "alignment": {
             "linear_gain": 0.6, "angular_gain": 1.2, "max_linear_mps": 0.08,
             "max_angular_rps": 0.35, "min_linear_mps": 0.03,
-            "min_angular_rps": 0.1, "timeout_sec": 20.0,
+            "min_angular_rps": 0.1, "precision_distance_m": 0.015,
+            "precision_heading_deg": 2.0, "timeout_sec": 20.0,
             "max_renavigations": 2},
         "slam_map_file": "", "memorized_tags_file": "",
         "tags_output_file": "~/.ros/fosa_tags_course.yaml",

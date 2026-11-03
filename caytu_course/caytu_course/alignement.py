@@ -3,6 +3,10 @@
 D'abord tourner pour faire face au tag, puis avancer ou reculer en ligne
 droite en corrigeant le cap. Un écart latéral trop grand ne se corrige pas
 sur place : on redemande une navigation Nav2 vers la pose d'approche.
+
+Deux niveaux : le robot ne s'arrête qu'à l'objectif de précision ; les
+tolérances (plus larges) servent à accepter la position si le temps manque.
+S'arrêter dès l'entrée dans la tolérance laissait le robot à son bord.
 """
 
 from dataclasses import dataclass
@@ -20,6 +24,8 @@ class ReglagesAlignement:
     max_angulaire: float
     min_lineaire: float
     min_angulaire: float
+    precision_distance: float
+    precision_cap: float
 
 
 @dataclass(frozen=True)
@@ -43,10 +49,10 @@ def _borner(valeur, maximum):
 def commande_alignement(erreurs, reglages):
     if abs(erreurs.laterale) > 2.0 * reglages.tolerance_laterale:
         return CommandeAlignement(0.0, 0.0, 'renaviguer')
-    if (abs(erreurs.distance) <= reglages.tolerance_distance
-            and abs(erreurs.cap) <= reglages.tolerance_cap):
+    distance_atteinte = abs(erreurs.distance) <= reglages.precision_distance
+    if distance_atteinte and abs(erreurs.cap) <= reglages.precision_cap:
         return CommandeAlignement(0.0, 0.0, 'aligne')
-    if abs(erreurs.cap) > reglages.tolerance_cap:
+    if abs(erreurs.cap) > reglages.tolerance_cap or distance_atteinte:
         return CommandeAlignement(0.0, _saturer(
             reglages.gain_angulaire * erreurs.cap,
             reglages.min_angulaire, reglages.max_angulaire), 'en_cours')
