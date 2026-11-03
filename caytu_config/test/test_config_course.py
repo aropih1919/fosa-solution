@@ -28,7 +28,7 @@ def _course_minimale(**surcharges):
         "order_topic": "/ordre",
         "order_type": "string",
         "start_topic": "/depart",
-        "state_topic": "/etat",
+        "state_topic": "/etat", "map_topic": "/map",
         "status": {
             "start_topic": "/s/depart", "visit_topic": "/s/tag",
             "image_topic": "/s/image", "finish_topic": "/s/fin"},
@@ -122,6 +122,7 @@ def test_le_mot_de_depart_exige_au_moins_un_mot():
             "enabled": True, "audio_topic": "/speech_audio",
             "mode": "utterance", "sample_rate": 16000, "channels": 1,
             "channel_index": 0, "sample_width": 2, "words": [],
+            "restricted_grammar": False,
             "model_path": "~/modele", "min_confidence": 0.8})
 
 

@@ -205,7 +205,7 @@ _NOMBRES_COURSE = (
     ("goal_xy_tolerance_m", {"positive": True}),
     ("goal_yaw_tolerance_deg", {"positive": True}),
 )
-_TEXTES_COURSE = ("order_topic", "start_topic", "state_topic")
+_TEXTES_COURSE = ("order_topic", "start_topic", "state_topic", "map_topic")
 _CHEMINS_COURSE = ("slam_map_file", "memorized_tags_file", "tags_output_file")
 
 
@@ -218,6 +218,7 @@ class CourseConfig:
     order_type: str
     start_topic: str
     state_topic: str
+    map_topic: str
     status: StatusTopicsConfig
     time_limit_sec: float
     stop_margin_sec: float
@@ -294,6 +295,7 @@ class StartWordConfig:
     channel_index: int
     sample_width: int
     words: tuple
+    restricted_grammar: bool
     model_path: str
     min_confidence: float
 
@@ -302,8 +304,8 @@ class StartWordConfig:
         data = _section(data, path)
         _check_keys(data, (
             "enabled", "audio_topic", "mode", "sample_rate", "channels",
-            "channel_index", "sample_width", "words", "model_path",
-            "min_confidence"), path)
+            "channel_index", "sample_width", "words", "restricted_grammar",
+            "model_path", "min_confidence"), path)
         voix = cls(
             enabled=_as_bool(_get(data, "enabled", path), f"{path}.enabled"),
             audio_topic=_as_str(
@@ -321,6 +323,9 @@ class StartWordConfig:
             words=tuple(
                 mot.casefold() for mot in _as_str_list(
                     _get(data, "words", path), f"{path}.words")),
+            restricted_grammar=_as_bool(
+                _get(data, "restricted_grammar", path),
+                f"{path}.restricted_grammar"),
             model_path=_as_str(
                 _get(data, "model_path", path), f"{path}.model_path"),
             min_confidence=_as_number(

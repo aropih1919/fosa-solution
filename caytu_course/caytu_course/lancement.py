@@ -16,7 +16,8 @@ def parametres_slam(configuration):
     systeme, navigation = configuration.system, configuration.navigation
     parametres = {
         'use_sim_time': systeme.use_sim_time,
-        'use_lifecycle_manager': True,
+        # Transitions pilotées par le lifecycle manager de la course (sans bond).
+        'use_lifecycle_manager': False,
         'odom_frame': navigation.odom_frame,
         'map_frame': systeme.global_frame,
         'base_frame': systeme.base_frame,

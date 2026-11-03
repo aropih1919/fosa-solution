@@ -26,7 +26,7 @@ def test_cartographie_en_direct_par_defaut(robot):
     assert parametres['map_frame'] == 'map'
     assert parametres['scan_topic'] == '/scan_filtered'
     assert parametres['use_sim_time'] is False
-    assert parametres['use_lifecycle_manager'] is True
+    assert parametres['use_lifecycle_manager'] is False
 
 
 def test_localisation_sur_une_carte_des_essais(robot):

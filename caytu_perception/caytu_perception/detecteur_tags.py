@@ -12,6 +12,7 @@ from cv_bridge import CvBridge
 import numpy as np
 import rclpy
 from rclpy.duration import Duration
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
@@ -167,7 +168,7 @@ def main(args=None):
     noeud = DetecteurTags()
     try:
         rclpy.spin(noeud)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         noeud.destroy_node()

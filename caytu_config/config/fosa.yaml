@@ -251,6 +251,7 @@ course:
   order_type: string              # string | int32_multi_array
   start_topic: /fosa/course/depart   # départ par commande (./run.sh depart) ou par la voix
   state_topic: /fosa/course/etat
+  map_topic: /map                 # carte publiée par slam_toolbox
   # Statut lu par les juges : À REMPLACER par le paquet officiel (caytu_course/statut.py).
   status:
     start_topic: /fosa/statut/depart
@@ -302,5 +303,8 @@ start_word:
   channel_index: 0
   sample_width: 2
   words: [allez]
+  # false : vocabulaire libre puis énoncé exact « allez ». Mesuré hors ligne :
+  # une grammaire restreinte confond « alors », « allô », « Alex » avec « allez ».
+  restricted_grammar: false
   model_path: models/vosk-model-small-fr-0.22   # relatif à caytu_config/config
-  min_confidence: 0.80
+  min_confidence: 0.75            # « allez » reconnu à 0,88 (voix de synthèse) : À AJUSTER
