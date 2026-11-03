@@ -20,6 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'tag_detector = caytu_perception.detecteur_tags:main',
+            'essai_tags = caytu_perception.essai_tags:main',
             'tag_calibrator = caytu_perception.calibrateur_tags:main',
             'obstacle_classifier = caytu_perception.classificateur_obstacles:main',
             'person_tracker = caytu_perception.suivi_personnes:main',

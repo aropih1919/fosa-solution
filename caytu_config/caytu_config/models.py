@@ -308,14 +308,34 @@ class AprilTagConfig:
     detector: str
     calibration_samples: int
     calibration_file: str
+    publish_map_pose: bool
+    annotated_directory: str
+    save_interval_sec: float
+    max_saved_images: int
+    test_ids: tuple
 
     @classmethod
     def from_mapping(cls, data, path="perception.apriltag"):
         data = _section(data, path)
         _check_keys(data, (
             "family", "size_m", "max_distance_m", "detector",
-            "calibration_samples", "calibration_file"), path)
+            "calibration_samples", "calibration_file", "publish_map_pose",
+            "annotated_directory", "save_interval_sec", "max_saved_images",
+            "test_ids"), path)
         return cls(
+            publish_map_pose=_as_bool(
+                _get(data, "publish_map_pose", path), f"{path}.publish_map_pose"),
+            annotated_directory=_as_str(
+                _get(data, "annotated_directory", path),
+                f"{path}.annotated_directory", allow_empty=True),
+            save_interval_sec=_as_number(
+                _get(data, "save_interval_sec", path),
+                f"{path}.save_interval_sec", positive=True),
+            max_saved_images=_as_int(
+                _get(data, "max_saved_images", path), f"{path}.max_saved_images", 1),
+            test_ids=tuple(_as_int(valeur, f"{path}.test_ids", 0)
+                           for valeur in _as_list(
+                               _get(data, "test_ids", path), f"{path}.test_ids")),
             family=_as_str(_get(data, "family", path), f"{path}.family"),
             size_m=_as_number(
                 _get(data, "size_m", path), f"{path}.size_m", positive=True),

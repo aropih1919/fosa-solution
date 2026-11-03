@@ -72,6 +72,11 @@ perception:
     size_m: 0.18
     max_distance_m: 4.0
     detector: opencv              # opencv | apriltag_ros
+    publish_map_pose: true        # false : IDs et annotations sans calibration ni TF
+    annotated_directory: ""      # vide : aucun fichier ; chaque lancement crée un sous-dossier
+    save_interval_sec: 1.0
+    max_saved_images: 100         # limite par lancement
+    test_ids: [1, 4, 7, 9]
     calibration_samples: 10
     calibration_file: ~/.ros/fosa_tag_calibration.yaml
 

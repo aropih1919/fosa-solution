@@ -15,6 +15,7 @@ _MODULES_MOCKS = [
     'rclpy',
     'rclpy.node',
     'rclpy.time',
+    'rclpy.qos',
     'cv2',
     'cv2.aruco',
     'cv_bridge',
