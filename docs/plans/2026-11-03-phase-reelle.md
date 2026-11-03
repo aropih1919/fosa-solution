@@ -183,3 +183,36 @@ Règle de sûreté conservée : aucun mouvement avant le départ ; le robot ne p
 ## Auto-relecture
 - Couverture des exigences du guide : ordre (3.2, 5.2), départ commande (5.2, 7) et voix (6), cartographie en direct (4.3, 5.3), tags 36h11 1/4/7/9 (2), visite 0,5 m ±12° (3.4, 3.7, 5.2), obstacles fixes/mobiles (4.2), statut départ/visites/fin (5.1), 10 min sans intervention (3.3, 5.2), instructions du gel (7).
 - Inconnues isolées dans la configuration ou dans `statut.py`.
+
+---
+
+## Journal d'exécution (03/11)
+
+| Lot | Commit | État |
+|---|---|---|
+| 1 Configuration robot | `afe975d` | fait, tests verts |
+| 2 Détection AprilTag | `cb1c0aa` | fait, nœud vérifié sur image synthétique (pose à 6 mm près) |
+| 3 Logique pure | `7b2d643` | fait, 53 tests |
+| 4 Nav2 depuis la config + SLAM | `17a16a4` | fait |
+| 5 Nœud de course + lancement | `671cbf4` | fait, lancement vérifié |
+| 6 Départ vocal | `6d6e4e6` | fait, vérifié avec Vosk réel et voix de synthèse |
+| 7 Déploiement + guide | `126ef5b` | fait |
+| 8 Validation simulation | `6fcb392` + suite | en cours (Gazebo + 4 tags 36h11) |
+
+Écarts par rapport au plan, tous justifiés par une mesure :
+- `caytu_perception/setup.cfg` ajouté : sans lui, `ros2 run`/launch ne trouvaient
+  pas les exécutables (même défaut, non corrigé, dans `caytu_assistant` et
+  `caytu_semantic_map`, hors déploiement).
+- Affinage des coins : fenêtre d'une demi-cellule au lieu de `CORNER_REFINE_SUBPIX`
+  fixe (biais de ±8 % sur la distance) ou `CORNER_REFINE_APRILTAG` (90 ms/image,
+  portée < 3 m). Erreur mesurée : 0,1 % à 0,5 m, < 3 % jusqu'à 4 m.
+- Mot de départ : vocabulaire libre + énoncé exact par défaut ; une grammaire
+  restreinte confondait « alors », « allô », « Alex » avec « allez ».
+- Clés de configuration ajoutées en cours de route : `course.map_topic`,
+  `goal_xy_tolerance_m`, `goal_yaw_tolerance_deg`, `alignment.min_*`,
+  `apriltag.detection_image_rate_hz`, `apriltag.tf_max_lag_sec`,
+  `start_word.restricted_grammar`.
+- Premier essai complet en simulation : budgets en temps réel au lieu de
+  l'horloge ROS, TF map <- caméra en retard de 0,3 s, BT abandonnant les buts
+  (`default_server_timeout` 20 ms), Ctrl-C transformé en `TypeError` → corrigés
+  dans `6fcb392`.
