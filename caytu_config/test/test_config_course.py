@@ -132,4 +132,5 @@ def test_une_source_d_obstacles_incoherente_est_refusee():
         ObstacleSourceConfig.from_mapping({
             "name": "lidar", "topic": "/scan", "enabled": True,
             "obstacle_min_range": 0.1, "obstacle_max_range": 4.0,
-            "raytrace_max_range": 3.0, "global_costmap": True})
+            "raytrace_max_range": 3.0, "inf_is_valid": False,
+            "global_costmap": True})

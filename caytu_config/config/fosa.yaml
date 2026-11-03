@@ -62,6 +62,7 @@ navigation:
       obstacle_min_range: 0.12
       obstacle_max_range: 3.5
       raytrace_max_range: 4.0
+      inf_is_valid: false        # pas de retour ≠ espace libre
       global_costmap: true
     - name: camera1
       topic: /camera1/scan
@@ -69,6 +70,7 @@ navigation:
       obstacle_min_range: 0.2
       obstacle_max_range: 2.5
       raytrace_max_range: 3.0
+      inf_is_valid: true
       global_costmap: true
     - name: camera2
       topic: /camera2/scan
@@ -76,6 +78,7 @@ navigation:
       obstacle_min_range: 0.2
       obstacle_max_range: 2.5
       raytrace_max_range: 3.0
+      inf_is_valid: true
       global_costmap: true
   global_costmap_clear_service: /global_costmap/clear_entirely_global_costmap
   local_costmap_clear_service: /local_costmap/clear_entirely_local_costmap

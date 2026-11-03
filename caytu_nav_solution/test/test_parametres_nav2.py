@@ -84,6 +84,18 @@ def test_l_empreinte_et_les_vitesses_sont_bornees(robot):
         robot.navigation.max_angular_speed)
 
 
+def test_le_planificateur_garde_le_cap_demande(robot):
+    """Revue de code : avec use_final_approach_orientation, Smac remplaçait le
+    cap du but par celui du dernier segment ; le robot arrivait de biais."""
+    planificateur = _parametres(robot)['planner_server']['ros__parameters']['GridBased']
+    assert planificateur['use_final_approach_orientation'] is False
+
+
+def test_le_lidar_n_efface_pas_avec_les_rayons_sans_retour(robot):
+    locale = _costmap(_parametres(robot), 'local_costmap')
+    assert locale['lidar_layer']['lidar']['inf_is_valid'] is False
+
+
 def test_le_cap_final_est_controle(robot):
     parametres = _parametres(robot)
     verificateur = parametres['controller_server']['ros__parameters']['goal_checker']

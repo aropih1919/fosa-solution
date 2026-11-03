@@ -254,9 +254,13 @@ class _FakeGoalHandle:
 
 
 class _FakeNavClient:
-    def __init__(self, handle):
+    def __init__(self, handle, pret=True):
         self.handle = handle
         self.sent = []
+        self.pret = pret
+
+    def server_is_ready(self):
+        return self.pret
 
     def send_goal_async(self, goal, feedback_callback=None):
         self.sent.append((goal, feedback_callback))
@@ -436,3 +440,38 @@ def test_la_rotation_s_interrompt_et_signale_un_serveur_absent():
 
     absent = _navigateur_rotation(_FakeGoalHandle(), pret=False)
     assert absent.tourner(6.28, 20.0) == 'indisponible'
+
+
+def test_sans_serveur_nav2_le_but_n_est_pas_envoye():
+    navigateur = _navigateur_pour_resultat(_FakeGoalHandle(), Pose2D(0, 0, 0))
+    navigateur._client.pret = False
+    assert navigateur.naviguer_une_fois(1.0, 0.0, 'map', Pose2D(0, 0, 0)) == 'refuse'
+    assert navigateur._client.sent == []
+
+
+class _FakeEnvoiTardif(_FakeNavClient):
+    """L'acceptation arrive après l'interruption (revue de code)."""
+
+    def __init__(self, handle):
+        super().__init__(handle)
+        self.future = _FakeFuture(False, handle)
+
+    def send_goal_async(self, goal, feedback_callback=None):
+        self.sent.append((goal, feedback_callback))
+        return self.future
+
+
+def test_un_but_accepte_apres_l_interruption_est_annule():
+    handle = _FakeGoalHandleEnCours()
+    navigateur = _navigateur_pour_resultat(handle, Pose2D(3.0, 0.0, 0.0))
+    client = _FakeEnvoiTardif(handle)
+    navigateur._client = client
+
+    def accepter_au_premier_tour(timeout):
+        client.future._done = True
+
+    navigateur._spin = accepter_au_premier_tour
+    resultat = navigateur.naviguer_une_fois(
+        0.0, 0.0, 'map', Pose2D(0, 0, 0), interrompre=lambda: True)
+    assert resultat == 'interrompu'
+    assert handle.cancelled is True

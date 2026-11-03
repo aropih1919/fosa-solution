@@ -45,9 +45,10 @@ def _couche_obstacles(source):
             'data_type': 'LaserScan',
             'marking': True,
             'clearing': True,
-            # Un rayon sans retour efface jusqu'à raytrace_max_range ; le point
-            # créé à range_max n'est jamais marqué (obstacle_max_range plus court).
-            'inf_is_valid': True,
+            # Vrai : un rayon sans retour efface jusqu'à raytrace_max_range (le
+            # point créé à range_max n'est jamais marqué). Faux pour le lidar :
+            # un pied de chaise noir sans retour n'efface pas l'obstacle.
+            'inf_is_valid': source.inf_is_valid,
             'obstacle_min_range': source.obstacle_min_range,
             'obstacle_max_range': source.obstacle_max_range,
             'raytrace_min_range': 0.0,
@@ -122,6 +123,10 @@ def construire_parametres_course(configuration, config_root=None):
     base = _charger_base(configuration, racine)
     carte, robot, odom = systeme.global_frame, systeme.base_frame, navigation.odom_frame
 
+    # Le cap du but doit être conservé (face au tag) : Smac ne doit pas le
+    # remplacer par l'orientation du dernier segment du chemin.
+    base['planner_server']['ros__parameters']['GridBased'][
+        'use_final_approach_orientation'] = False
     bt = base['bt_navigator']['ros__parameters']
     bt.update(global_frame=carte, robot_base_frame=robot,
               odom_topic=navigation.odom_topic)

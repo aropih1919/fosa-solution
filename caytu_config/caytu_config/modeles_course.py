@@ -56,6 +56,7 @@ class ObstacleSourceConfig:
     obstacle_min_range: float
     obstacle_max_range: float
     raytrace_max_range: float
+    inf_is_valid: bool
     global_costmap: bool
 
     @classmethod
@@ -63,7 +64,8 @@ class ObstacleSourceConfig:
         data = _section(data, path)
         _check_keys(data, (
             "name", "topic", "enabled", "obstacle_min_range",
-            "obstacle_max_range", "raytrace_max_range", "global_costmap"), path)
+            "obstacle_max_range", "raytrace_max_range", "inf_is_valid",
+            "global_costmap"), path)
         source = cls(
             name=_as_str(_get(data, "name", path), f"{path}.name"),
             topic=_as_str(_get(data, "topic", path), f"{path}.topic"),
@@ -77,6 +79,8 @@ class ObstacleSourceConfig:
             raytrace_max_range=_as_number(
                 _get(data, "raytrace_max_range", path),
                 f"{path}.raytrace_max_range", positive=True),
+            inf_is_valid=_as_bool(
+                _get(data, "inf_is_valid", path), f"{path}.inf_is_valid"),
             global_costmap=_as_bool(
                 _get(data, "global_costmap", path), f"{path}.global_costmap"),
         )

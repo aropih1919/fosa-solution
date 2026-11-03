@@ -21,6 +21,7 @@ navigation:
       obstacle_min_range: 0.35      # le lidar simulé voit les roues sous 0,35 m
       obstacle_max_range: 3.5
       raytrace_max_range: 4.0
+      inf_is_valid: false
       global_costmap: true
 
 perception:

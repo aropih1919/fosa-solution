@@ -303,6 +303,17 @@ class Nav2Navigator:
             self._spin(0.05)
         self._but_en_cours = None
 
+    def _annuler_si_accepte(self, future_envoi):
+        """But abandonné avant son acceptation : s'il est accepté juste après,
+        on l'annule, sinon le robot repartirait (par exemple après la fin)."""
+        fin = time.monotonic() + self._navigation.cancel_timeout_sec
+        while self._is_ok() and not future_envoi.done() and time.monotonic() < fin:
+            self._spin(0.05)
+        poignee = future_envoi.result() if future_envoi.done() else None
+        if poignee is not None and poignee.accepted:
+            self._but_en_cours = poignee
+            self.annuler_but()
+
     def _attendre_future(self, future, interrompre=None):
         """Traite les messages jusqu'à la fin de `future`.
 
@@ -325,11 +336,14 @@ class Nav2Navigator:
         `cap` impose l'orientation finale ; `interrompre()` vrai annule le but
         en cours (cible trouvée pendant une recherche, budget épuisé...).
         """
+        if not self._client.server_is_ready():
+            return 'refuse'
         future_envoi = self._client.send_goal_async(
             self.message_but(goal_x, goal_y, frame, spawn, cap),
             feedback_callback=self.recevoir_feedback)
-        resultat = self._attendre_future(future_envoi)
+        resultat = self._attendre_future(future_envoi, interrompre)
         if resultat != 'ok':
+            self._annuler_si_accepte(future_envoi)
             return resultat
 
         but = future_envoi.result() if future_envoi.done() else None
@@ -392,8 +406,9 @@ class Nav2Navigator:
         but.time_allowance = Duration(
             sec=int(delai_sec), nanosec=int((delai_sec % 1.0) * 1e9))
         future_envoi = self._client_rotation.send_goal_async(but)
-        resultat = self._attendre_future(future_envoi)
+        resultat = self._attendre_future(future_envoi, interrompre)
         if resultat != 'ok':
+            self._annuler_si_accepte(future_envoi)
             return resultat
         poignee = future_envoi.result() if future_envoi.done() else None
         if poignee is None or not poignee.accepted:
