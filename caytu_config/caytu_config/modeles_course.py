@@ -145,6 +145,7 @@ class AlignmentConfig:
     min_angular_rps: float
     precision_distance_m: float
     precision_heading_deg: float
+    max_distance_error_m: float
     timeout_sec: float
     max_renavigations: int
 
@@ -154,7 +155,8 @@ class AlignmentConfig:
         _check_keys(data, (
             "linear_gain", "angular_gain", "max_linear_mps", "max_angular_rps",
             "min_linear_mps", "min_angular_rps", "precision_distance_m",
-            "precision_heading_deg", "timeout_sec", "max_renavigations"), path)
+            "precision_heading_deg", "max_distance_error_m", "timeout_sec",
+            "max_renavigations"), path)
         alignement = cls(
             linear_gain=_as_number(
                 _get(data, "linear_gain", path), f"{path}.linear_gain",
@@ -181,6 +183,9 @@ class AlignmentConfig:
             precision_heading_deg=_as_number(
                 _get(data, "precision_heading_deg", path),
                 f"{path}.precision_heading_deg", positive=True),
+            max_distance_error_m=_as_number(
+                _get(data, "max_distance_error_m", path),
+                f"{path}.max_distance_error_m", positive=True),
             timeout_sec=_as_number(
                 _get(data, "timeout_sec", path), f"{path}.timeout_sec",
                 positive=True),
@@ -216,6 +221,10 @@ _NOMBRES_COURSE = (
     ("front_guard_m", {"minimum": 0.0}),
     ("goal_xy_tolerance_m", {"positive": True}),
     ("goal_yaw_tolerance_deg", {"positive": True}),
+    ("tag_lost_timeout_sec", {"positive": True}),
+    ("preapproach_margin_m", {"minimum": 0.0}),
+    ("search_spin_speed_rps", {"positive": True, "maximum": 1.0}),
+    ("search_max_radius_m", {"positive": True}),
 )
 _TEXTES_COURSE = ("order_topic", "start_topic", "state_topic", "map_topic")
 _CHEMINS_COURSE = ("slam_map_file", "memorized_tags_file", "tags_output_file")
@@ -251,6 +260,10 @@ class CourseConfig:
     front_guard_m: float
     goal_xy_tolerance_m: float
     goal_yaw_tolerance_deg: float
+    tag_lost_timeout_sec: float
+    preapproach_margin_m: float
+    search_spin_speed_rps: float
+    search_max_radius_m: float
     alignment: AlignmentConfig
     slam_map_file: str
     memorized_tags_file: str

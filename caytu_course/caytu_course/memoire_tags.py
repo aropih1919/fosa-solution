@@ -1,7 +1,10 @@
 """Mémoire des tags vus pendant la course, dans le repère `map`.
 
 Chaque observation est pondérée par 1/distance² : une vue de près, plus
-précise, l'emporte sur les vues lointaines. La normale (cap) est moyennée sur
+précise, l'emporte sur les vues lointaines. Une vue nettement plus proche que
+les précédentes repart de zéro, et une vue nettement plus lointaine que la
+meilleure est ignorée : mesuré en simulation, les vues à 1,5 m dispersaient
+la pose de 0,6 m et la normale de 36°. La normale (cap) est moyennée sur
 le cercle. La mémoire peut être exportée en fin de course et rechargée (poses
 mémorisées pendant les essais, seulement si le règlement l'autorise).
 """
@@ -11,6 +14,10 @@ import math
 
 # Les vues très proches ne doivent pas écraser toutes les autres.
 DISTANCE_PONDERATION_MIN = 0.3
+# Vue au moins 1,5 fois plus proche que la meilleure : elle remplace tout.
+RAPPORT_REMPLACEMENT = 1.0 / 1.5
+# Vue plus de 1,5 fois plus lointaine que la meilleure : ignorée.
+RAPPORT_REJET = 1.5
 
 
 @dataclass(frozen=True)
@@ -59,9 +66,16 @@ class MemoireTags:
         """Fusionne une observation ; retourne False si elle est ignorée."""
         if not math.isfinite(distance) or distance > self._distance_max:
             return False
+        accumulateur = self._tags.get(int(tag_id))
+        if accumulateur is not None:
+            if distance > RAPPORT_REJET * accumulateur.distance_min:
+                return False
+            if distance < RAPPORT_REMPLACEMENT * accumulateur.distance_min:
+                accumulateur = None
+        if accumulateur is None:
+            accumulateur = self._tags[int(tag_id)] = _Accumulateur()
         poids = 1.0 / max(distance, DISTANCE_PONDERATION_MIN) ** 2
-        self._tags.setdefault(int(tag_id), _Accumulateur()).ajouter(
-            x, y, cap, distance, poids)
+        accumulateur.ajouter(x, y, cap, distance, poids)
         return True
 
     def connait(self, tag_id):

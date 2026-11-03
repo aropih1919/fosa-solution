@@ -139,9 +139,10 @@ def construire_parametres_course(configuration, config_root=None):
     comportements = base['behavior_server']['ros__parameters']
     comportements.update(
         local_frame=odom, global_frame=carte, robot_base_frame=robot,
+        # Le tour de recherche (behavior Spin) est lent : pas de flou de bougé.
         max_rotational_vel=min(
             float(comportements['max_rotational_vel']),
-            navigation.max_angular_speed))
+            navigation.max_angular_speed, course.search_spin_speed_rps))
     for nom, globale, repere in (
             ('global_costmap', True, carte), ('local_costmap', False, odom)):
         parametres = base[nom][nom]['ros__parameters']

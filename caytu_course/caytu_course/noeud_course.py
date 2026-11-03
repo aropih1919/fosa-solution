@@ -12,6 +12,7 @@ Déroulement (guide officiel) :
   4. signaler la fin et s'arrêter, au plus tard à 10 minutes.
 """
 
+from dataclasses import replace
 import json
 import math
 import signal
@@ -32,6 +33,7 @@ from caytu_config import ConfigurationError, load_config
 from caytu_course.alignement import (
     ReglagesAlignement,
     commande_alignement,
+    obstacle_derriere,
     obstacle_devant,
 )
 from caytu_course.entrees_course import EntreesCourse
@@ -48,7 +50,6 @@ from caytu_nav_solution.navigation_runtime import (
 )
 
 PERIODE_BOUCLE = 0.1
-DELAI_TAG_PERDU = 3.0
 
 
 class NoeudCourse(Node):
@@ -62,6 +63,7 @@ class NoeudCourse(Node):
         self._en_attente = True
         self._tours = []           # positions où un tour sur place a été fait
         self._points_essayes = []  # points de recherche déjà tentés
+        self._echeances = {}       # échéance de chaque tag (horloge de course)
 
         self._memoire_tf = Buffer()
         self._ecouteur_tf = TransformListener(
@@ -116,7 +118,8 @@ class NoeudCourse(Node):
             min_lineaire=alignement.min_linear_mps,
             min_angulaire=alignement.min_angular_rps,
             precision_distance=alignement.precision_distance_m,
-            precision_cap=math.radians(alignement.precision_heading_deg))
+            precision_cap=math.radians(alignement.precision_heading_deg),
+            erreur_distance_max=alignement.max_distance_error_m)
 
     def publier_etat(self, etat, cible=None, detail=''):
         if (etat, cible, detail) == self._etat:
@@ -225,11 +228,13 @@ class NoeudCourse(Node):
             self.get_logger().error('Nav2 ou la localisation SLAM ne répond pas.')
 
     def _traiter_tag(self, tag_id):
-        budget = budget_pour_tag(
-            self._chrono.remaining(), self._sequence.restants(),
-            self._course.min_tag_budget_sec)
-        echeance = self._temps() + budget
-        self.get_logger().info(f'Tag {tag_id} : budget {budget:.0f} s.')
+        if tag_id not in self._echeances:
+            budget = budget_pour_tag(
+                self._chrono.remaining(), self._sequence.restants(),
+                self._course.min_tag_budget_sec)
+            self._echeances[tag_id] = self._temps() + budget
+            self.get_logger().info(f'Tag {tag_id} : budget {budget:.0f} s.')
+        echeance = self._echeances[tag_id]
         while rclpy.ok():
             if self._temps_ecoule():
                 return 'temps_ecoule'
@@ -293,10 +298,13 @@ class NoeudCourse(Node):
         grille = self._entrees.grille()
         if grille is None:
             return None
+        # Le repère map part du point de départ : la zone autorisée est un
+        # cercle autour de l'origine.
         points = points_recherche(
             grille, self._course.search_clearance_m, self._course.search_grid_step_m,
             self._tours + self._points_essayes, self._course.search_visited_radius_m,
-            (pose.x, pose.y))
+            (pose.x, pose.y), centre=(0.0, 0.0),
+            rayon_max=self._course.search_max_radius_m)
         return points[0] if points else None
 
     # ------------------------------------------------------------- visite
@@ -304,6 +312,26 @@ class NoeudCourse(Node):
         """Pose de base_link quand le centre du robot est en (x, y)."""
         decalage = self._navigation.center_offset_x
         return x - decalage * math.cos(cap), y - decalage * math.sin(cap)
+
+    def _pose_tag_courante(self, tag_id):
+        """(x, y, cap de la normale, distance) du tag dans map, ou None.
+
+        Si le tag est vu en ce moment, sa pose dans le repère du robot est
+        composée avec la pose actuelle du robot : pas d'accumulation d'erreurs
+        de TF ni de corrections SLAM passées. Sinon, la mémoire.
+        """
+        vue = self._entrees.detection_recente(
+            tag_id, self._course.detection_max_age_sec)
+        robot = self.pose_robot()
+        if vue is not None and robot is not None:
+            cos_cap, sin_cap = math.cos(robot.yaw), math.sin(robot.yaw)
+            return (robot.x + cos_cap * vue.x - sin_cap * vue.y,
+                    robot.y + sin_cap * vue.x + cos_cap * vue.y,
+                    robot.yaw + vue.cap, vue.distance)
+        memoire = self._memoire.pose(tag_id)
+        if memoire is None:
+            return None
+        return memoire.x, memoire.y, memoire.cap, memoire.distance_min
 
     def _visiter(self, tag_id, echeance):
         """Approche Nav2 puis alignement visuel ; retourne visite/perdu/echec/temps_ecoule."""
@@ -314,12 +342,14 @@ class NoeudCourse(Node):
                 return 'temps_ecoule'
             if self._temps() > echeance:
                 return 'echec'
-            tag = self._memoire.pose(tag_id)
+            tag = self._pose_tag_courante(tag_id)
             if tag is None:
                 return 'perdu'
-            pre_approche = tag.distance_min > course.approach_distance_m + 0.3
+            tag_x, tag_y, tag_cap, tag_distance = tag
+            pre_approche = (tag_distance
+                            > course.approach_distance_m + course.preapproach_margin_m)
             distance = course.approach_distance_m if pre_approche else course.visit_distance_m
-            x, y, cap = pose_approche(tag.x, tag.y, tag.cap, distance)
+            x, y, cap = pose_approche(tag_x, tag_y, tag_cap, distance)
             x, y = self._but_pour_centre(x, y, cap)
             self.publier_etat('APPROCHE', tag_id, f'{distance:.2f} m du tag')
             resultat = self._navigateur.naviguer_une_fois(
@@ -335,12 +365,17 @@ class NoeudCourse(Node):
             if resultat == 'reessayer' and pre_approche:
                 renavigations += 1
                 continue
-            if pre_approche and self._memoire.pose(tag_id).distance_min > distance + 0.3:
-                # Toujours pas vu de près depuis la pré-approche : on cherche.
-                return 'perdu'
             if pre_approche:
+                courante = self._pose_tag_courante(tag_id)
+                if courante is None or courante[3] > distance + course.preapproach_margin_m:
+                    # Toujours pas vu de près depuis la pré-approche : on cherche.
+                    return 'perdu'
                 continue
-            resultat = self._aligner(tag_id, echeance)
+            # Dernier essai : on accepte un écart latéral double plutôt que de
+            # perdre la visite (le cap reste aligné sur la normale du tag).
+            dernier_essai = renavigations >= course.alignment.max_renavigations
+            tolerance_laterale = course.lateral_tolerance_m * (2.0 if dernier_essai else 1.0)
+            resultat = self._aligner(tag_id, echeance, tolerance_laterale)
             if resultat == 'aligne':
                 return self._valider_visite(tag_id)
             if resultat in ('perdu', 'temps_ecoule'):
@@ -348,9 +383,11 @@ class NoeudCourse(Node):
             renavigations += 1
         return 'echec'
 
-    def _aligner(self, tag_id, echeance):
+    def _aligner(self, tag_id, echeance, tolerance_laterale):
         course = self._course
+        reglages = replace(self._reglages, tolerance_laterale=tolerance_laterale)
         x_avant = max(x for x, _ in self._navigation.footprint)
+        x_arriere = min(x for x, _ in self._navigation.footprint)
         demi_largeur = max(abs(y) for _, y in self._navigation.footprint)
         debut = dernier_vu = dernier_journal = self._temps()
         stables = 0
@@ -363,13 +400,16 @@ class NoeudCourse(Node):
                 return 'temps_ecoule'
             if maintenant > echeance or maintenant - debut > course.alignment.timeout_sec:
                 self.arreter_robot()
-                return 'aligne' if self._position_acceptable(erreurs) else 'echec'
+                return ('aligne' if self._position_acceptable(erreurs, tolerance_laterale)
+                        else 'echec')
             vue = self._entrees.detection_recente(tag_id, course.detection_max_age_sec)
             if vue is None:
-                self.publier_vitesse(0.0, 0.0)
-                if maintenant - dernier_vu > DELAI_TAG_PERDU:
+                # Tourner vers la pose mémorisée avant de conclure à une perte.
+                self.publier_vitesse(0.0, self._rotation_vers_memoire(tag_id))
+                if maintenant - dernier_vu > course.tag_lost_timeout_sec:
+                    self.arreter_robot()
                     self.get_logger().warning(
-                        f'Tag {tag_id} invisible depuis {DELAI_TAG_PERDU:.0f} s '
+                        f'Tag {tag_id} invisible depuis {course.tag_lost_timeout_sec:.0f} s '
                         'pendant l\'alignement.')
                     return 'perdu'
                 self.traiter_pendant(PERIODE_BOUCLE)
@@ -378,7 +418,7 @@ class NoeudCourse(Node):
             erreurs = erreurs_visite(
                 vue.x, vue.y, vue.cap, self._navigation.center_offset_x,
                 course.visit_distance_m)
-            commande = commande_alignement(erreurs, self._reglages)
+            commande = commande_alignement(erreurs, reglages)
             if maintenant - dernier_journal >= 1.0:
                 dernier_journal = maintenant
                 self.get_logger().info(
@@ -397,23 +437,40 @@ class NoeudCourse(Node):
             else:
                 stables = 0
                 lineaire = commande.lineaire
-                if lineaire > 0.0 and obstacle_devant(
-                        self._entrees.points_scan_robot(), x_avant, demi_largeur,
-                        course.front_guard_m):
+                points = self._entrees.points_scan_robot() if lineaire else []
+                if (lineaire > 0.0 and obstacle_devant(
+                        points, x_avant, demi_largeur, course.front_guard_m)) or (
+                        lineaire < 0.0 and obstacle_derriere(
+                            points, x_arriere, demi_largeur, course.front_guard_m)):
                     lineaire = 0.0
                     self.get_logger().warning(
-                        'Obstacle devant : avance bloquée.', throttle_duration_sec=2.0)
+                        'Obstacle sur le trajet : déplacement bloqué.',
+                        throttle_duration_sec=2.0)
                 self.publier_vitesse(lineaire, commande.angulaire)
             self.traiter_pendant(PERIODE_BOUCLE)
         return 'echec'
 
-    def _position_acceptable(self, erreurs):
+    def _rotation_vers_memoire(self, tag_id):
+        """Vitesse angulaire pour regarder vers le tag mémorisé (0 si inconnu)."""
+        tag, robot = self._memoire.pose(tag_id), self.pose_robot()
+        if tag is None or robot is None:
+            return 0.0
+        relevement = math.atan2(math.sin(
+            math.atan2(tag.y - robot.y, tag.x - robot.x) - robot.yaw), math.cos(
+            math.atan2(tag.y - robot.y, tag.x - robot.x) - robot.yaw))
+        if abs(relevement) <= math.radians(self._course.heading_tolerance_deg):
+            return 0.0
+        vitesse = min(self._reglages.max_angulaire,
+                      max(self._reglages.min_angulaire, abs(relevement)))
+        return math.copysign(vitesse, relevement)
+
+    def _position_acceptable(self, erreurs, tolerance_laterale):
         """Objectif de précision non atteint à temps : tolérances d'acceptation."""
         if erreurs is None:
             return False
         course = self._course
         acceptable = visite_valide(
-            erreurs, course.distance_tolerance_m, 2.0 * course.lateral_tolerance_m,
+            erreurs, course.distance_tolerance_m, tolerance_laterale,
             math.radians(course.heading_tolerance_deg))
         if acceptable:
             self.get_logger().warning(
@@ -471,6 +528,8 @@ def main(args=None):
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     signal.signal(signal.SIGINT, _interruption)
     signal.signal(signal.SIGTERM, _interruption)
+    # Session SSH coupée sans tmux : arrêt propre plutôt que mort brutale.
+    signal.signal(signal.SIGHUP, _interruption)
     try:
         configuration = load_config()
     except ConfigurationError as erreur:
@@ -491,6 +550,7 @@ def main(args=None):
     finally:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
         if rclpy.ok():
             noeud.arret_urgence()
         noeud.destroy_node()

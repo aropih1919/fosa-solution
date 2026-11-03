@@ -26,6 +26,7 @@ class ReglagesAlignement:
     min_angulaire: float
     precision_distance: float
     precision_cap: float
+    erreur_distance_max: float   # au-delà : Nav2, pas l'asservissement visuel
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,8 @@ def _borner(valeur, maximum):
 
 
 def commande_alignement(erreurs, reglages):
-    if abs(erreurs.laterale) > 2.0 * reglages.tolerance_laterale:
+    if (abs(erreurs.laterale) > reglages.tolerance_laterale
+            or abs(erreurs.distance) > reglages.erreur_distance_max):
         return CommandeAlignement(0.0, 0.0, 'renaviguer')
     distance_atteinte = abs(erreurs.distance) <= reglages.precision_distance
     if distance_atteinte and abs(erreurs.cap) <= reglages.precision_cap:
@@ -68,3 +70,10 @@ def obstacle_devant(points, x_avant, demi_largeur, marge):
     limite = x_avant + marge
     return any(
         0.0 < x <= limite and abs(y) <= demi_largeur for x, y in points)
+
+
+def obstacle_derriere(points, x_arriere, demi_largeur, marge):
+    """Vrai si un point occupe le couloir derrière l'empreinte (recul)."""
+    limite = x_arriere - marge
+    return any(
+        limite <= x < 0.0 and abs(y) <= demi_largeur for x, y in points)

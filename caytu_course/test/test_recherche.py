@@ -56,6 +56,14 @@ def test_l_inconnu_est_evite_comme_un_mur():
     assert all(x <= 5.0 - 40 * RESOLUTION - 0.45 + RESOLUTION for x, _ in points)
 
 
+def test_les_points_restent_dans_le_rayon_autour_du_depart():
+    tous = points_recherche(_arene(), 0.45, 0.8, [], 0.8, (2.5, 2.5))
+    proches = points_recherche(
+        _arene(), 0.45, 0.8, [], 0.8, (2.5, 2.5), centre=(1.0, 1.0), rayon_max=1.5)
+    assert proches and len(proches) < len(tous)
+    assert all(math.dist(point, (1.0, 1.0)) <= 1.5 for point in proches)
+
+
 def test_une_grille_inconnue_ne_donne_aucun_point():
     grille = GrilleOccupation(20, 20, RESOLUTION, 0.0, 0.0, [-1] * 400)
     assert points_recherche(grille, 0.45, 0.8, [], 0.8, (0.5, 0.5)) == []

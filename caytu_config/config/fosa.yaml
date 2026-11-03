@@ -283,6 +283,10 @@ course:
   front_guard_m: 0.10
   goal_xy_tolerance_m: 0.08       # arrivée Nav2 avant l'alignement visuel
   goal_yaw_tolerance_deg: 7.0
+  tag_lost_timeout_sec: 4.0       # tag invisible pendant l'alignement -> recherche
+  preapproach_margin_m: 0.3       # vu de plus loin que approach + marge : pré-approche
+  search_spin_speed_rps: 0.4      # tour de recherche lent : pas de flou de bougé
+  search_max_radius_m: 5.0        # zone de recherche autour du départ (arène 5 m)
   alignment:
     linear_gain: 0.6
     angular_gain: 1.2
@@ -293,6 +297,7 @@ course:
     # Objectif d'arrêt (plus strict que les tolérances d'acceptation ci-dessus).
     precision_distance_m: 0.015
     precision_heading_deg: 2.0
+    max_distance_error_m: 0.25    # au-delà, Nav2 replanifie (pas de longue ligne droite)
     timeout_sec: 20.0
     max_renavigations: 2
   # Vide = cartographie en direct. Sinon : posegraph slam_toolbox sérialisé

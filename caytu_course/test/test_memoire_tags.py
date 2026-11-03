@@ -20,9 +20,9 @@ def test_un_tag_observe_est_connu():
 
 def test_les_observations_proches_comptent_plus():
     memoire = MemoireTags(distance_max=4.0)
-    memoire.ajouter(4, 0.0, 0.0, 0.0, 2.0)   # poids 1/4
+    memoire.ajouter(4, 0.0, 0.0, 0.0, 1.2)   # poids 1/1,44
     memoire.ajouter(4, 1.0, 0.0, 0.0, 1.0)   # poids 1
-    assert memoire.pose(4).x == pytest.approx(0.8)
+    assert memoire.pose(4).x == pytest.approx(1.0 / (1.0 + 1.0 / 1.44))
     assert memoire.pose(4).distance_min == pytest.approx(1.0)
 
 
@@ -58,3 +58,23 @@ def test_export_et_import():
     # Une observation ajoutée après import se fond dans la mémoire importée.
     copie.ajouter(7, 1.0, 2.0, 0.5, 1.0)
     assert copie.pose(7).nombre == 2
+
+
+def test_une_vue_bien_plus_proche_remplace_les_vues_lointaines():
+    """Mesuré en simulation : les vues à 1,5 m dispersaient la pose de 0,6 m."""
+    memoire = MemoireTags(distance_max=4.0)
+    memoire.ajouter(4, 0.0, 0.0, 0.0, 2.0)
+    memoire.ajouter(4, 0.6, 0.0, 0.5, 1.9)
+    memoire.ajouter(4, 1.0, 1.0, 1.0, 0.8)
+    pose = memoire.pose(4)
+    assert (pose.x, pose.y, pose.cap) == pytest.approx((1.0, 1.0, 1.0))
+    assert pose.nombre == 1
+
+
+def test_une_vue_lointaine_n_abime_pas_une_pose_vue_de_pres():
+    memoire = MemoireTags(distance_max=4.0)
+    memoire.ajouter(4, 1.0, 1.0, 1.0, 0.8)
+    assert not memoire.ajouter(4, 3.0, 3.0, 0.0, 2.0)
+    assert memoire.pose(4).x == pytest.approx(1.0)
+    assert memoire.ajouter(4, 1.1, 1.0, 1.0, 1.0)
+    assert memoire.pose(4).nombre == 2

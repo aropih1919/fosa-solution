@@ -16,7 +16,6 @@ from caytu_config.modeles_course import (
     TagCameraConfig,
 )
 from caytu_config.validation import (
-    _MISSING,
     _as_bool,
     _as_int,
     _as_list,

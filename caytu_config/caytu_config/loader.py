@@ -127,7 +127,7 @@ def load_config(dossier=None):
             f"Section obligatoire absente de fosa.yaml : {erreur.args[0]}"
         ) from erreur
 
-    return FosaConfig(
+    configuration = FosaConfig(
         system=SystemConfig.from_mapping(systeme),
         navigation=NavigationConfig.from_mapping(navigation),
         perception=PerceptionConfig.from_mapping(perception),
@@ -144,3 +144,10 @@ def load_config(dossier=None):
         course=CourseConfig.from_mapping(course),
         start_word=StartWordConfig.from_mapping(start_word),
     )
+    manquants = set(configuration.course.tag_ids) - set(
+        configuration.perception.apriltag.ids)
+    if manquants:
+        raise ConfigurationError(
+            f"course.tag_ids : tags {sorted(manquants)} absents de "
+            "perception.apriltag.ids (jamais détectés).")
+    return configuration

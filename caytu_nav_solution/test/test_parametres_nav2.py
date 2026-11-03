@@ -81,7 +81,7 @@ def test_l_empreinte_et_les_vitesses_sont_bornees(robot):
     assert suivi['desired_linear_vel'] <= robot.navigation.max_linear_speed
     assert suivi['rotate_to_heading_angular_vel'] <= robot.navigation.max_angular_speed
     assert parametres['behavior_server']['ros__parameters']['max_rotational_vel'] <= (
-        robot.navigation.max_angular_speed)
+        robot.course.search_spin_speed_rps)
 
 
 def test_le_planificateur_garde_le_cap_demande(robot):

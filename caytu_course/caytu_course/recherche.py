@@ -41,8 +41,13 @@ def _dilater(masque, rayon):
     return somme > 0
 
 
-def points_recherche(grille, clairance_m, pas_m, visites, rayon_visite_m, position):
-    """Liste de (x, y) dans le repère de la grille, du plus proche au plus loin."""
+def points_recherche(grille, clairance_m, pas_m, visites, rayon_visite_m, position,
+                     centre=None, rayon_max=None):
+    """Liste de (x, y) dans le repère de la grille, du plus proche au plus loin.
+
+    centre, rayon_max : zone autorisée (cercle autour du départ), pour ne pas
+    partir vers le public si le lidar voit au-delà de l'arène.
+    """
     attendu = grille.largeur * grille.hauteur
     if len(grille.donnees) != attendu:
         raise ValueError(
@@ -64,5 +69,6 @@ def points_recherche(grille, clairance_m, pas_m, visites, rayon_visite_m, positi
 
     points = [
         (float(x), float(y)) for x, y in zip(xs, ys)
-        if all(math.dist((x, y), visite) > rayon_visite_m for visite in visites)]
+        if all(math.dist((x, y), visite) > rayon_visite_m for visite in visites)
+        and (rayon_max is None or math.dist((x, y), centre) <= rayon_max)]
     return sorted(points, key=lambda point: math.dist(point, position))

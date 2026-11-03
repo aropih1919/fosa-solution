@@ -123,9 +123,11 @@ class EntreesCourse:
                     pose.orientation.x, pose.orientation.y,
                     pose.orientation.z, pose.orientation.w)
                 if cap is not None:
+                    # TF approchée (confiance < 1) : la vue compte comme plus
+                    # lointaine, donc moins que les vues exactes.
                     self._memoire.ajouter(
-                        detection.tag_id, pose.position.x, pose.position.y,
-                        cap, detection.distance_m)
+                        detection.tag_id, pose.position.x, pose.position.y, cap,
+                        detection.distance_m / max(detection.confidence, 0.1))
             if detection.has_pose_robot:
                 pose = detection.pose_robot.pose
                 cap = cap_normale(
@@ -147,12 +149,18 @@ class EntreesCourse:
         self._images.append((_cle_image(message.header), message))
 
     def image_preuve(self, tag_id):
-        """Image où le tag a été détecté ; à défaut la plus récente."""
+        """Image où le tag a été détecté ; à défaut la plus récente de la même
+        caméra (l'autre caméra ne montre pas forcément le tag)."""
         cle = self._stamps_tag.get(tag_id)
+        if cle is None:
+            return self._images[-1][1] if self._images else None
         for cle_image, image in reversed(self._images):
             if cle_image == cle:
                 return image
-        return self._images[-1][1] if self._images else None
+        for cle_image, image in reversed(self._images):
+            if cle_image[2] == cle[2]:
+                return image
+        return None
 
     # ------------------------------------------------------------- carte/scan
     def _recevoir_carte(self, message):

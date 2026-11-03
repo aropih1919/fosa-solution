@@ -41,12 +41,15 @@ def _course_minimale(**surcharges):
         "search_spin_time_sec": 25.0, "search_grid_step_m": 0.8,
         "search_clearance_m": 0.45, "search_visited_radius_m": 0.8,
         "front_guard_m": 0.10, "goal_xy_tolerance_m": 0.08,
-        "goal_yaw_tolerance_deg": 7.0,
+        "goal_yaw_tolerance_deg": 7.0, "tag_lost_timeout_sec": 4.0,
+        "preapproach_margin_m": 0.3, "search_spin_speed_rps": 0.4,
+        "search_max_radius_m": 5.0,
         "alignment": {
             "linear_gain": 0.6, "angular_gain": 1.2, "max_linear_mps": 0.08,
             "max_angular_rps": 0.35, "min_linear_mps": 0.03,
             "min_angular_rps": 0.1, "precision_distance_m": 0.015,
-            "precision_heading_deg": 2.0, "timeout_sec": 20.0,
+            "precision_heading_deg": 2.0, "max_distance_error_m": 0.25,
+            "timeout_sec": 20.0,
             "max_renavigations": 2},
         "slam_map_file": "", "memorized_tags_file": "",
         "tags_output_file": "~/.ros/fosa_tags_course.yaml",
@@ -134,3 +137,12 @@ def test_une_source_d_obstacles_incoherente_est_refusee():
             "obstacle_min_range": 0.1, "obstacle_max_range": 4.0,
             "raytrace_max_range": 3.0, "inf_is_valid": False,
             "global_costmap": True})
+
+
+def test_les_tags_de_la_course_doivent_etre_detectes(tmp_path, monkeypatch):
+    surcharge = tmp_path / "surcharge.yaml"
+    surcharge.write_text("perception:\n  apriltag:\n    ids: [1, 4, 7]\n",
+                         encoding="utf-8")
+    monkeypatch.setenv("FOSA_CONFIG_OVERRIDE", str(surcharge))
+    with pytest.raises(ConfigurationError, match="tag_ids"):
+        load_config(CONFIG)
