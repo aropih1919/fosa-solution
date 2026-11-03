@@ -54,6 +54,7 @@ class DetecteurTags(Node):
         self._repere_robot = self._configuration.system.base_frame
         self._repere_global = self._configuration.system.global_frame
         self._delai_tf = Duration(seconds=tag.tf_timeout_sec)
+        self._retard_max = Duration(seconds=tag.tf_max_lag_sec)
         self._periode = 1.0 / tag.max_rate_hz
         self._periode_image = 1.0 / tag.detection_image_rate_hz
         self._derniere_image = 0.0
@@ -121,17 +122,31 @@ class DetecteurTags(Node):
             self._publicateur_image.publish(message)
 
     def _chercher_tf(self, repere_cible, entete):
-        """(translation, rotation) cible <- caméra à l'instant de l'image, ou None."""
+        """(translation, rotation, exacte) cible <- caméra, ou None.
+
+        À l'instant de l'image si possible ; sinon la dernière transformation
+        connue, si elle n'a pas plus de `tf_max_lag_sec` d'écart avec l'image
+        (odométrie publiée après l'image).
+        """
+        instant = Time.from_msg(entete.stamp)
+        exacte = True
         try:
             transformation = self._memoire_tf.lookup_transform(
-                repere_cible, entete.frame_id, Time.from_msg(entete.stamp),
-                timeout=self._delai_tf)
+                repere_cible, entete.frame_id, instant, timeout=self._delai_tf)
         except TransformException:
-            return None
+            exacte = False
+            try:
+                transformation = self._memoire_tf.lookup_transform(
+                    repere_cible, entete.frame_id, Time())
+            except TransformException:
+                return None
+            ecart = instant - Time.from_msg(transformation.header.stamp)
+            if abs(ecart.nanoseconds) > self._retard_max.nanoseconds:
+                return None
         translation = transformation.transform.translation
         rotation = transformation.transform.rotation
         return ((translation.x, translation.y, translation.z),
-                (rotation.x, rotation.y, rotation.z, rotation.w))
+                (rotation.x, rotation.y, rotation.z, rotation.w), exacte)
 
     def _convertir(self, entete, detection, vers_robot, vers_carte):
         pose = estimer_pose(
@@ -154,12 +169,14 @@ class DetecteurTags(Node):
                       translation, orientation)
         if vers_robot is not None:
             _remplir_pose(tag.pose_robot, entete, self._repere_robot,
-                          *composer(*vers_robot, translation, orientation))
+                          *composer(*vers_robot[:2], translation, orientation))
             tag.has_pose_robot = True
         if vers_carte is not None:
             _remplir_pose(tag.pose_map, entete, self._repere_global,
-                          *composer(*vers_carte, translation, orientation))
+                          *composer(*vers_carte[:2], translation, orientation))
             tag.has_pose_map = True
+            if not vers_carte[2]:
+                tag.confidence = 0.5    # TF approchée : pose map moins fiable
         return tag
 
 

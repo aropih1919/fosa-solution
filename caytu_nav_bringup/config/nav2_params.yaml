@@ -33,7 +33,9 @@ bt_navigator:
       goal_blackboard_id: goal
       path_blackboard_id: path
     bt_loop_duration: 10
-    default_server_timeout: 20
+    # 20 ms (valeur Nav2) : sous charge, les serveurs répondent plus lentement
+    # et le BT abandonne le but (« Timed out ... compute_path_to_pose »).
+    default_server_timeout: 200
     default_cancel_timeout: 20
     error_code_names:
       - compute_path_error_code

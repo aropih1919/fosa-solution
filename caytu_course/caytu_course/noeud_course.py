@@ -161,6 +161,10 @@ class NoeudCourse(Node):
     def _temps_ecoule(self):
         return self._chrono.remaining() <= 0.0
 
+    def _temps(self):
+        """Secondes depuis le départ, sur l'horloge ROS (comme le chrono)."""
+        return self._chrono.elapsed()
+
     # ------------------------------------------------------------- course
     def executer(self):
         self._attendre_ordre_et_depart()
@@ -181,7 +185,16 @@ class NoeudCourse(Node):
             if self._temps_ecoule():
                 break
             cible = self._sequence.cible()
-            resultat = self._traiter_tag(cible)
+            try:
+                resultat = self._traiter_tag(cible)
+            except KeyboardInterrupt:
+                raise
+            except Exception as erreur:  # le budget du tag borne les reprises
+                self.get_logger().error(f'Erreur pendant le tag {cible} : {erreur!r}')
+                self._navigateur.annuler_but()
+                self.arreter_robot()
+                self.traiter_pendant(1.0)
+                continue
             if resultat == 'visite':
                 self._sequence.marquer_visite(cible)
             elif resultat == 'saute':
@@ -213,12 +226,12 @@ class NoeudCourse(Node):
         budget = budget_pour_tag(
             self._chrono.remaining(), self._sequence.restants(),
             self._course.min_tag_budget_sec)
-        echeance = time.monotonic() + budget
+        echeance = self._temps() + budget
         self.get_logger().info(f'Tag {tag_id} : budget {budget:.0f} s.')
         while rclpy.ok():
             if self._temps_ecoule():
                 return 'temps_ecoule'
-            if time.monotonic() > echeance:
+            if self._temps() > echeance:
                 return 'saute'
             if self._memoire.connait(tag_id):
                 resultat = self._visiter(tag_id, echeance)
@@ -237,7 +250,7 @@ class NoeudCourse(Node):
     # ---------------------------------------------------------- recherche
     def _interruption_recherche(self, tag_id, echeance):
         return lambda: (self._memoire.connait(tag_id)
-                        or time.monotonic() > echeance or self._temps_ecoule())
+                        or self._temps() > echeance or self._temps_ecoule())
 
     def _chercher(self, tag_id, echeance):
         """Un pas de recherche : tour sur place, sinon aller au point suivant."""
@@ -297,7 +310,7 @@ class NoeudCourse(Node):
         while rclpy.ok() and renavigations <= course.alignment.max_renavigations:
             if self._temps_ecoule():
                 return 'temps_ecoule'
-            if time.monotonic() > echeance:
+            if self._temps() > echeance:
                 return 'echec'
             tag = self._memoire.pose(tag_id)
             if tag is None:
@@ -309,7 +322,7 @@ class NoeudCourse(Node):
             self.publier_etat('APPROCHE', tag_id, f'{distance:.2f} m du tag')
             resultat = self._navigateur.naviguer_une_fois(
                 x, y, self._configuration.system.global_frame, Pose2D(0.0, 0.0, 0.0),
-                cap=cap, interrompre=lambda: time.monotonic() > echeance)
+                cap=cap, interrompre=lambda: self._temps() > echeance)
             if resultat == 'temps_ecoule':
                 return resultat
             if resultat in ('interrompu', 'arret'):
@@ -337,11 +350,11 @@ class NoeudCourse(Node):
         course = self._course
         x_avant = max(x for x, _ in self._navigation.footprint)
         demi_largeur = max(abs(y) for _, y in self._navigation.footprint)
-        debut = dernier_vu = time.monotonic()
+        debut = dernier_vu = dernier_journal = self._temps()
         stables = 0
         self.publier_etat('ALIGNEMENT', tag_id)
         while rclpy.ok():
-            maintenant = time.monotonic()
+            maintenant = self._temps()
             if self._temps_ecoule():
                 self.arreter_robot()
                 return 'temps_ecoule'
@@ -352,13 +365,24 @@ class NoeudCourse(Node):
             if vue is None:
                 self.publier_vitesse(0.0, 0.0)
                 if maintenant - dernier_vu > DELAI_TAG_PERDU:
+                    self.get_logger().warning(
+                        f'Tag {tag_id} invisible depuis {DELAI_TAG_PERDU:.0f} s '
+                        'pendant l\'alignement.')
                     return 'perdu'
                 self.traiter_pendant(PERIODE_BOUCLE)
                 continue
             dernier_vu = maintenant
-            commande = commande_alignement(erreurs_visite(
+            erreurs = erreurs_visite(
                 vue.x, vue.y, vue.cap, self._navigation.center_offset_x,
-                course.visit_distance_m), self._reglages)
+                course.visit_distance_m)
+            commande = commande_alignement(erreurs, self._reglages)
+            if maintenant - dernier_journal >= 1.0:
+                dernier_journal = maintenant
+                self.get_logger().info(
+                    f'Alignement tag {tag_id} : distance {erreurs.distance:+.3f} m, '
+                    f'latéral {erreurs.laterale:+.3f} m, cap '
+                    f'{math.degrees(erreurs.cap):+.1f}° -> {commande.etat} '
+                    f'(v={commande.lineaire:+.2f}, w={commande.angulaire:+.2f})')
             if commande.etat == 'renaviguer':
                 self.arreter_robot()
                 return 'renaviguer'
@@ -384,8 +408,8 @@ class NoeudCourse(Node):
         self.arreter_robot()
         self._statut.signaler_visite(tag_id, self._entrees.image_preuve(tag_id))
         self.publier_etat('VISITE', tag_id, f'maintien {self._course.hold_sec:.0f} s')
-        fin = time.monotonic() + self._course.hold_sec
-        while rclpy.ok() and time.monotonic() < fin and not self._temps_ecoule():
+        fin = self._temps() + self._course.hold_sec
+        while rclpy.ok() and self._temps() < fin and not self._temps_ecoule():
             self.publier_vitesse(0.0, 0.0)
             self.traiter_pendant(0.2)
         return 'visite'
@@ -444,6 +468,9 @@ def main(args=None):
             rclpy.spin_once(noeud, timeout_sec=0.5)
     except KeyboardInterrupt:
         pass
+    except Exception as erreur:
+        # Un Ctrl-C reçu pendant un appel C++ de rclpy arrive sous cette forme.
+        noeud.get_logger().error(f'Arrêt de la course : {erreur!r}')
     finally:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)

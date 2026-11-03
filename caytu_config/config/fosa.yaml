@@ -119,6 +119,9 @@ perception:
     detection_image_topic: /perception/tags/image   # image de preuve pour le statut
     detection_image_rate_hz: 2.0
     tf_timeout_sec: 0.1
+    # Si l'odométrie arrive après l'image : dernière TF acceptée jusqu'à ce
+    # retard (pose marquée moins fiable). Mesuré en simulation : ~0,3 s.
+    tf_max_lag_sec: 0.5
     # Les deux RealSense détectent ; la caméra haute est à confirmer sur place.
     cameras:
       - name: camera1
