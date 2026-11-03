@@ -143,8 +143,8 @@ def test_navigation_launch_starts_everything_in_one_lifecycle_manager():
         assert executable in text
     assert "TOPIC_VITESSE = CONFIG.navigation.cmd_vel_topic" in text
     from caytu_config import load_config
-    assert load_config().navigation.cmd_vel_topic == (
-        "/robot_base_controller/cmd_vel_unstamped")
+    # Profil par défaut = robot réel : Twist sur /cmd_vel (obstacle_avoidance).
+    assert load_config().navigation.cmd_vel_topic == "/cmd_vel"
     assert "navigate_bounded_recovery.xml" in text
     assert "get_package_share_directory" in text
     assert 'choices=["rpp", "dwb", "mppi"]' in text

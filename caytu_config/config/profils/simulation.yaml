@@ -1,0 +1,34 @@
+# Profil Gazebo (monde officiel PARC) : surcharge de fosa.yaml.
+# Activé par FOSA_CONFIG_OVERRIDE ou `FOSA_PROFIL=simulation ./run.sh ...`.
+# Les listes remplacent celles de fosa.yaml ; les mappings se complètent.
+
+system:
+  deployment: simulation
+  use_sim_time: true
+  base_frame: base_footprint
+  ros_domain_id: 42
+
+navigation:
+  # Sortie du filtre d'auto-détection lancé par course.launch.py en simulation.
+  scan_topic: /scan_filtered
+  cmd_vel_topic: /robot_base_controller/cmd_vel_unstamped
+  odom_topic: /odom
+  laser_self_filter: true
+  obstacle_sources:
+    - name: lidar
+      topic: /scan_filtered
+      enabled: true
+      obstacle_min_range: 0.35      # le lidar simulé voit les roues sous 0,35 m
+      obstacle_max_range: 3.5
+      raytrace_max_range: 4.0
+      global_costmap: true
+
+perception:
+  apriltag:
+    cameras:
+      - name: haute
+        color_topic: /top_camera_color/image_raw
+        info_topic: /top_camera_color/camera_info
+
+start_word:
+  enabled: false                    # pas de ReSpeaker dans Gazebo

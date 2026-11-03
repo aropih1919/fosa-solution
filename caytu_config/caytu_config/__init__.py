@@ -12,6 +12,14 @@ jamais coder une coordonnée, un seuil, un topic ou un nom de modèle en dur.
 
 from caytu_config.errors import ConfigurationError
 from caytu_config.loader import config_directory, load_config
+from caytu_config.modeles_course import (
+    AlignmentConfig,
+    CourseConfig,
+    ObstacleSourceConfig,
+    StartWordConfig,
+    StatusTopicsConfig,
+    TagCameraConfig,
+)
 from caytu_config.models import (
     AprilTagConfig,
     AudioConfig,
@@ -39,7 +47,13 @@ from caytu_config.models import (
 )
 
 __all__ = [
+    "AlignmentConfig",
     "AprilTagConfig",
+    "CourseConfig",
+    "ObstacleSourceConfig",
+    "StartWordConfig",
+    "StatusTopicsConfig",
+    "TagCameraConfig",
     "AudioConfig",
     "ConfigurationError",
     "DialogueConfig",

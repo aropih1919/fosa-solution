@@ -6,106 +6,34 @@ valeurs par défaut vivent dans `config/fosa.yaml`, jamais dans les nœuds.
 """
 
 from dataclasses import dataclass
-import unicodedata
 
 from caytu_config.errors import ConfigurationError
+from caytu_config.modeles_course import (
+    _as_int_list,
+    CourseConfig,
+    ObstacleSourceConfig,
+    StartWordConfig,
+    TagCameraConfig,
+)
+from caytu_config.validation import (
+    _MISSING,
+    _as_bool,
+    _as_int,
+    _as_list,
+    _as_number,
+    _as_numbers,
+    _as_str,
+    _check_keys,
+    _choice,
+    _get,
+    _normaliser,
+    _section,
+)
 
-_MISSING = object()
-
-DEPLOYMENTS = ("local", "remote_pc", "simulation")
+DEPLOYMENTS = ("robot", "local", "remote_pc", "simulation")
 PROVIDERS = ("local", "api", "auto")
 MAP_MODES = ("auto", "always", "never")
 APRILTAG_DETECTORS = ("opencv", "apriltag_ros")
-
-
-# --------------------------------------------------------------------- outils
-def _section(value, path):
-    if not isinstance(value, dict):
-        raise ConfigurationError(f"{path} doit être un mapping YAML.")
-    return value
-
-
-def _check_keys(data, allowed, path):
-    unknown = sorted(set(data) - set(allowed))
-    if unknown:
-        raise ConfigurationError(
-            f"{path}: clé(s) inconnue(s) : {', '.join(unknown)}")
-
-
-def _get(data, key, path, default=_MISSING):
-    if key in data:
-        return data[key]
-    if default is _MISSING:
-        raise ConfigurationError(f"{path}.{key} est obligatoire.")
-    return default
-
-
-def _as_str(value, path, allow_empty=False):
-    if not isinstance(value, str):
-        raise ConfigurationError(f"{path} doit être une chaîne.")
-    if not allow_empty and not value.strip():
-        raise ConfigurationError(f"{path} ne doit pas être vide.")
-    return value
-
-
-def _as_bool(value, path):
-    if not isinstance(value, bool):
-        raise ConfigurationError(f"{path} doit être un booléen.")
-    return value
-
-
-def _as_int(value, path, minimum=None, maximum=None):
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ConfigurationError(f"{path} doit être un entier.")
-    if minimum is not None and value < minimum:
-        raise ConfigurationError(f"{path} doit être >= {minimum}.")
-    if maximum is not None and value > maximum:
-        raise ConfigurationError(f"{path} doit être <= {maximum}.")
-    return value
-
-
-def _as_number(value, path, minimum=None, maximum=None, positive=False):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigurationError(f"{path} doit être un nombre.")
-    value = float(value)
-    if positive and value <= 0.0:
-        raise ConfigurationError(f"{path} doit être strictement positif.")
-    if minimum is not None and value < minimum:
-        raise ConfigurationError(f"{path} doit être >= {minimum}.")
-    if maximum is not None and value > maximum:
-        raise ConfigurationError(f"{path} doit être <= {maximum}.")
-    return value
-
-
-def _as_list(value, path):
-    if not isinstance(value, list):
-        raise ConfigurationError(f"{path} doit être une liste.")
-    return value
-
-
-def _as_numbers(value, path, positive=False):
-    elements = _as_list(value, path)
-    if not elements:
-        raise ConfigurationError(f"{path} ne doit pas être vide.")
-    return tuple(
-        _as_number(element, f"{path}[{index}]", positive=positive)
-        for index, element in enumerate(elements))
-
-
-def _choice(value, choices, path):
-    value = _as_str(value, path)
-    if value not in choices:
-        raise ConfigurationError(
-            f"{path} doit valoir l'un de : {', '.join(choices)}.")
-    return value
-
-
-def _normaliser(texte):
-    """Minuscules, sans accents, espaces uniques : comparaison de lieux."""
-    decompose = unicodedata.normalize("NFKD", texte)
-    sans_accents = "".join(c for c in decompose if not unicodedata.combining(c))
-    return " ".join(
-        sans_accents.casefold().replace("_", " ").replace("-", " ").split())
 
 
 # -------------------------------------------------------------------- système
@@ -143,6 +71,31 @@ class SystemConfig:
 
 
 # ---------------------------------------------------------------- navigation
+def _as_footprint(value, path):
+    """Polygone [[x, y], ...] d'au moins trois sommets, dans base_frame."""
+    sommets = _as_list(value, path)
+    if len(sommets) < 3:
+        raise ConfigurationError(f"{path} doit contenir au moins 3 sommets.")
+    polygone = []
+    for index, sommet in enumerate(sommets):
+        if len(_as_list(sommet, f"{path}[{index}]")) != 2:
+            raise ConfigurationError(f"{path}[{index}] doit être un couple [x, y].")
+        polygone.append(_as_numbers(sommet, f"{path}[{index}]"))
+    return tuple(polygone)
+
+
+def _as_obstacle_sources(value, path):
+    sources = tuple(
+        ObstacleSourceConfig.from_mapping(source, f"{path}[{index}]")
+        for index, source in enumerate(_as_list(value, path)))
+    if not any(source.enabled for source in sources):
+        raise ConfigurationError(f"{path}: au moins une source doit être active.")
+    noms = [source.name for source in sources]
+    if len(set(noms)) != len(noms):
+        raise ConfigurationError(f"{path}: noms de sources en double.")
+    return sources
+
+
 @dataclass(frozen=True)
 class NavigationConfig:
     map_yaml: str
@@ -180,6 +133,15 @@ class NavigationConfig:
     stop_repeat_count: int
     feedback_log_period_sec: float
     floor_line_distance: float
+    odom_topic: str
+    odom_frame: str
+    footprint: tuple
+    footprint_padding: float
+    center_offset_x: float
+    max_linear_speed: float
+    max_angular_speed: float
+    laser_self_filter: bool
+    obstacle_sources: tuple
 
     @classmethod
     def from_mapping(cls, data, path="navigation"):
@@ -197,7 +159,9 @@ class NavigationConfig:
             "guiding_wait_sec", "blank_map_resolution", "blank_map_margin",
             "clock_wait_sec", "cancel_timeout_sec", "bringup_stop_timeouts",
             "stop_repeat_count", "feedback_log_period_sec",
-            "floor_line_distance"), path)
+            "floor_line_distance", "odom_topic", "odom_frame", "footprint",
+            "footprint_padding", "center_offset_x", "max_linear_speed",
+            "max_angular_speed", "laser_self_filter", "obstacle_sources"), path)
         return cls(
             map_yaml=_as_str(
                 _get(data, "map_yaml", path, ""), f"{path}.map_yaml",
@@ -296,6 +260,29 @@ class NavigationConfig:
             floor_line_distance=_as_number(
                 _get(data, "floor_line_distance", path),
                 f"{path}.floor_line_distance", minimum=0.0),
+            odom_topic=_as_str(
+                _get(data, "odom_topic", path), f"{path}.odom_topic"),
+            odom_frame=_as_str(
+                _get(data, "odom_frame", path), f"{path}.odom_frame"),
+            footprint=_as_footprint(
+                _get(data, "footprint", path), f"{path}.footprint"),
+            footprint_padding=_as_number(
+                _get(data, "footprint_padding", path),
+                f"{path}.footprint_padding", minimum=0.0),
+            center_offset_x=_as_number(
+                _get(data, "center_offset_x", path), f"{path}.center_offset_x"),
+            max_linear_speed=_as_number(
+                _get(data, "max_linear_speed", path),
+                f"{path}.max_linear_speed", positive=True, maximum=1.5),
+            max_angular_speed=_as_number(
+                _get(data, "max_angular_speed", path),
+                f"{path}.max_angular_speed", positive=True, maximum=2.0),
+            laser_self_filter=_as_bool(
+                _get(data, "laser_self_filter", path),
+                f"{path}.laser_self_filter"),
+            obstacle_sources=_as_obstacle_sources(
+                _get(data, "obstacle_sources", path),
+                f"{path}.obstacle_sources"),
         )
 
 
@@ -308,14 +295,44 @@ class AprilTagConfig:
     detector: str
     calibration_samples: int
     calibration_file: str
+    ids: tuple
+    min_marker_distance_rate: float
+    max_rate_hz: float
+    detection_image_topic: str
+    tf_timeout_sec: float
+    cameras: tuple
 
     @classmethod
     def from_mapping(cls, data, path="perception.apriltag"):
         data = _section(data, path)
         _check_keys(data, (
             "family", "size_m", "max_distance_m", "detector",
-            "calibration_samples", "calibration_file"), path)
+            "calibration_samples", "calibration_file", "ids",
+            "min_marker_distance_rate", "max_rate_hz",
+            "detection_image_topic", "tf_timeout_sec", "cameras"), path)
+        cameras = tuple(
+            TagCameraConfig.from_mapping(camera, f"{path}.cameras[{index}]")
+            for index, camera in enumerate(
+                _as_list(_get(data, "cameras", path), f"{path}.cameras")))
+        if not cameras:
+            raise ConfigurationError(f"{path}.cameras ne doit pas être vide.")
+        if len({camera.name for camera in cameras}) != len(cameras):
+            raise ConfigurationError(f"{path}.cameras: noms en double.")
         return cls(
+            ids=_as_int_list(_get(data, "ids", path), f"{path}.ids"),
+            min_marker_distance_rate=_as_number(
+                _get(data, "min_marker_distance_rate", path),
+                f"{path}.min_marker_distance_rate", 0.0, 1.0),
+            max_rate_hz=_as_number(
+                _get(data, "max_rate_hz", path), f"{path}.max_rate_hz",
+                positive=True),
+            detection_image_topic=_as_str(
+                _get(data, "detection_image_topic", path),
+                f"{path}.detection_image_topic"),
+            tf_timeout_sec=_as_number(
+                _get(data, "tf_timeout_sec", path), f"{path}.tf_timeout_sec",
+                positive=True),
+            cameras=cameras,
             family=_as_str(_get(data, "family", path), f"{path}.family"),
             size_m=_as_number(
                 _get(data, "size_m", path), f"{path}.size_m", positive=True),
@@ -1182,3 +1199,5 @@ class FosaConfig:
     knowledge: KnowledgeConfig
     prompts: PromptsConfig
     secrets: Secrets
+    course: CourseConfig
+    start_word: StartWordConfig

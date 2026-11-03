@@ -2,13 +2,17 @@
 # Toute valeur modifiable vit ici. Les nœuds Python ne doivent jamais coder
 # une coordonnée, un seuil, un topic, un modèle ou une durée en dur.
 # Les secrets (clés API) ne vont JAMAIS dans ce fichier : variables d'environnement.
+#
+# Valeurs par défaut = ROBOT RÉEL (inventaire ROS du 02/11, ROS_DOMAIN_ID=0).
+# Simulation Gazebo : FOSA_CONFIG_OVERRIDE=config/profils/simulation.yaml
+# (fait automatiquement par `FOSA_PROFIL=simulation ./run.sh ...`).
 
 system:
-  deployment: simulation          # local | remote_pc | simulation
-  use_sim_time: true
-  global_frame: map
-  base_frame: base_footprint
-  ros_domain_id: 42
+  deployment: robot               # robot | local | remote_pc | simulation
+  use_sim_time: false             # le robot n'a pas d'horloge Gazebo
+  global_frame: map               # publié par slam_toolbox
+  base_frame: base_link           # le robot réel n'a pas de base_footprint
+  ros_domain_id: 0
   clock_topic: /clock
 
 navigation:
@@ -36,9 +40,43 @@ navigation:
   bringup_package: caytu_nav_bringup
   bringup_launch: solution_bringup.launch.py
 
-  scan_topic: /scan
+  scan_topic: /scan_filtered      # filtre d'auto-détection des organisateurs
   amcl_pose_topic: /amcl_pose
-  cmd_vel_topic: /robot_base_controller/cmd_vel_unstamped
+  cmd_vel_topic: /cmd_vel         # Twist, relu par obstacle_avoidance (organisateurs)
+  odom_topic: /botwheel_explorer/odom
+  odom_frame: odom
+  # Empreinte dans base_frame (x vers l'avant). Valeurs du URDF simulé :
+  # À MESURER sur le robot réel avant la course.
+  footprint: [[0.22, 0.25], [0.22, -0.25], [-0.31, -0.25], [-0.31, 0.25]]
+  footprint_padding: 0.03
+  center_offset_x: 0.0            # centre géométrique du robot dans base_frame
+  max_linear_speed: 0.30          # m/s, arène de 5 m avec des personnes
+  max_angular_speed: 0.80         # rad/s
+  laser_self_filter: false        # true seulement en simulation (lidar sous le châssis)
+  # Scans utilisés par les costmaps. Les scans caméra des organisateurs sont
+  # désactivés tant que leur contenu n'a pas été vérifié sur le robot.
+  obstacle_sources:
+    - name: lidar
+      topic: /scan_filtered
+      enabled: true
+      obstacle_min_range: 0.12
+      obstacle_max_range: 3.5
+      raytrace_max_range: 4.0
+      global_costmap: true
+    - name: camera1
+      topic: /camera1/scan
+      enabled: false
+      obstacle_min_range: 0.2
+      obstacle_max_range: 2.5
+      raytrace_max_range: 3.0
+      global_costmap: true
+    - name: camera2
+      topic: /camera2/scan
+      enabled: false
+      obstacle_min_range: 0.2
+      obstacle_max_range: 2.5
+      raytrace_max_range: 3.0
+      global_costmap: true
   global_costmap_clear_service: /global_costmap/clear_entirely_global_costmap
   local_costmap_clear_service: /local_costmap/clear_entirely_local_costmap
 
@@ -69,11 +107,25 @@ perception:
 
   apriltag:
     family: 36h11
-    size_m: 0.18
-    max_distance_m: 4.0
+    size_m: 0.165                 # côté du carré noir (règlement : 16,5 cm)
+    ids: [1, 4, 7, 9]             # aucun autre tag dans l'arène
+    max_distance_m: 4.5
     detector: opencv              # opencv | apriltag_ros
     calibration_samples: 10
     calibration_file: ~/.ros/fosa_tag_calibration.yaml
+    # Évite le rejet d'un tag à marge blanche d'un bit posé sur un fond sombre.
+    min_marker_distance_rate: 0.01
+    max_rate_hz: 10.0             # cadence max de détection par caméra
+    detection_image_topic: /perception/tags/image
+    tf_timeout_sec: 0.1
+    # Les deux RealSense détectent ; la caméra haute est à confirmer sur place.
+    cameras:
+      - name: camera1
+        color_topic: /camera1/camera1/color/image_raw
+        info_topic: /camera1/camera1/color/camera_info
+      - name: camera2
+        color_topic: /camera2/camera2/color/image_raw
+        info_topic: /camera2/camera2/color/camera_info
 
   yolo:
     enabled: true                 # install.sh --models télécharge et exporte le modèle ONNX
@@ -187,3 +239,63 @@ mission:
   emergency_location: infirmerie
   default_wait_sec: 20.0
   emergency_keywords: [mal, blessé, blessure, secours, urgence, tomber, tombé, évanoui, sang]
+
+# --------------------------------------------------------------------------
+# Course officielle de la phase réelle (guide des équipes PARC 2026).
+course:
+  tag_ids: [1, 4, 7, 9]
+  # Ordre publié par les organisateurs : nom et type À CONFIRMER.
+  # string : "7,1,9,4", "[7, 1, 9, 4]" ou JSON {"order": [...]}.
+  order_topic: /parc/tag_order
+  order_type: string              # string | int32_multi_array
+  start_topic: /fosa/course/depart   # départ par commande (./run.sh depart) ou par la voix
+  state_topic: /fosa/course/etat
+  # Statut lu par les juges : À REMPLACER par le paquet officiel (caytu_course/statut.py).
+  status:
+    start_topic: /fosa/statut/depart
+    visit_topic: /fosa/statut/tag
+    image_topic: /fosa/statut/image
+    finish_topic: /fosa/statut/fin
+  time_limit_sec: 600.0
+  stop_margin_sec: 5.0
+  nav2_ready_timeout_sec: 60.0
+  visit_distance_m: 0.50          # règlement : centre du robot à 0,5 m du tag
+  approach_distance_m: 0.90       # pré-approche si le tag n'a été vu que de loin
+  distance_tolerance_m: 0.04
+  lateral_tolerance_m: 0.06
+  heading_tolerance_deg: 5.0      # règlement : ±12°
+  stable_cycles: 5                # cycles consécutifs dans les tolérances
+  hold_sec: 5.0                   # maintien après le signalement (À CONFIRMER)
+  min_tag_budget_sec: 45.0
+  detection_max_age_sec: 0.6
+  search_spin_time_sec: 25.0
+  search_grid_step_m: 0.8
+  search_clearance_m: 0.45
+  search_visited_radius_m: 0.8
+  front_guard_m: 0.10
+  alignment:
+    linear_gain: 0.6
+    angular_gain: 1.2
+    max_linear_mps: 0.08
+    max_angular_rps: 0.35
+    timeout_sec: 20.0
+    max_renavigations: 2
+  # Vide = cartographie en direct. Sinon : posegraph slam_toolbox sérialisé
+  # pendant les essais (seulement si les cartes pré-construites sont autorisées).
+  slam_map_file: ""
+  # Vide = aucune pose de tag mémorisée (à n'utiliser que si c'est autorisé).
+  memorized_tags_file: ""
+  tags_output_file: ~/.ros/fosa_tags_course.yaml
+
+# Démarrage vocal hors ligne (bonus de 5 points) : Vosk, grammaire restreinte.
+start_word:
+  enabled: true
+  audio_topic: /speech_audio      # respeaker_node : une phrase par message
+  mode: utterance                 # utterance | stream (ex. /audio)
+  sample_rate: 16000              # À CONFIRMER (format non documenté)
+  channels: 1
+  channel_index: 0
+  sample_width: 2
+  words: [allez]
+  model_path: models/vosk-model-small-fr-0.22   # relatif à caytu_config/config
+  min_confidence: 0.80

@@ -1,6 +1,7 @@
 """Tests du chargeur et des schémas de configuration Fosa."""
 
 from pathlib import Path
+import re
 import shutil
 
 import pytest
@@ -34,14 +35,14 @@ def _modifier_yaml(chemin, modification):
 
 def test_la_configuration_par_defaut_est_valide():
     configuration = load_config(CONFIG)
-    assert configuration.system.deployment == "simulation"
-    assert configuration.system.use_sim_time is True
+    assert configuration.system.deployment == "robot"
+    assert configuration.system.use_sim_time is False
     assert configuration.navigation.controller == "rpp"
     assert configuration.navigation.profile == "balanced"
     assert configuration.navigation.localization == "odom_imu"
     assert configuration.navigation.time_limit_sec == 600.0
     assert configuration.perception.apriltag.family == "36h11"
-    assert configuration.perception.apriltag.size_m == 0.18
+    assert configuration.perception.apriltag.size_m == 0.165
     assert configuration.dialogue.llm.provider == "local"
     assert configuration.audio.sample_rate == 16000
     assert "fr" in configuration.dialogue.languages
@@ -103,8 +104,10 @@ def test_un_alias_en_double_est_refuse():
             "world": "test",
             "frame": "map",
             "locations": [
-                {"name": "a", "aliases": ["meme"]},
-                {"name": "b", "aliases": ["meme"]},
+                {"name": "a", "aliases": ["meme"], "category": "service",
+                 "approach_offset_m": 0.8},
+                {"name": "b", "aliases": ["meme"], "category": "service",
+                 "approach_offset_m": 0.8},
             ],
         })
 
@@ -115,15 +118,18 @@ def test_un_tag_ne_peut_pas_designer_deux_lieux():
             "world": "test",
             "frame": "map",
             "locations": [
-                {"name": "a", "tag_ids": [7]},
-                {"name": "b", "tag_ids": [7]},
+                {"name": "a", "tag_ids": [7], "category": "service",
+                 "approach_offset_m": 0.8},
+                {"name": "b", "tag_ids": [7], "category": "service",
+                 "approach_offset_m": 0.8},
             ],
         })
 
 
 def test_un_lieu_sans_pose_reste_utilisable_par_tag():
     lieu = Location.from_mapping(
-        {"name": "accueil", "tag_ids": [10]}, "locations[0]")
+        {"name": "accueil", "tag_ids": [10], "category": "service",
+         "approach_offset_m": 0.8}, "locations[0]")
     assert lieu.approach_pose is None
     assert lieu.tag_ids == (10,)
 
@@ -138,7 +144,7 @@ def test_l_override_est_fusionne_sans_ecraser_le_reste(tmp_path, monkeypatch):
     configuration = load_config(dossier)
     assert configuration.navigation.time_limit_sec == 120.0
     assert configuration.navigation.controller == "rpp"
-    assert configuration.system.deployment == "simulation"
+    assert configuration.system.deployment == "robot"
 
 
 def test_le_mode_de_deploiement_est_surchargeable(tmp_path, monkeypatch):
@@ -157,10 +163,12 @@ def test_les_secrets_viennent_uniquement_de_l_environnement(monkeypatch):
 
 
 def test_aucun_secret_dans_les_yaml_versionnes():
-    for chemin in CONFIG.glob("*.yaml"):
+    # Forme d'une clé OpenAI : « sk- » suivi d'au moins 20 caractères.
+    cle_api = re.compile(r"\bsk-[a-z0-9_-]{20,}")
+    for chemin in CONFIG.rglob("*.yaml"):
         texte = chemin.read_text(encoding="utf-8").lower()
         assert "api_key:" not in texte
-        assert "sk-" not in texte
+        assert not cle_api.search(texte), chemin
 
 
 def test_le_dossier_est_surchargeable(monkeypatch, tmp_path):

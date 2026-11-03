@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 
 from caytu_config.errors import ConfigurationError
+from caytu_config.modeles_course import CourseConfig, StartWordConfig
 from caytu_config.models import (
     AudioConfig,
     DialogueConfig,
@@ -119,6 +120,8 @@ def load_config(dossier=None):
         audio = fosa["audio"]
         dialogue = fosa["dialogue"]
         mission = fosa["mission"]
+        course = fosa["course"]
+        start_word = fosa["start_word"]
     except KeyError as erreur:
         raise ConfigurationError(
             f"Section obligatoire absente de fosa.yaml : {erreur.args[0]}"
@@ -138,4 +141,6 @@ def load_config(dossier=None):
         prompts=PromptsConfig.from_mapping(
             _read_yaml(base / "prompts.yaml")),
         secrets=_secrets(),
+        course=CourseConfig.from_mapping(course),
+        start_word=StartWordConfig.from_mapping(start_word),
     )
