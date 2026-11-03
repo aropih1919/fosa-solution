@@ -99,7 +99,8 @@ class EntreesCourse:
             return
         if ordre == self.ordre:
             return
-        if not self._attente_depart():
+        # Départ par commande avant l'ordre : le premier ordre reste accepté.
+        if self.ordre is not None and not self._attente_depart():
             self._node.get_logger().warning(
                 f'Nouvel ordre {list(ordre)} ignoré : la course a commencé.')
             return
