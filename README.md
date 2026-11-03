@@ -5,9 +5,17 @@ Solution globale pour le robot d'accueil et de guidage CAYTU Sito-É combinant n
 **Pays :** Madagascar
 **Équipe FOSA**
 
+> [!IMPORTANT]
+> **Phase réelle (robot physique, 3–6 novembre)** : la solution de course est
+> le paquet `caytu_course` (`./run.sh course`, départ `./run.sh depart` ou
+> « allez »). Installation, lancement, check-lists de créneau et questions aux
+> organisateurs : **[docs/PHASE_REELLE.md](docs/PHASE_REELLE.md)**. La
+> configuration par défaut est celle du robot réel ; Gazebo :
+> `FOSA_PROFIL=simulation`.
+
 ---
 
-## 1. Architecture des 7 paquets
+## 1. Architecture des paquets
 
 Le projet est conçu de façon modulaire et lisible :
 
@@ -19,6 +27,7 @@ Le projet est conçu de façon modulaire et lisible :
 | [`caytu_perception`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_perception) | **Vision et détection d'obstacles** : détection de balises AprilTag, classification 3D par nuages de points (personnes vs mobilier) et suivi de visiteurs. |
 | [`caytu_assistant`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_assistant) | **Intelligence et interaction vocale** : reconnaissance vocale (Whisper local/API), compréhension contrainte avec LangChain (Ollama local ou API compatible OpenAI), dispatcher d'actions déterministe et synthèse vocale (Piper/API). |
 | [`caytu_nav_solution`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_nav_solution) | **Solution de navigation** : point d'entrée officiel Phase 1 (`task_solution.py`) et client d'action `Nav2Navigator` réutilisable. |
+| [`caytu_course`](caytu_course) | **Course de la phase réelle** : ordre des tags, départ (commande ou voix Vosk), SLAM + Nav2, recherche, alignement à 0,5 m, statut. |
 | [`caytu_nav_bringup`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_nav_bringup) | **Bringup matériel et Nav2** : filtrage des capteurs (masquage châssis LiDAR, caméras), profils de contrôleurs (RPP, DWB) et localisation odom+IMU. |
 
 > [!IMPORTANT]

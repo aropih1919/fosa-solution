@@ -10,8 +10,20 @@ afficher_aide() {
     cat <<'AIDE'
 Usage : ./run.sh [MODE] [arguments ROS]
 
-Modes disponibles :
-  complet       Gazebo PARC et assistant vocal complet (mode par défaut)
+Modes de la course (phase réelle, robot réel par défaut) :
+  course        SLAM + Nav2 + détection des tags + mot de départ + mission
+  cartographie  idem sans la mission (essais : carte, réglages, rosbag)
+  depart        donner le départ par commande (la mission doit attendre)
+  ordre-test O  publier un ordre de test, ex. "7,1,9,4" (ESSAIS SEULEMENT)
+  etat          suivre l'état de la course
+  sauver-carte  sérialiser la carte SLAM (option : nom du fichier)
+  diagnostic-robot  vérifier topics, TF, caméras, audio (premier créneau)
+
+Profils : FOSA_PROFIL=simulation pour Gazebo (sinon robot réel).
+Espace de travail de base du robot : FOSA_BASE_WS=<dossier> (sourcé d'abord).
+
+Modes hérités (simulation, phase 1 et assistant) :
+  complet       Gazebo PARC et assistant vocal complet
   navigation    tâche officielle surveillée, avec résultats conservés
   assistant     assistant complet sur un robot ou simulateur déjà actif
   tts [TEXTE]   prononcer un texte avec le fournisseur TTS configuré
@@ -22,7 +34,9 @@ Modes disponibles :
   diagnostic    lancer tools/diag_nav.py
 
 Exemples :
-  ./run.sh
+  ./run.sh course
+  ./run.sh depart
+  FOSA_PROFIL=simulation ./run.sh course
   ./run.sh complet input_mode:=microphone
   ./run.sh assistant input_mode:=text
   ./run.sh gazebo
@@ -38,19 +52,19 @@ mode="${1:-}"
 if [[ -z "$mode" ]]; then
     if [[ -t 0 ]]; then
         echo "Que souhaitez-vous lancer ?"
-        select choix in "solution complète" "navigation officielle" "assistant seul" "test TTS" "benchmark" "quitter"; do
+        select choix in "course" "cartographie (sans mission)" "départ par commande" "diagnostic robot" "quitter"; do
             case "$REPLY" in
-                1) mode="complet"; break ;;
-                2) mode="navigation"; break ;;
-                3) mode="assistant"; break ;;
-                4) mode="tts"; break ;;
-                5) mode="benchmark"; break ;;
-                6) exit 0 ;;
-                *) echo "Choisissez un numéro de 1 à 6." ;;
+                1) mode="course"; break ;;
+                2) mode="cartographie"; break ;;
+                3) mode="depart"; break ;;
+                4) mode="diagnostic-robot"; break ;;
+                5) exit 0 ;;
+                *) echo "Choisissez un numéro de 1 à 5." ;;
             esac
         done
     else
-        mode="complet"
+        afficher_aide >&2
+        exit 2
     fi
 fi
 if (($#)); then shift; fi
@@ -67,8 +81,21 @@ fi
 
 set +u
 source "/opt/ros/$ROS_DISTRO/setup.bash"
+# Espace de travail de base du robot (paquets des organisateurs) : sourcé avant
+# le nôtre pour que nos paquets restent prioritaires.
+if [[ -n "${FOSA_BASE_WS:-}" ]]; then
+    for script in "$FOSA_BASE_WS/install/setup.bash" "$FOSA_BASE_WS/setup.bash"; do
+        if [[ -f "$script" ]]; then source "$script"; break; fi
+    done
+fi
 source "$ESPACE_TRAVAIL/install/setup.bash"
 export FOSA_CONFIG_DIR="${FOSA_CONFIG_DIR:-$DOSSIER_SCRIPT/caytu_config/config}"
+case "${FOSA_PROFIL:-robot}" in
+    robot) ;;
+    simulation)
+        export FOSA_CONFIG_OVERRIDE="${FOSA_CONFIG_OVERRIDE:-$FOSA_CONFIG_DIR/profils/simulation.yaml}" ;;
+    *) echo "Profil inconnu : $FOSA_PROFIL (robot | simulation)" >&2; exit 2 ;;
+esac
 if [[ -f "$ESPACE_TRAVAIL/.venv/bin/activate" ]]; then
     source "$ESPACE_TRAVAIL/.venv/bin/activate"
     DOSSIER_PAQUETS_PYTHON="$("$ESPACE_TRAVAIL/.venv/bin/python" -c \
@@ -80,15 +107,13 @@ if [[ -f "$ESPACE_TRAVAIL/.venv/bin/activate" ]]; then
 fi
 set -u
 
+# Valeur lue dans la configuration active (profil compris) : le robot est sur
+# le domaine 0 ; un ROS_DOMAIN_ID déjà exporté reste prioritaire.
+lire_config() {
+    python3 -c "from caytu_config import load_config; c = load_config(); print($1)"
+}
 if [[ -z "${ROS_DOMAIN_ID:-}" ]]; then
-    export ROS_DOMAIN_ID="$(python3 - "$DOSSIER_SCRIPT/caytu_config/config/fosa.yaml" <<'PY'
-import sys
-import yaml
-
-with open(sys.argv[1], encoding="utf-8") as fichier:
-    print(yaml.safe_load(fichier)["system"]["ros_domain_id"])
-PY
-)"
+    export ROS_DOMAIN_ID="$(lire_config c.system.ros_domain_id)"
 fi
 
 verifier_paquet() {
@@ -112,6 +137,45 @@ arreter_simulation() {
 }
 
 case "$mode" in
+    course)
+        verifier_paquet caytu_course
+        echo "Course : profil ${FOSA_PROFIL:-robot}, ROS_DOMAIN_ID=$ROS_DOMAIN_ID."
+        echo "Le robot attend l'ordre puis le départ (./run.sh depart ou « allez »)."
+        ros2 launch caytu_course course.launch.py "$@"
+        ;;
+    cartographie)
+        verifier_paquet caytu_course
+        ros2 launch caytu_course course.launch.py mission:=false "$@"
+        ;;
+    depart)
+        topic="$(lire_config c.course.start_topic)"
+        ros2 topic pub --once "$topic" std_msgs/msg/String "{data: commande}"
+        ;;
+    ordre-test)
+        ordre="${1:-}"
+        if [[ -z "$ordre" ]]; then
+            echo "Usage : ./run.sh ordre-test \"7,1,9,4\"  (essais seulement)" >&2
+            exit 2
+        fi
+        echo "ATTENTION : en course, l'ordre vient UNIQUEMENT des organisateurs."
+        topic="$(lire_config c.course.order_topic)"
+        ros2 topic pub -t 5 -r 1 --qos-reliability reliable \
+            --qos-durability transient_local "$topic" std_msgs/msg/String "{data: '$ordre'}"
+        ;;
+    etat)
+        ros2 topic echo "$(lire_config c.course.state_topic)" std_msgs/msg/String
+        ;;
+    sauver-carte)
+        nom="${1:-arene_$(date +%H%M%S)}"
+        dossier="${FOSA_DONNEES:-$HOME/.ros/fosa}/cartes"
+        mkdir -p "$dossier"
+        ros2 service call /slam_toolbox/serialize_map \
+            slam_toolbox/srv/SerializePoseGraph "{filename: '$dossier/$nom'}"
+        echo "Carte : $dossier/$nom.posegraph (course.slam_map_file si autorisé)."
+        ;;
+    diagnostic-robot)
+        "$DOSSIER_SCRIPT/outils/diagnostic_robot.sh" "$@"
+        ;;
     complet)
         verifier_paquet parc_robot_bringup
         echo "Démarrage du monde PARC. Ctrl+C arrête l'assistant et la simulation."
