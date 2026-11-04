@@ -197,7 +197,8 @@ Règle de sûreté conservée : aucun mouvement avant le départ ; le robot ne p
 | 5 Nœud de course + lancement | `671cbf4` | fait, lancement vérifié |
 | 6 Départ vocal | `6d6e4e6` | fait, vérifié avec Vosk réel et voix de synthèse |
 | 7 Déploiement + guide | `126ef5b` | fait |
-| 8 Validation simulation | `6fcb392` + suite | en cours (Gazebo + 4 tags 36h11) |
+| 8 Validation simulation | `6fcb392`, `5c2526e` | essai 2 : 4/4 tags visités dans l'ordre, fin à 444 s, 1 contact léger |
+| Revue de code | `1daad88`, `3707c64`, `88ed95a`, `71b0cc1`, `eada599` | 2 critiques + 7 importants corrigés |
 
 Écarts par rapport au plan, tous justifiés par une mesure :
 - `caytu_perception/setup.cfg` ajouté : sans lui, `ros2 run`/launch ne trouvaient
@@ -216,3 +217,16 @@ Règle de sûreté conservée : aucun mouvement avant le départ ; le robot ne p
   l'horloge ROS, TF map <- caméra en retard de 0,3 s, BT abandonnant les buts
   (`default_server_timeout` 20 ms), Ctrl-C transformé en `TypeError` → corrigés
   dans `6fcb392`.
+
+Revue de code indépendante (04/11), corrigée :
+- critique : l'ordre publié après un départ par commande était refusé ;
+- critique : `use_final_approach_orientation` remplaçait le cap du but ;
+- alignement non borné et recul sans garde ; écart latéral accepté jusqu'à
+  12 cm ; vues à TF approchée en mémoire ; but Nav2 accepté tardivement non
+  annulé ; déploiement bloqué par `srt` (source seulement) ; coupure SSH ;
+  `inf_is_valid` vrai pour le lidar ; localisation slam_toolbox sur le
+  mauvais nœud.
+
+Essai 2 en simulation (vérité Gazebo) : visites à 0,56 m et ±2,2° avant la
+correction de précision (objectif 1,5 cm / 2°) ; approche suivante calculée
+depuis la vue en direct.

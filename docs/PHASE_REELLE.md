@@ -40,14 +40,18 @@ export FOSA_BASE_WS=<espace de travail de base du robot>   # à demander
 ```
 
 Le script s'arrête si Nav2 ou slam_toolbox manquent : **demander aux
-organisateurs** `ros-jazzy-navigation2` et `ros-jazzy-slam-toolbox`. Le robot
-redémarre entre deux créneaux : les fichiers restent, les processus non.
+organisateurs** `ros-jazzy-navigation2` et `ros-jazzy-slam-toolbox`. Il
+construit d'abord les paquets, puis installe Vosk dans `<ws>/.fosa_python`
+(avec pip, ou sans pip en extrayant les roues de `livraison/`). Si la voix
+échoue, la course reste possible par commande. Le robot redémarre entre deux
+créneaux : les fichiers restent, les processus non.
 
 ## 4. Lancer et démarrer
 
 | Action | Commande |
 |---|---|
-| Solution complète | `./run.sh course` (terminal 1, laisser tourner) |
+| Solution complète | `./run.sh course` : détachée de SSH (tmux ou nohup), journal dans `~/.ros/fosa/` |
+| Arrêter (essais) | `./run.sh arreter` |
 | Départ par commande | `./run.sh depart` (terminal 2) |
 | Départ par la voix | dire distinctement « allez » (seul) près du robot |
 | Suivre l'état | `./run.sh etat` |
@@ -57,7 +61,8 @@ redémarre entre deux créneaux : les fichiers restent, les processus non.
 
 Ordre exact pour une course : lancer `./run.sh course`, attendre
 `[ATTENTE_DEPART]` (ordre reçu), puis départ. Après le départ, ne plus rien
-toucher.
+toucher. Une coupure de la session SSH n'arrête pas la course. Le départ par
+commande peut aussi précéder l'ordre : la course attend alors l'ordre.
 
 ## 5. Créneau 1 (15 min) : vérifier et enregistrer
 
