@@ -7,6 +7,9 @@
 #   Sur le PC, avec Internet :  ./deployer_robot.sh --preparer
 #       télécharge dans livraison/ les paquets Python de Vosk pour aarch64 /
 #       Python 3.12 et le modèle FR, à copier avec le dépôt sur le robot.
+#   Sur le PC :                  ./deployer_robot.sh --envoyer <utilisateur@IP> <dossier équipe>
+#       copie par SSH (rsync) uniquement ce qui sert au robot dans
+#       <dossier équipe>/ws/src/fosa-solution (ni simulation, ni docs, ni git).
 #   Sur le robot :               ./deployer_robot.sh
 #       vérifie les prérequis, construit les paquets de la course, puis
 #       installe Vosk dans <workspace>/.fosa_python (sans venv ni pip requis).
@@ -36,14 +39,31 @@ preparer() {
     python3 -m pip download srt --no-deps --no-binary=:all: --dest "$roues"
     echo "[3/3] Modèle Vosk $MODELE..."
     [[ -f "$LIVRAISON/$MODELE.zip" ]] || curl -fsSL "$URL_MODELE" -o "$LIVRAISON/$MODELE.zip"
-    echo "Copier le dépôt (avec livraison/) dans <dossier équipe>/ws/src/ du robot."
+    echo "Puis : $0 --envoyer <utilisateur@IP du robot> <dossier équipe sur le robot>"
+}
+
+envoyer() {
+    local cible="${1:-}" dossier="${2:-}"
+    if [[ -z "$cible" || -z "$dossier" ]]; then
+        echo "Usage : $0 --envoyer <utilisateur@IP du robot> <dossier équipe sur le robot>" >&2
+        exit 2
+    fi
+    local destination="$dossier/ws/src/fosa-solution"
+    ssh "$cible" "mkdir -p '$destination'"
+    rsync -az --delete --info=stats1 \
+        --exclude='.git/' --exclude='simulation/' --exclude='docs/' \
+        --exclude='build/' --exclude='install/' --exclude='log/' \
+        --exclude='__pycache__/' --exclude='.pytest_cache/' --exclude='AGENTS.md' \
+        "$DOSSIER_SCRIPT/" "$cible:$destination/"
+    echo "Copié dans $cible:$destination. Sur le robot : cd $destination && ./deployer_robot.sh"
 }
 
 sourcer_ros() {
     set +u
     source /opt/ros/jazzy/setup.bash
-    if [[ -n "${FOSA_BASE_WS:-}" ]]; then
-        for script in "$FOSA_BASE_WS/install/setup.bash" "$FOSA_BASE_WS/setup.bash"; do
+    local base="${FOSA_BASE_WS:-$HOME/ros2_ws}"
+    if [[ "$(cd "$base" 2>/dev/null && pwd)" != "$ESPACE_TRAVAIL" ]]; then
+        for script in "$base/install/setup.bash" "$base/setup.bash"; do
             if [[ -f "$script" ]]; then source "$script"; break; fi
         done
     fi
@@ -109,6 +129,7 @@ installer_vosk() {
 
 case "${1:-}" in
     --preparer) preparer ;;
+    --envoyer) shift; envoyer "$@" ;;
     "")
         echo "[1/3] Prérequis (aucune installation système)..."
         verifier_prerequis
@@ -127,5 +148,5 @@ Déploiement terminé. Pour chaque créneau (le robot redémarre entre deux) :
   ./run.sh depart                     # départ par commande (sinon dire « allez »)
 FIN
         ;;
-    *) echo "Usage : $0 [--preparer]" >&2; exit 2 ;;
+    *) echo "Usage : $0 [--preparer | --envoyer <utilisateur@IP> <dossier équipe>]" >&2; exit 2 ;;
 esac
