@@ -78,3 +78,11 @@ def test_une_vue_lointaine_n_abime_pas_une_pose_vue_de_pres():
     assert memoire.pose(4).x == pytest.approx(1.0)
     assert memoire.ajouter(4, 1.1, 1.0, 1.0, 1.0)
     assert memoire.pose(4).nombre == 2
+
+
+def test_aucun_tag_cible_n_est_jamais_connu():
+    """Régression : la préparation explore sans cible (tag None) et plantait."""
+    memoire = MemoireTags(4.0)
+    memoire.ajouter(7, 1.0, 2.0, 0.0, 1.0)
+    assert memoire.connait(7)
+    assert not memoire.connait(None)

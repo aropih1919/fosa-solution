@@ -413,10 +413,16 @@ class NoeudCourse(Node):
                 self.get_logger().warning(f'Tour sur place impossible ({resultat}).')
             return
 
+        if self._entrees.grille() is None:
+            self.publier_etat('RECHERCHE', tag_id, 'carte en attente')
+            self.traiter_pendant(0.5)
+            return
         point = self._prochain_point(pose)
         if point is None:
-            # Toute la carte a été parcourue : nouveau passage.
-            self._passages += 1
+            # Toute la carte a été parcourue : nouveau passage. Il ne compte
+            # que si des points ont vraiment été visités.
+            if self._points_essayes:
+                self._passages += 1
             self.publier_etat('RECHERCHE', tag_id, 'nouveau passage')
             self._tours.clear()
             self._points_essayes.clear()

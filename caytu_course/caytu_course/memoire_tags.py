@@ -79,7 +79,8 @@ class MemoireTags:
         return True
 
     def connait(self, tag_id):
-        return int(tag_id) in self._tags
+        """Faux pour None : la préparation explore sans tag cible."""
+        return tag_id is not None and int(tag_id) in self._tags
 
     def pose(self, tag_id):
         accumulateur = self._tags.get(int(tag_id))
