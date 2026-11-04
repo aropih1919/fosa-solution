@@ -64,7 +64,7 @@ verifier_rien_ne_tourne() {
 }
 
 arreter_groupe() {
-    [[ -n "${1:-}" ]] && kill -INT -- "-$1" 2>/dev/null
+    if [[ -n "${1:-}" ]]; then kill -INT -- "-$1" 2>/dev/null; fi
 }
 
 arreter() {
@@ -117,14 +117,13 @@ phase() {
     fi
     timeout "$DUREE_MAX" python3 -u "$DOSSIER_SIM/moniteur.py" --quitter-a-la-fin \
         | tee "$moniteur"
+    echo "Arrêt de la phase ${mode}..."
     arreter_groupe "$pid_course"
-    sleep 12
+    sleep 5
     arreter_groupe "$pid_monde"
-    sleep 8
-    pkill -9 -f "[g]z sim" 2>/dev/null
-    if pgrep -f "[c]ourse_parc" >/dev/null; then
-        echo "ATTENTION : des nœuds de course tournent encore : simulation/simulation.sh arreter" >&2
-    fi
+    # Le lanceur ROS ne finit pas toujours son arrêt (nœuds relancés par
+    # respawn) : arrêt complet, sinon la phase suivante refuserait de démarrer.
+    arreter > /dev/null
 }
 
 case "${1:-}" in
