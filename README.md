@@ -174,11 +174,14 @@ Pendant les 15 minutes de préparation, `./run.sh preparation` fait tout seul :
 1. il met de côté la préparation précédente (renommée avec la date) et
    repart de zéro : la carte de la veille peut être fausse ;
 2. il explore l'arène avec la recherche décrite en 1.8 : tours sur place et
-   points libres de la carte, jusqu'à l'avoir entièrement parcourue ;
+   points libres de la carte ;
 3. chaque tag aperçu de loin (à plus de 1,3 m) est mesuré de près : le robot
-   va se placer à 0,9 m devant lui, car une vue proche est bien plus précise ;
-4. il s'arrête quand toute l'arène est parcourue et les 4 tags mesurés, ou au
-   bout de 12 minutes (il reste 3 minutes de marge) ;
+   va se placer à 0,9 m devant lui, car une vue proche est bien plus précise,
+   puis recule de 30 cm pour quitter les abords du tag ;
+4. il s'arrête dès que les 4 tags sont mesurés de près : explorer davantage
+   n'apporte rien au match et risque de le coincer contre un meuble. S'il ne
+   les trouve pas tous, il continue jusqu'à avoir parcouru deux fois toute
+   l'arène, ou au bout de 12 minutes (il reste 3 minutes de marge) ;
 5. il enregistre la carte et la position des tags dans
    `~/.ros/fosa/preparation/` : `carte.posegraph` et `carte.data` pour le
    match, `carte.pgm` pour la voir, `tags.yaml` pour les tags.
@@ -372,11 +375,39 @@ l'affiche dans un terminal, avec le temps écoulé et le temps restant. Exemple 
 Le récit couvre : les données chargées, le départ, l'ordre, chaque tag repéré
 (même s'il n'est pas la cible), chaque nouveau plan, chaque saut avec ses
 chiffres, chaque échec avec sa raison, chaque visite avec la distance et
-l'angle mesurés, et à la fin, pour chaque tag non visité, **pourquoi**.
+l'angle mesurés, et à la fin, pour chaque tag non visité, **pourquoi**. Le
+micro raconte aussi ce qu'il entend (`[micro] Entendu « alors » : pas le mot
+de départ`).
 
-## 1.15 Comment nous l'avons vérifié
+Sous le récit, en plus discret, la **surveillance technique** montre la
+mécanique (dans l'esprit du moniteur de la branche benchmark) :
 
-- **185 tests automatiques**, sans robot ni simulateur : géométrie,
+```text
+        [CHEMIN] 42 points, 2,31 m
+        [NAV2] trajet en cours
+        [ROTATION] rotation sur place de 9 s
+        [ARRÊT] immobile depuis 6 s pendant un trajet Nav2
+        [BLOQUÉ] commandes envoyées (v=-0.08, w=+0.00) mais le robot ne bouge pas depuis 5 s
+        [NAV2] ÉCHEC : Nav2 a abandonné le trajet
+        [ÉTAT] position (1,23 ; -0,50), cap +90° | v=+0.20 w=+0.00 | Nav2 actif | chemins 7 | contacts 0
+```
+
+Les alertes (`[BLOQUÉ]`, `[CONTACT]`, échec de Nav2) sont en rouge.
+`./run.sh suivi --sans-technique` n'affiche que le récit.
+
+## 1.15 Se dégager quand le robot est coincé
+
+En simulation, le robot est resté coincé entre un tag et un meuble : Nav2
+n'arrivait plus à repartir. Le robot recule donc de 30 cm, lentement et avec
+une garde lidar à l'arrière :
+
+- après avoir mesuré un tag pendant la préparation ;
+- après chaque visite pendant le match, avant de partir vers le tag suivant ;
+- après deux trajets de recherche ratés de suite.
+
+## 1.16 Comment nous l'avons vérifié
+
+- **198 tests automatiques**, sans robot ni simulateur : géométrie,
   alignement, stratégie, lecture de l'ordre, messages de l'arbitre,
   configuration, détection sur images synthétiques.
 - **Simulation Gazebo** : le monde officiel PARC, avec quatre tags ajoutés, et
@@ -396,7 +427,7 @@ l'angle mesurés, et à la fin, pour chaque tag non visité, **pourquoi**.
     tag posé à distance connue, puis corrigé. Sur le vrai robot, la même
     vérification se fait au mètre ruban (partie 2, section B.5).
 
-## 1.16 Questions probables du jury
+## 1.17 Questions probables du jury
 
 **Pourquoi ne pas aller droit au tag suivant ?** Un tag introuvable ou mal
 placé peut coûter plus de points qu'il n'en rapporte. La stratégie compare
@@ -493,7 +524,7 @@ But : pouvoir construire la solution, lancer les tests et la simulation.
    ```bash
    cd ~/ros2_ws
    colcon test --packages-select caytu_config caytu_perception caytu_course caytu_nav_solution
-   colcon test-result --verbose          # attendu : 185 tests, 0 errors, 0 failures
+   colcon test-result --verbose          # attendu : 198 tests, 0 errors, 0 failures
    ```
 
 **Après chaque modification du code** : `cd ~/ros2_ws && colcon build
@@ -634,13 +665,38 @@ plus vite.
 
 Ce que je regarde dans le terminal :
 
+- le récit (voir 1.14) et, en plus discret, la surveillance technique ; une
+  ligne rouge `[BLOQUÉ]` ou `[CONTACT]` signale un problème ;
 - `=== FIN ===` puis une ligne par tag : visité, ou **pourquoi** il ne l'a pas
   été ;
 - `[juge simulé] VISITE tag N mesurée dans Gazebo : centre à 0.5xx m, erreur
   de cap ±x° -> VALIDE` ;
 - `[juge simulé] arbitre : visite du tag N reçue, photo jpeg (... octets)`.
 
-### C.2 Une seule phase
+### C.2 Le départ à la voix dans la simulation
+
+Oui, c'est possible : le micro du PC remplace celui du robot.
+
+Une seule fois :
+
+```bash
+sudo apt install ros-jazzy-audio-common-msgs
+simulation/simulation.sh voix-preparer        # Vosk + modèle français, sans sudo
+```
+
+Puis, pour un match avec départ vocal :
+
+```bash
+FOSA_SIM_VOIX=1 FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh course 7,1,9,4
+```
+
+Quand le récit affiche `[micro] À l'écoute du mot de départ : dites « allez »`,
+dire **« allez »** distinctement. Le récit montre ce que le micro a compris ;
+le départ part avec `method 1` vers l'arbitre, comme sur le robot. Si le
+mauvais micro est utilisé : `arecord -L` liste les micros, et
+`FOSA_SIM_MICRO=<nom>` choisit le bon.
+
+### C.3 Une seule phase
 
 ```bash
 FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh preparation     # carte + tags
@@ -651,7 +707,7 @@ Le match seul utilise la dernière préparation de simulation, rangée dans
 `~/.fosa_simulation/preparation` (jamais mélangée avec celle du robot). Pour
 tester un match sans préparation (carte en direct), supprimer ce dossier.
 
-### C.3 Tout arrêter
+### C.4 Tout arrêter
 
 Après un Ctrl-C, un terminal fermé, ou le message « Une course ou Gazebo
 tourne déjà » :
@@ -663,7 +719,7 @@ simulation/simulation.sh arreter
 Ne jamais lancer deux simulations à la fois : elles piloteraient le même
 robot simulé et les journaux se mélangeraient.
 
-### C.4 À la main, terminal par terminal (pour déboguer)
+### C.5 À la main, terminal par terminal (pour déboguer)
 
 ```bash
 # Terminal 1 : le monde, le robot et les tags
@@ -676,7 +732,7 @@ simulation/simulation.sh moniteur
 # Terminal 4 (match seulement) : l'ordre puis le départ
 export FOSA_PROFIL=simulation FOSA_BASE_WS=~/.fosa_simulation/parc_ws
 ./run.sh ordre-test "7,1,9,4"
-./run.sh depart
+./run.sh depart                   # ou, pour la voix : simulation/simulation.sh micro
 ```
 
 Journaux : `~/.fosa_simulation/journaux/` (`course_*.log` : détail
