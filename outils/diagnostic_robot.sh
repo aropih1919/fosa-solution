@@ -61,15 +61,21 @@ done
 titre "Arbitre (parc_msgs)"
 # Les définitions exactes des messages ne sont pas dans la documentation reçue :
 # elles sont enregistrées ici dans le rapport du premier créneau.
-if ros2 interface package parc_msgs >/dev/null 2>&1; then
-    ok "parc_msgs installé"
-    for interface in $(ros2 interface package parc_msgs); do
-        info "$interface"
-        ros2 interface show "$interface" 2>&1 | sed 's/^/      /'
-    done
-else
-    ko "parc_msgs absent : sourcer ~/ros2_ws/install/setup.bash avant l'espace de l'équipe"
-fi
+# Lecture en Python : `ros2 interface` n'est pas toujours installé.
+python3 - <<'PYTHON' || ko "parc_msgs absent : sourcer ~/ros2_ws/install/setup.bash avant l'espace de l'équipe"
+import parc_msgs.msg as messages
+
+print('  [OK]   parc_msgs installé')
+for nom in sorted(dir(messages)):
+    classe = getattr(messages, nom)
+    if isinstance(classe, type) and hasattr(classe, 'get_fields_and_field_types'):
+        print(f'  [INFO] parc_msgs/msg/{nom}')
+        for champ, genre in classe.get_fields_and_field_types().items():
+            print(f'      {genre} {champ}')
+        constantes = [c for c in dir(classe) if c.isupper() and c != 'SLOT_TYPES']
+        for constante in constantes:
+            print(f'      constante {constante} = {getattr(classe, constante)!r}')
+PYTHON
 for topic in "$(lire_config c.course.order_topic)" "$(lire_config c.course.referee.start_topic)" \
     "$(lire_config c.course.referee.visit_topic)" "$(lire_config c.course.referee.finish_topic)" \
     "$(lire_config c.course.referee.run_status_topic)"; do
