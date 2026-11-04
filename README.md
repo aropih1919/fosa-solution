@@ -1,146 +1,118 @@
-# ÉQUIPE FOSA — PARC Engineers League 2026
+# Équipe Fosa — PARC Engineers League 2026, phase réelle
 
-Solution globale pour le robot d'accueil et de guidage CAYTU Sito-É combinant navigation autonome robuste sous Nav2, perception multimodale (LiDAR, caméras de profondeur, balises AprilTag) et assistant vocal intelligent avec validation déterministe.
+Solution de course du robot **CAYTU Sito-É** (Jetson AGX Orin, ROS 2 Jazzy) :
+cartographie SLAM en direct, navigation Nav2, détection des AprilTags 36h11,
+alignement à 0,5 m face au tag et départ à la voix.
 
-**Pays :** Madagascar
-**Équipe FOSA**
+> **Règlement résumé** — ordre des tags 1, 4, 7 et 9 publié par les
+> organisateurs au départ ; course de 10 minutes maximum ; départ par commande
+> ou par le mot « allez » ; une visite compte lorsque le robot s'arrête à 0,5 m
+> du tag, face à lui à ±12°, et garde la position jusqu'à confirmation des
+> juges. Le détail officiel est dans
+> [`docs/parc-phase-finale-docs/PARC2026_Phase_Reelle_Guide_FR.md`](docs/parc-phase-finale-docs/PARC2026_Phase_Reelle_Guide_FR.md).
 
-> [!IMPORTANT]
-> **Phase réelle (robot physique, 3–6 novembre)** : la solution de course est
-> le paquet `caytu_course` (`./run.sh course`, départ `./run.sh depart` ou
-> « allez »). Installation, lancement, check-lists de créneau et questions aux
-> organisateurs : **[docs/PHASE_REELLE.md](docs/PHASE_REELLE.md)**. La
-> configuration par défaut est celle du robot réel ; Gazebo :
-> `FOSA_PROFIL=simulation`.
+## 1. Ce que fait le robot
 
----
+1. Attend l'ordre des tags publié par les organisateurs.
+2. Attend le départ : commande `./run.sh depart` ou mot « allez ».
+3. Pour chaque tag, dans l'ordre : le cherche (tours sur place et points de la
+   carte SLAM), s'en approche avec Nav2, s'aligne à 0,5 m face à lui, publie
+   l'identifiant et une image, puis garde la position.
+4. Signale la fin et s'arrête, au plus tard à 10 minutes.
 
-## 1. Architecture des paquets
+Un tag dont le budget de temps est épuisé est sauté, jamais revisité. Aucun
+mouvement n'a lieu avant le départ.
 
-Le projet est conçu de façon modulaire et lisible :
+## 2. Paquets
 
-| Paquet | Description & Rôle |
+| Paquet | Rôle |
 |---|---|
-| [`caytu_config`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_config) | **Source unique de configuration** : tous les seuils, vitesses, topics, modèles, lieux et FAQ sont centralisés dans 4 fichiers YAML validés par schémas stricts. |
-| [`caytu_interfaces`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_interfaces) | **Messages et services ROS 2** : contrats d'échange typés (`SemanticLocation`, `DetectedEntity`, `TagDetection`, `DialogueState`, etc.). |
-| [`caytu_semantic_map`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_semantic_map) | **Carte sémantique du site** : résolution des noms de stands, alias et tags AprilTag avec calcul de la pose d'approche devant chaque point d'intérêt. |
-| [`caytu_perception`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_perception) | **Vision et détection d'obstacles** : détection de balises AprilTag, classification 3D par nuages de points (personnes vs mobilier) et suivi de visiteurs. |
-| [`caytu_assistant`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_assistant) | **Intelligence et interaction vocale** : reconnaissance vocale (Whisper local/API), compréhension contrainte avec LangChain (Ollama local ou API compatible OpenAI), dispatcher d'actions déterministe et synthèse vocale (Piper/API). |
-| [`caytu_nav_solution`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_nav_solution) | **Solution de navigation** : point d'entrée officiel Phase 1 (`task_solution.py`) et client d'action `Nav2Navigator` réutilisable. |
-| [`caytu_course`](caytu_course) | **Course de la phase réelle** : ordre des tags, départ (commande ou voix Vosk), SLAM + Nav2, recherche, alignement à 0,5 m, statut. |
-| [`caytu_nav_bringup`](file:///home/johny-olivier/ros2_ws/src/fosa-solution/caytu_nav_bringup) | **Bringup matériel et Nav2** : filtrage des capteurs (masquage châssis LiDAR, caméras), profils de contrôleurs (RPP, DWB) et localisation odom+IMU. |
+| `caytu_config` | Toutes les valeurs métier : robot, navigation, perception, course, mot de départ. |
+| `caytu_course` | Machine à états de la course, ordre des tags, recherche, alignement, statut, lancement. |
+| `caytu_perception` | Détection AprilTag par OpenCV et obstacles hauts par profondeur. |
+| `caytu_nav_solution` | Chronomètre de course, client Nav2 et génération du YAML Nav2. |
+| `caytu_nav_bringup` | Paramètres Nav2, filtre du lidar et arbre de comportement. |
+| `caytu_interfaces` | Messages `TagDetection` et `TagDetectionArray`. |
 
-> [!IMPORTANT]
-> **Règle de sécurité absolue** : Le modèle de langage (LLM) ne génère **jamais** de coordonnées spatiales ni de vitesse moteur. Il extrait une intention et un nom de lieu. Le dispatcher déterministe valide le lieu et pilote Nav2 en toute sécurité.
+## 3. Installation sur le robot
 
----
+Le robot doit déjà disposer de ROS 2 Jazzy, Nav2, slam_toolbox, OpenCV et
+`cv_bridge`. Ces paquets sont système : les demander aux organisateurs.
 
-## 2. Guide des commandes — Que lancer et comment ?
+Sur un PC connecté à Internet, préparer les roues Vosk et le modèle français :
 
-### 2.1 Installation sur un nouveau PC
 ```bash
-cd ~/ros2_ws/src/fosa-solution
-./install.sh
-```
-L'installateur prépare Ubuntu 24.04, ROS 2 Jazzy, le dépôt de simulation PARC,
-les dépendances Python et tous les paquets du workspace. Il demande si les
-modèles IA locaux (YOLO, LLM, Whisper et voix Piper) doivent être téléchargés
-immédiatement. Pour les récupérer plus tard : `./install.sh --models`.
-
-Pour partager les modèles lourds sans les retélécharger :
-
-Sur le premier poste, créez `modeles-fosa.tar.gz` :
-```bash
-./exporter_importer_modeles.sh exporter
+./deployer_robot.sh --preparer
 ```
 
-Sur le poste destinataire, lancez d'abord `./install.sh --no-models`, copiez
-`modeles-fosa.tar.gz` à la racine du projet, puis importez les modèles :
-```bash
-./exporter_importer_modeles.sh importer
-```
-L'archive contient les modèles YOLO/Piper, Whisper et tout le dépôt de modèles Ollama.
-Les modèles YOLO/Piper sont installés dans `caytu_config/config/models/` du
-projet. Whisper est placé dans le cache Hugging Face de l’utilisateur et Ollama
-dans son répertoire de modèles habituel. `run.sh` charge la configuration du
-dépôt afin que les modèles restent disponibles après une reconstruction.
+Copier tout le dépôt (avec `livraison/`) dans le dossier de l'équipe du robot,
+puis, sur le robot :
 
-`run.sh` source automatiquement ROS, le workspace compilé et l'environnement Python.
-
----
-
-### 2.2 Solution complète — Simulation et assistant
 ```bash
-./run.sh complet
-```
-Par défaut, l'assistant utilise le mode microphone configuré. Pour saisir le
-texte au clavier :
-```bash
-./run.sh complet input_mode:=text
+./deployer_robot.sh
 ```
 
-### 2.3 Navigation autonome officielle
-La simulation doit d'abord être lancée dans un terminal :
+Le script construit les six paquets, vérifie les prérequis et installe Vosk
+sans `sudo`. La voix est facultative : si elle échoue, le départ par commande
+reste disponible.
 
-**Terminal 1 — Lancement de la simulation officielle :**
+## 4. Déroulement d'un créneau
+
 ```bash
-./run.sh gazebo
+cd <dossier équipe>/ws/src/fosa-solution
+
+./run.sh diagnostic-robot   # premier créneau : topics, TF, caméras, audio
+./run.sh course             # SLAM + Nav2 + tags + mot de départ + mission
+./run.sh depart             # départ par commande (ou dire « allez »)
+./run.sh etat               # suivre l'état de la course
+./run.sh arreter            # essais uniquement
 ```
 
-**Terminal 2 — Lancement de la solution Fosa :**
+`course` tourne dans tmux (ou en arrière-plan avec `nohup`) : une coupure SSH
+n'arrête pas la course. Le journal est écrit dans `~/.ros/fosa/`.
+
+Autres modes utiles pendant les essais :
+
 ```bash
-./run.sh navigation
+./run.sh cartographie       # tout sauf la mission : carte, réglages, rosbag
+./run.sh sauver-carte       # sérialiser la carte SLAM
+./run.sh mesure-rotation    # vérifier l'odométrie en rotation (robot dégagé)
+./run.sh ordre-test "7,1,9,4"   # ordre de test, ESSAIS SEULEMENT
 ```
 
-Ce mode lance `task_solution.py` avec le moniteur actif et enregistre un rapport
-par navigation dans `results/`. Le contrôleur, le profil et la localisation
-proviennent de `caytu_config/config/fosa.yaml`. Les sorties détaillées restent
-dans chaque dossier de rapport; les erreurs et le suivi du robot restent visibles.
+## 5. Configuration
 
----
+Tout est dans `caytu_config/config/fosa.yaml` : topics, repères, empreinte,
+vitesses, seuils d'alignement, mots de départ. Les valeurs par défaut sont
+celles du robot réel (`ROS_DOMAIN_ID=0`, `use_sim_time=false`).
 
-### 2.4 Assistant seul et test TTS
+Pour Gazebo, utiliser le profil simulation :
 
-**Mode interactif en console (Idéal pour tester sans microphone) :**
 ```bash
-./run.sh assistant input_mode:=text
-```
-*Tapez directement vos phrases dans le terminal (`Où sont les toilettes ?`, `Oui`, `Stop`, `À quelle heure est la finale ?`, `J'ai mal`).*
-
-**Mode vocal complet (avec microphone et haut-parleur) :**
-```bash
-./run.sh assistant input_mode:=microphone
+FOSA_PROFIL=simulation ./run.sh course
 ```
 
-**Essai direct de la synthèse vocale :**
+Variables utiles : `FOSA_BASE_WS` (workspace des paquets organisateurs),
+`FOSA_CONFIG_OVERRIDE` (surcharge YAML), `FOSA_DONNEES` (journaux et cartes).
+
+## 6. Points à confirmer avec les organisateurs
+
+Le paquet de statut officiel n'est pas encore publié. En attendant, les
+événements partent sur `/fosa/statut/depart`, `/fosa/statut/tag`,
+`/fosa/statut/image` et `/fosa/statut/fin` (QoS fiable, transient local).
+Seul `caytu_course/caytu_course/statut.py` sera à adapter.
+
+Restent à confirmer sur place : le topic et le type de l'ordre des tags, le
+type de `/cmd_vel`, le format de `/speech_audio` et l'identité de la caméra
+haute. `./run.sh diagnostic-robot` affiche l'état réel des interfaces.
+
+## 7. Tests
+
 ```bash
-./run.sh tts "Bonjour, ceci est un essai de synthèse vocale."
-```
-
----
-
-### 2.5 Outil de diagnostic en direct
-Permet de mesurer en temps réel la dérive de localisation, les faux obstacles et les contacts :
-```bash
-./run.sh diagnostic --ros-args -p use_sim_time:=true
-```
-
----
-
-Les outils du laboratoire restent accessibles avec `./run.sh benchmark` et
-`./run.sh compare`.
-
-### 2.6 Lancement des tests unitaires
-Vérifie la robustesse de tous les modules sans nécessiter de simulateur :
-```bash
-colcon test --packages-select caytu_config caytu_nav_bringup caytu_nav_solution caytu_semantic_map caytu_assistant caytu_perception
+colcon test --packages-select caytu_config caytu_perception caytu_course caytu_nav_solution
 colcon test-result --verbose
 ```
 
----
-
-## 3. Documentation de référence
-
-Pour approfondir, deux guides complets sont à votre disposition :
-1. **[Contexte & Architecture détaillée](file:///home/johny-olivier/ros2_ws/src/fosa-solution/docs/CONTEXTE_ET_ARCHITECTURE.md)** : description approfondie des 7 paquets, de la configuration centralisée (`fosa.yaml`) et des conventions de code `refactor/franglais`.
-2. **[Guide des tests pas-à-pas](file:///home/johny-olivier/ros2_ws/src/fosa-solution/docs/GUIDE_TESTS.md)** : scénarios complets de validation manuelle pour la Phase 1 et la Phase 2.
+Les tests ne demandent ni robot ni Gazebo. Les guides détaillés sont
+[`docs/GUIDE_DE_TEST.md`](docs/GUIDE_DE_TEST.md) et
+[`docs/FLUX_DE_LA_SOLUTION.md`](docs/FLUX_DE_LA_SOLUTION.md).
