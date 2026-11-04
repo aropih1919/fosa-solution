@@ -90,6 +90,7 @@ class NoeudCourse(Node):
         self._dernieres_erreurs = None  # placement mesuré à la fin de l'alignement
         self._raisons = {}             # tag non visité -> pourquoi
         self._passages = 0             # parcours complets de la carte
+        self._echecs_trajet = 0        # trajets de recherche ratés de suite
         self._preparation_enregistree = False
         self._publicateur_evenements = self.create_publisher(
             String, self._course.events_topic, qos_evenements())
@@ -269,6 +270,8 @@ class NoeudCourse(Node):
                 continue
             if resultat == 'visite':
                 self._sequence.marquer_visite(cible)
+                if not self._sequence.terminee():
+                    self._degager('laisser la place devant le tag avant le suivant')
             elif resultat == 'saute':
                 self._sequence.sauter()
             self._plan_instant = None   # nouvelle cible : replanifier
@@ -435,8 +438,15 @@ class NoeudCourse(Node):
         resultat = self._navigateur.naviguer_une_fois(
             point[0], point[1], self._configuration.system.global_frame,
             Pose2D(0.0, 0.0, 0.0), interrompre=interrompre)
-        if resultat == 'refuse':
-            self.traiter_pendant(0.5)
+        if resultat in ('refuse', 'reessayer'):
+            self._echecs_trajet += 1
+            if self._echecs_trajet >= self._course.unstuck_after_failures:
+                self._degager(f'{self._echecs_trajet} trajets ratés de suite')
+                self._echecs_trajet = 0
+            else:
+                self.traiter_pendant(0.5)
+        else:
+            self._echecs_trajet = 0
 
     def _prochain_point(self, pose):
         grille = self._entrees.grille()
@@ -620,6 +630,34 @@ class NoeudCourse(Node):
             self.traiter_pendant(PERIODE_BOUCLE)
         return 'echec'
 
+    def _degager(self, raison):
+        """Recule lentement de `unstuck_distance_m`, garde arrière active.
+
+        Sert à quitter un endroit étroit (devant un tag, contre un meuble) où
+        Nav2 n'arrive plus à repartir.
+        """
+        distance = self._course.unstuck_distance_m
+        vitesse = self._course.alignment.max_linear_mps
+        x_arriere = min(x for x, _ in self._navigation.footprint)
+        demi_largeur = max(abs(y) for _, y in self._navigation.footprint)
+        depart = self.pose_robot()
+        if depart is None:
+            return
+        self.evenement('degagement', f'Recul de {distance * 100:.0f} cm pour se dégager '
+                       f'({raison}).')
+        fin = self._temps() + 3.0 * distance / vitesse
+        while rclpy.ok() and self._temps() < fin and not self._temps_ecoule():
+            pose = self.pose_robot()
+            if pose is not None and math.hypot(pose.x - depart.x, pose.y - depart.y) >= distance:
+                break
+            if obstacle_derriere(self._entrees.points_scan_robot(), x_arriere, demi_largeur,
+                                 self._course.front_guard_m):
+                self.evenement('degagement', 'Obstacle derrière : recul arrêté.')
+                break
+            self.publier_vitesse(-vitesse, 0.0)
+            self.traiter_pendant(PERIODE_BOUCLE)
+        self.arreter_robot()
+
     def _vitesse_gardee(self, commande, x_avant, x_arriere, demi_largeur):
         """Annule l'avance (ou le recul) si un obstacle occupe le couloir."""
         lineaire = commande.lineaire
@@ -732,8 +770,14 @@ class NoeudCourse(Node):
         self.enregistrer_preparation()
 
     def _exploration_terminee(self):
-        tous = all(self._memoire.connait(tag) for tag in self._course.tag_ids)
-        return (tous and self._passages >= 1) or self._passages >= 2
+        """Fin dès que les 4 tags sont mesurés de près : explorer davantage
+        n'apporte rien au match et risque de coincer le robot. Sinon, deux
+        parcours complets de la carte sans les trouver tous."""
+        proche = self._course.preparation.close_view_m
+        mesures = all(
+            self._memoire.connait(tag) and self._memoire.pose(tag).distance_min <= proche
+            for tag in self._course.tag_ids)
+        return mesures or self._passages >= 2
 
     def _mesurer_de_pres(self, tag_id):
         pose = self._memoire.pose(tag_id)
@@ -743,9 +787,14 @@ class NoeudCourse(Node):
             tag_id, (pose.x, pose.y, pose.cap, pose.distance_min), self._temps_ecoule)
         self.traiter_pendant(1.0)
         nouvelle = self._memoire.pose(tag_id)
-        if nouvelle is not None:
-            self.evenement('mesure', f'Tag {tag_id} mesuré à {nouvelle.distance_min:.1f} m '
-                           f'(approche : {resultat}).', tag=tag_id)
+        if nouvelle is not None and nouvelle.distance_min <= self._course.preparation.close_view_m:
+            self.evenement('mesure', f'Tag {tag_id} mesuré de près, à {nouvelle.distance_min:.1f} m : '
+                           'position précise enregistrée.', tag=tag_id)
+        elif nouvelle is not None:
+            self.evenement('mesure', f'Tag {tag_id} pas revu de près ({recit.RESULTATS_APPROCHE.get(resultat, resultat)}) : '
+                           f'meilleure vue à {nouvelle.distance_min:.1f} m, nouvelle tentative plus tard.',
+                           tag=tag_id)
+        self._degager('quitter les abords du tag avant la suite')
 
     def _nouveau_dossier_preparation(self):
         """Archive la préparation précédente : la carte de mardi peut être fausse

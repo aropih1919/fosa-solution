@@ -19,7 +19,7 @@ from std_msgs.msg import String
 from caytu_config import load_config
 from caytu_config.loader import config_directory
 from caytu_course.mot_depart import est_mot_depart, extraire_canal, grammaire
-from caytu_course.statut import qos_statut
+from caytu_course.statut import qos_evenements, qos_statut
 
 TYPE_AUDIO = 'audio_common_msgs/msg/AudioData'
 ETATS_ARMES = {'ATTENTE_DEPART'}
@@ -41,6 +41,9 @@ class NoeudMotDepart(Node):
         self._flux = None
         self._publicateur = self.create_publisher(
             String, configuration.course.start_topic, 10)
+        # Ce que le micro entend apparaît dans le récit (./run.sh suivi).
+        self._recit = self.create_publisher(
+            String, configuration.course.events_topic, qos_evenements())
         self.create_subscription(
             String, configuration.course.state_topic, self._recevoir_etat,
             qos_statut(1))
@@ -92,7 +95,7 @@ class NoeudMotDepart(Node):
             return
         arme = etat in ETATS_ARMES and not self._depart_publie
         if arme and not self._arme:
-            self.get_logger().info('À l\'écoute du mot de départ.')
+            self._raconter(f'À l\'écoute du mot de départ : dites « {self._voix.words[0]} ».')
         if not arme:
             self._flux = None
         self._arme = arme
@@ -113,6 +116,11 @@ class NoeudMotDepart(Node):
         if self._flux.AcceptWaveform(donnees):
             self._decider(self._flux.Result())
 
+    def _raconter(self, texte):
+        self._recit.publish(String(data=json.dumps(
+            {'type': 'voix', 'texte': texte}, ensure_ascii=False)))
+        self.get_logger().info(texte)
+
     def _decider(self, resultat):
         try:
             texte = json.loads(resultat).get('text', '')
@@ -120,7 +128,8 @@ class NoeudMotDepart(Node):
             texte = ''
         if not est_mot_depart(resultat, self._voix.words, self._voix.min_confidence):
             if texte:
-                self.get_logger().info(f'Entendu « {texte} » : pas un départ.')
+                self._raconter(f'Entendu « {texte} » : pas le mot de départ '
+                               f'(« {self._voix.words[0]} » attendu).')
             return
         self._depart_publie = True
         self._arme = False

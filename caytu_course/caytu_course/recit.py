@@ -14,6 +14,15 @@ RAISONS_ECHEC = {
 }
 
 
+RESULTATS_APPROCHE = {
+    'arrive': 'arrivé devant',
+    'reessayer': "Nav2 n'a pas atteint le point d'approche",
+    'perdu': "tag non revu à l'arrivée",
+    'echec': 'approche interrompue',
+    'temps_ecoule': 'temps écoulé',
+}
+
+
 def _secondes(valeur):
     return f'{valeur:.0f} s'
 
@@ -48,6 +57,8 @@ def phrase_donnees_match(carte, tags):
 
 
 def phrase_tag_repere(tag_id, distance, cible):
+    if cible is None:
+        return f'Tag {tag_id} repéré à {distance:.1f} m.'
     if tag_id == cible:
         return f'Tag {tag_id} repéré à {distance:.1f} m : c\'est la cible, on y va.'
     return f'Tag {tag_id} repéré à {distance:.1f} m : position mémorisée pour plus tard.'

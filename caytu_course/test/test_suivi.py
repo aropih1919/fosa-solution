@@ -20,3 +20,8 @@ def test_la_fin_affiche_une_ligne_par_tag():
 def test_les_couleurs_entourent_le_texte():
     ligne = formater({'type': 'visite', 'texte': 'Tag 7 VISITÉ'})[0]
     assert '\033[1;32mTag 7 VISITÉ\033[0m' in ligne
+
+
+def test_le_micro_n_affiche_pas_de_faux_chronometre():
+    lignes = formater({'type': 'voix', 'texte': 'Entendu « alors ».'}, couleurs=False)
+    assert lignes == ['[micro] Entendu « alors ».']

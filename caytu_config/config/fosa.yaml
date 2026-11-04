@@ -181,6 +181,11 @@ course:
   preapproach_margin_m: 0.3       # vu de plus loin que approach + marge : pré-approche
   search_spin_speed_rps: 0.4      # tour de recherche lent : pas de flou de bougé
   search_max_radius_m: 5.0        # zone de recherche autour du départ (arène 5 m)
+  # Dégagement : reculer lentement (garde arrière du lidar) après une mesure
+  # de tag, après une visite, ou après plusieurs échecs Nav2 de suite.
+  # Simulation : le robot restait coincé entre un tag et un meuble.
+  unstuck_distance_m: 0.30
+  unstuck_after_failures: 2
   alignment:
     linear_gain: 0.6
     angular_gain: 1.2

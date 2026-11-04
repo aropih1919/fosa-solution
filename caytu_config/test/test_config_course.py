@@ -48,7 +48,8 @@ def _course_minimale(**surcharges):
         "front_guard_m": 0.10, "goal_xy_tolerance_m": 0.08,
         "goal_yaw_tolerance_deg": 7.0, "tag_lost_timeout_sec": 4.0,
         "preapproach_margin_m": 0.3, "search_spin_speed_rps": 0.4,
-        "search_max_radius_m": 5.0,
+        "search_max_radius_m": 5.0, "unstuck_distance_m": 0.3,
+        "unstuck_after_failures": 2,
         "alignment": {
             "linear_gain": 0.6, "angular_gain": 1.2, "max_linear_mps": 0.08,
             "max_angular_rps": 0.35, "min_linear_mps": 0.03,

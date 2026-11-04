@@ -56,3 +56,7 @@ def test_les_autres_phrases():
     assert 'VISITÉ (2/4)' in phrase_visite(1, 2, 4, 0.503, -1.2)
     assert 'en direct' in phrase_donnees_match(None, ())
     assert '1, 4, 7, 9' in phrase_donnees_match('carte', (9, 1, 7, 4))
+
+
+def test_en_preparation_un_tag_repere_n_est_pas_garde_pour_plus_tard():
+    assert phrase_tag_repere(9, 1.94, None) == 'Tag 9 repéré à 1.9 m.'

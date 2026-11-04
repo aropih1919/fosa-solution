@@ -377,6 +377,7 @@ _NOMBRES_COURSE = (
     ("preapproach_margin_m", {"minimum": 0.0}),
     ("search_spin_speed_rps", {"positive": True, "maximum": 1.0}),
     ("search_max_radius_m", {"positive": True}),
+    ("unstuck_distance_m", {"positive": True, "maximum": 1.0}),
 )
 _TEXTES_COURSE = ("order_topic", "start_topic", "state_topic", "events_topic",
                   "map_topic")
@@ -416,6 +417,8 @@ class CourseConfig:
     preapproach_margin_m: float
     search_spin_speed_rps: float
     search_max_radius_m: float
+    unstuck_distance_m: float
+    unstuck_after_failures: int
     alignment: AlignmentConfig
     strategy: StrategyConfig
     preparation: PreparationConfig
@@ -425,7 +428,7 @@ class CourseConfig:
         data = _section(data, path)
         _check_keys(data, (
             "tag_ids", "order_type", "referee", "stable_cycles", "alignment",
-            "strategy", "preparation")
+            "strategy", "preparation", "unstuck_after_failures")
             + _TEXTES_COURSE
             + tuple(cle for cle, _ in _NOMBRES_COURSE), path)
         valeurs = {
@@ -443,6 +446,9 @@ class CourseConfig:
                 _get(data, "referee", path), f"{path}.referee"),
             stable_cycles=_as_int(
                 _get(data, "stable_cycles", path), f"{path}.stable_cycles", 1),
+            unstuck_after_failures=_as_int(
+                _get(data, "unstuck_after_failures", path),
+                f"{path}.unstuck_after_failures", 1),
             alignment=AlignmentConfig.from_mapping(
                 _get(data, "alignment", path), f"{path}.alignment"),
             strategy=StrategyConfig.from_mapping(
