@@ -131,6 +131,12 @@ case "${1:-}" in
     --preparer) preparer ;;
     --envoyer) shift; envoyer "$@" ;;
     "")
+        # Sur le PC, ce build (--symlink-install) se mélangerait à colcon build.
+        if [[ "$(uname -m)" != aarch64 && "${FOSA_FORCER_PC:-0}" != 1 ]]; then
+            echo "Ce script s'exécute SUR LE ROBOT. Sur le PC : colcon build, ou" >&2
+            echo "  $0 --envoyer <utilisateur@IP du robot> <dossier équipe>" >&2
+            exit 1
+        fi
         echo "[1/3] Prérequis (aucune installation système)..."
         verifier_prerequis
         echo "[2/3] Construction des paquets de la course..."
