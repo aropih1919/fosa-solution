@@ -41,6 +41,7 @@ from caytu_nav_solution.nav_math import (
 from caytu_nav_solution.navigation_runtime import (
     BringupManager,
     Nav2Navigator,
+    secteur_arriere_est_libre,
     TaskTimer,
 )
 from caytu_nav_solution.task_params import (
@@ -139,6 +140,7 @@ class SolutionTache(Node):
 
     def _initialiser_etat(self):
         self._dernier_scan = None           # sert uniquement à vérifier la carte
+        self._reception_dernier_scan = None
         self._pose_amcl = None              # dernière pose publiée par AMCL
 
     def _connecter_ros(self):
@@ -180,9 +182,10 @@ class SolutionTache(Node):
 
     # ------------------------------------------------------------- utilitaires
     def recevoir_scan(self, message):
-        # On garde seulement le dernier scan : le contrôle de carte n'a besoin
-        # que d'une photo à un instant donné, pas de l'historique.
+        # Le scan sert à la cohérence de carte puis à valider le secteur arrière
+        # avant et pendant un éventuel recul.
         self._dernier_scan = message
+        self._reception_dernier_scan = time.monotonic()
 
     def recevoir_pose_amcl(self, message):
         self._pose_amcl = message
@@ -231,6 +234,112 @@ class SolutionTache(Node):
         if pose is None:
             return None
         return pose.distance_vers(self._task.goal_x, self._task.goal_y)
+
+    def _pose_odom(self):
+        """Pose robot dans odom, repère continu utilisé pour surveiller un recul."""
+        try:
+            tf = self._memoire_tf.lookup_transform(
+                self._configuration.system.odom_frame,
+                self._repere_robot, Time())
+        except TransformException:
+            return None
+        translation = tf.transform.translation
+        rotation = tf.transform.rotation
+        return Pose2D(
+            translation.x, translation.y,
+            lacet_depuis_quaternion(
+                rotation.x, rotation.y, rotation.z, rotation.w),
+        )
+
+    def _secteur_arriere_libre(self, distance_requise):
+        """Exige un scan frais, transformable et dense derrière le robot."""
+        navigation = self._configuration.navigation
+        if (self._dernier_scan is None or self._reception_dernier_scan is None
+                or time.monotonic() - self._reception_dernier_scan
+                > navigation.obstacle_rear_scan_max_age_sec):
+            return False
+        if self._dernier_scan.header.stamp.sec == 0:
+            return False
+        maintenant_ros = self.get_clock().now().nanoseconds
+        if maintenant_ros > 0:
+            age_scan = (maintenant_ros - Time.from_msg(
+                self._dernier_scan.header.stamp).nanoseconds) * 1e-9
+            if not 0.0 <= age_scan <= navigation.obstacle_rear_scan_max_age_sec:
+                return False
+        try:
+            transformation = self._memoire_tf.lookup_transform(
+                self._repere_robot, self._dernier_scan.header.frame_id,
+                Time.from_msg(self._dernier_scan.header.stamp))
+        except TransformException:
+            return False
+        return secteur_arriere_est_libre(
+            self._dernier_scan, transformation, distance_requise,
+            navigation.obstacle_rear_sector_half_angle_rad,
+            navigation.obstacle_rear_min_samples,
+            navigation.obstacle_rear_max_angular_gap_rad)
+
+    def _recul_surveille(self):
+        """Effectue un seul recul lent, borné et surveillé à chaque cycle."""
+        navigation = self._configuration.navigation
+        if not navigation.obstacle_retreat_enabled:
+            return False, False
+
+        distance = navigation.obstacle_retreat_distance_m
+        marge_securite = navigation.obstacle_retreat_clearance_m
+        if not self._secteur_arriere_libre(distance + marge_securite):
+            self.get_logger().warning(
+                'Recul refusé : espace arrière non couvert, scan trop ancien '
+                'ou dégagement insuffisant.')
+            return False, False
+        pose_depart = self._pose_odom()
+        if pose_depart is None:
+            self.get_logger().warning('Recul refusé : pose odom indisponible.')
+            return False, False
+
+        self.get_logger().warning(
+            f'Recul surveillé autorisé : {distance:.2f} m à '
+            f'{navigation.obstacle_retreat_speed_mps:.2f} m/s.')
+        fin = time.monotonic() + navigation.obstacle_retreat_timeout_sec
+        commande = Twist()
+        commande.linear.x = -navigation.obstacle_retreat_speed_mps
+        succes = False
+        try:
+            while rclpy.ok() and time.monotonic() < fin:
+                if self.temps_restant() <= 0.0:
+                    break
+                pose = self._pose_odom()
+                if pose is None:
+                    break
+                dx, dy = pose.x - pose_depart.x, pose.y - pose_depart.y
+                progression = -(dx * math.cos(pose_depart.yaw)
+                                + dy * math.sin(pose_depart.yaw))
+                derive_laterale = abs(
+                    -dx * math.sin(pose_depart.yaw)
+                    + dy * math.cos(pose_depart.yaw))
+                if (derive_laterale > navigation.obstacle_retreat_max_lateral_m
+                        or progression < -navigation.obstacle_min_progress_m):
+                    self.get_logger().warning(
+                        'Recul interrompu : trajectoire odom inattendue.')
+                    break
+                if progression >= distance:
+                    succes = True
+                    break
+                restant = distance - max(progression, 0.0)
+                if not self._secteur_arriere_libre(
+                        restant + marge_securite):
+                    self.get_logger().warning(
+                        'Recul interrompu : dégagement arrière perdu ou scan '
+                        'devenu insuffisant.')
+                    break
+                self._publicateur_vitesse.publish(commande)
+                rclpy.spin_once(self, timeout_sec=0.05)
+        finally:
+            self.arreter_robot()
+
+        if not succes:
+            self.get_logger().warning(
+                'Recul surveillé interrompu avant sa distance cible.')
+        return True, succes
 
     def bringup_est_vivant(self):
         # Si aucun programme n'a été lancé (launch_bringup=false), le bringup
@@ -464,8 +573,8 @@ class SolutionTache(Node):
         self.attendre_horloge()
         chemin_carte = self.choisir_carte()
 
-        # Le scan ne sert plus à rien une fois la carte choisie.
-        self.destroy_subscription(self._abonnement_scan)
+        # Garder le scan pendant la mission : le recul est interdit si le
+        # secteur arrière n'est pas mesuré et libre.
         self.demarrer_bringup(chemin_carte)
 
         if not self.attendre_nav2():
@@ -476,8 +585,11 @@ class SolutionTache(Node):
     def boucle_navigation(self):
         tentatives = 0
         refus = 0
+        retries_sans_progres = 0
+        reculs_tentes = 0
 
         while rclpy.ok():
+            distance_avant = self.distance_vers_but()
             if self.est_arrive():
                 resultat = 'succes'
             elif self.temps_restant() <= 0.0:
@@ -527,10 +639,37 @@ class SolutionTache(Node):
                     "Le bringup s'est arrêté : navigation impossible.")
                 return EXIT_FAILURE
 
-            # Échec récupérable : on repart avec des costmaps propres.
-            self._navigateur.vider_costmaps()
-            self.traiter_messages_pendant(
-                float(self.get_parameter('retry_pause_sec').value))
+            # Conserver les observations dans les costmaps et renvoyer la même
+            # destination. Une absence de progrès déclenche une période
+            # d'observation, pas une boucle de manœuvres répétées.
+            distance_apres = self.distance_vers_but()
+            navigation = self._configuration.navigation
+            if distance_avant is not None and distance_apres is not None:
+                progres = distance_avant - distance_apres
+                if progres >= navigation.obstacle_min_progress_m:
+                    retries_sans_progres = 0
+                else:
+                    retries_sans_progres += 1
+
+            if retries_sans_progres >= navigation.obstacle_retries_before_retreat:
+                recul_effectue = False
+                if (navigation.obstacle_retreat_enabled
+                        and reculs_tentes < navigation.obstacle_max_retreat_attempts):
+                    autorise, succes_recul = self._recul_surveille()
+                    if autorise:
+                        reculs_tentes += 1
+                        recul_effectue = succes_recul
+                        if succes_recul:
+                            retries_sans_progres = 0
+                if not recul_effectue:
+                    self.get_logger().warning(
+                        'Pas de progrès : robot immobile en observation, '
+                        'destination conservée et nouvelle planification à venir.')
+                self.traiter_messages_pendant(
+                    navigation.obstacle_observation_sec)
+            else:
+                self.traiter_messages_pendant(
+                    float(self.get_parameter('retry_pause_sec').value))
 
         return EXIT_FAILURE
 

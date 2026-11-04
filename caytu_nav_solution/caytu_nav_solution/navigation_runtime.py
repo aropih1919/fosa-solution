@@ -57,6 +57,63 @@ class TaskTimer:
         return self.remaining() <= 0.0
 
 
+def secteur_arriere_est_libre(scan, transformation, distance_requise,
+                              demi_angle, echantillons_min, ecart_angulaire_max):
+    """Accepte un recul uniquement si le scan couvre et dégage tout son secteur.
+
+    Les rayons sont exprimés dans le repère du capteur ; la transformation vers
+    `base_footprint` permet de vérifier le secteur arrière du robot, même si le
+    lidar est décalé ou orienté différemment. Un rayon manquant ou invalide rend
+    le résultat faux : l'absence d'observation n'est jamais assimilée au vide.
+    """
+    if (scan is None or len(scan.ranges) == 0 or scan.angle_increment <= 0.0
+            or distance_requise <= 0.0 or echantillons_min < 1):
+        return False
+
+    translation = transformation.transform.translation
+    rotation = transformation.transform.rotation
+    decalage_capteur = math.hypot(translation.x, translation.y)
+    portee_requise = distance_requise + decalage_capteur
+    if scan.range_max < portee_requise:
+        return False
+
+    x, y, z, w = rotation.x, rotation.y, rotation.z, rotation.w
+    angles = []
+    for index, mesure in enumerate(scan.ranges):
+        angle_capteur = scan.angle_min + index * scan.angle_increment
+        vx, vy = math.cos(angle_capteur), math.sin(angle_capteur)
+        uv = (-z * vy, z * vx, x * vy - y * vx)
+        uuv = (y * uv[2] - z * uv[1],
+               z * uv[0] - x * uv[2],
+               x * uv[1] - y * uv[0])
+        direction_x = vx + 2.0 * (w * uv[0] + uuv[0])
+        direction_y = vy + 2.0 * (w * uv[1] + uuv[1])
+        angle_base = math.atan2(direction_y, direction_x)
+        ecart = (angle_base - math.pi + math.pi) % (2.0 * math.pi) - math.pi
+        if abs(ecart) > demi_angle:
+            continue
+
+        portee_requise_ray = portee_requise / math.cos(ecart)
+        valeur = float(mesure)
+        if math.isnan(valeur) or valeur < scan.range_min:
+            return False
+        if math.isinf(valeur):
+            if valeur < 0.0 or scan.range_max < portee_requise_ray:
+                return False
+        elif valeur < portee_requise_ray or valeur > scan.range_max:
+            return False
+        angles.append(ecart)
+
+    if len(angles) < echantillons_min:
+        return False
+    angles.sort()
+    ecarts = [angles[0] + demi_angle]
+    ecarts.extend(droite - gauche
+                  for gauche, droite in zip(angles, angles[1:]))
+    ecarts.append(demi_angle - angles[-1])
+    return max(ecarts, default=float('inf')) <= ecart_angulaire_max
+
+
 class BringupManager:
     """Lance `ros2 launch` dans un groupe de processus et l'arrête proprement."""
 

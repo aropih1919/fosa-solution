@@ -231,11 +231,24 @@ def test_cafe_map_is_in_the_gazebo_frame_and_keeps_spawn_and_goal_free():
     assert any(value(4.34 + d, -6.0) == 0 for d in (-0.1, -0.05, 0.0, 0.05, 0.1))
 
 
-def test_behavior_tree_only_uses_known_recovery_services():
+def test_behavior_tree_preserve_les_obstacles_et_n_essaie_pas_de_recul_aveugle():
     text = (PACKAGE_DIR / "behavior_trees" / "navigate_bounded_recovery.xml").read_text(
         encoding="utf-8")
     assert 'main_tree_to_execute="MainTree"' in text
-    assert "local_costmap/clear_entirely_local_costmap" in text
-    assert "global_costmap/clear_entirely_global_costmap" in text
+    assert '<RateController hz="2.0">' in text
+    assert "ClearEntireCostmap" not in text
+    assert "BackUp" not in text
+    assert "<Spin" not in text
     assert 'default_controller="FollowPath"' in text
     assert 'default_planner="GridBased"' in text
+
+    behavior = nav2()["behavior_server"]["ros__parameters"]
+    assert behavior["behavior_plugins"] == ["wait"]
+    assert "backup" not in behavior
+
+    task = (Path(__file__).resolve().parents[2]
+            / "caytu_nav_solution" / "caytu_nav_solution" / "task_solution.py")
+    task_text = task.read_text(encoding="utf-8")
+    assert ".vider_costmaps()" not in task_text
+    assert "obstacle_retreat_enabled" in task_text
+    assert "obstacle_observation_sec" in task_text

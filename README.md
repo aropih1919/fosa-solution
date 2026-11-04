@@ -132,6 +132,7 @@ colcon test-result --verbose
 
 ## 3. Documentation de référence
 
-Pour approfondir, deux guides complets sont à votre disposition :
+Pour approfondir, les guides suivants sont à votre disposition :
 1. **[Contexte & Architecture détaillée](file:///home/johny-olivier/ros2_ws/src/fosa-solution/docs/CONTEXTE_ET_ARCHITECTURE.md)** : description approfondie des 7 paquets, de la configuration centralisée (`fosa.yaml`) et des conventions de code `refactor/franglais`.
 2. **[Guide des tests pas-à-pas](file:///home/johny-olivier/ros2_ws/src/fosa-solution/docs/GUIDE_TESTS.md)** : scénarios complets de validation manuelle pour la Phase 1 et la Phase 2.
+3. **[Obstacles mobiles](docs/OBSTACLES_MOBILES.md)** : appariement YOLO/profondeur, suivi compensé dans `odom`, comportement Nav2, garde-fous de recul et campagne de validation.

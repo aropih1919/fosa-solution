@@ -7,6 +7,7 @@ system:
   deployment: simulation          # local | remote_pc | simulation
   use_sim_time: true
   global_frame: map
+  odom_frame: odom
   base_frame: base_footprint
   ros_domain_id: 42
   clock_topic: /clock
@@ -44,6 +45,22 @@ navigation:
 
   guiding_speed_mps: 0.30
   guiding_wait_sec: 15.0
+
+  # Politique de dégagement face aux obstacles mobiles.
+  obstacle_min_progress_m: 0.10
+  obstacle_retries_before_retreat: 3
+  obstacle_observation_sec: 4.0
+  obstacle_retreat_enabled: false # activer seulement après validation couverture arrière
+  obstacle_max_retreat_attempts: 1
+  obstacle_retreat_distance_m: 0.20
+  obstacle_retreat_speed_mps: 0.08
+  obstacle_retreat_clearance_m: 0.60
+  obstacle_retreat_timeout_sec: 5.0
+  obstacle_retreat_max_lateral_m: 0.08
+  obstacle_rear_sector_half_angle_rad: 0.70
+  obstacle_rear_scan_max_age_sec: 0.25
+  obstacle_rear_min_samples: 5
+  obstacle_rear_max_angular_gap_rad: 0.20
 
   # Carte vide de secours (monde différent du café).
   blank_map_resolution: 0.05
@@ -84,10 +101,18 @@ perception:
     enabled: true                 # install.sh --models télécharge et exporte le modèle ONNX
     model_path: models/yolo11n.onnx
     confidence: 0.45
+    nms_iou_threshold: 0.45
+    max_detections: 100
     input_size: 640
     person_class_index: 0
     max_fps: 8.0
     device: cpu
+
+  tracking:
+    image_cloud_sync_slop_sec: 0.08
+    max_observation_age_sec: 0.50
+    track_max_gap_sec: 0.75
+    min_projected_points: 3
 
   person:
     min_distance_m: 0.8
@@ -101,7 +126,6 @@ perception:
     cluster_tolerance_m: 0.18
     min_cluster_points: 12
     tracker_match_m: 0.45
-    bearing_tolerance_rad: 0.25
     front_fov_rad: 1.57
     robot_stop_threshold_mps: 0.03
 
@@ -188,7 +212,7 @@ dialogue:
   state_topic: /assistant/state
 
 mission:
-  greeting_enabled: true
+  greeting_enabled: false # la reconnaissance personne n'entraîne pas de salutation dans ce périmètre
   emergency_location: infirmerie
   default_wait_sec: 20.0
   emergency_keywords: [mal, blessé, blessure, secours, urgence, tomber, tombé, évanoui, sang]

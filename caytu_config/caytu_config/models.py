@@ -114,6 +114,7 @@ class SystemConfig:
     deployment: str
     use_sim_time: bool
     global_frame: str
+    odom_frame: str
     base_frame: str
     ros_domain_id: int
     clock_topic: str
@@ -122,7 +123,7 @@ class SystemConfig:
     def from_mapping(cls, data, path="system"):
         data = _section(data, path)
         _check_keys(data, (
-            "deployment", "use_sim_time", "global_frame", "base_frame",
+            "deployment", "use_sim_time", "global_frame", "odom_frame", "base_frame",
             "ros_domain_id", "clock_topic"), path)
         return cls(
             deployment=_choice(
@@ -132,6 +133,8 @@ class SystemConfig:
                 _get(data, "use_sim_time", path), f"{path}.use_sim_time"),
             global_frame=_as_str(
                 _get(data, "global_frame", path), f"{path}.global_frame"),
+            odom_frame=_as_str(
+                _get(data, "odom_frame", path), f"{path}.odom_frame"),
             base_frame=_as_str(
                 _get(data, "base_frame", path), f"{path}.base_frame"),
             ros_domain_id=_as_int(
@@ -172,6 +175,20 @@ class NavigationConfig:
     local_costmap_clear_service: str
     guiding_speed_mps: float
     guiding_wait_sec: float
+    obstacle_min_progress_m: float
+    obstacle_retries_before_retreat: int
+    obstacle_observation_sec: float
+    obstacle_retreat_enabled: bool
+    obstacle_max_retreat_attempts: int
+    obstacle_retreat_distance_m: float
+    obstacle_retreat_speed_mps: float
+    obstacle_retreat_clearance_m: float
+    obstacle_retreat_timeout_sec: float
+    obstacle_retreat_max_lateral_m: float
+    obstacle_rear_sector_half_angle_rad: float
+    obstacle_rear_scan_max_age_sec: float
+    obstacle_rear_min_samples: int
+    obstacle_rear_max_angular_gap_rad: float
     blank_map_resolution: float
     blank_map_margin: float
     clock_wait_sec: float
@@ -194,11 +211,20 @@ class NavigationConfig:
             "bringup_launch", "scan_topic", "amcl_pose_topic",
             "cmd_vel_topic", "global_costmap_clear_service",
             "local_costmap_clear_service", "guiding_speed_mps",
-            "guiding_wait_sec", "blank_map_resolution", "blank_map_margin",
+            "guiding_wait_sec", "obstacle_min_progress_m",
+            "obstacle_retries_before_retreat", "obstacle_observation_sec",
+            "obstacle_retreat_enabled", "obstacle_max_retreat_attempts",
+            "obstacle_retreat_distance_m", "obstacle_retreat_speed_mps",
+            "obstacle_retreat_clearance_m", "obstacle_retreat_timeout_sec",
+            "obstacle_retreat_max_lateral_m",
+            "obstacle_rear_sector_half_angle_rad",
+            "obstacle_rear_scan_max_age_sec", "obstacle_rear_min_samples",
+            "obstacle_rear_max_angular_gap_rad",
+            "blank_map_resolution", "blank_map_margin",
             "clock_wait_sec", "cancel_timeout_sec", "bringup_stop_timeouts",
             "stop_repeat_count", "feedback_log_period_sec",
             "floor_line_distance"), path)
-        return cls(
+        config = cls(
             map_yaml=_as_str(
                 _get(data, "map_yaml", path, ""), f"{path}.map_yaml",
                 allow_empty=True),
@@ -272,6 +298,54 @@ class NavigationConfig:
             guiding_wait_sec=_as_number(
                 _get(data, "guiding_wait_sec", path),
                 f"{path}.guiding_wait_sec", minimum=0.0),
+            obstacle_min_progress_m=_as_number(
+                _get(data, "obstacle_min_progress_m", path),
+                f"{path}.obstacle_min_progress_m", positive=True),
+            obstacle_retries_before_retreat=_as_int(
+                _get(data, "obstacle_retries_before_retreat", path),
+                f"{path}.obstacle_retries_before_retreat", 1),
+            obstacle_observation_sec=_as_number(
+                _get(data, "obstacle_observation_sec", path),
+                f"{path}.obstacle_observation_sec", positive=True),
+            obstacle_retreat_enabled=_as_bool(
+                _get(data, "obstacle_retreat_enabled", path),
+                f"{path}.obstacle_retreat_enabled"),
+            obstacle_max_retreat_attempts=_as_int(
+                _get(data, "obstacle_max_retreat_attempts", path),
+                f"{path}.obstacle_max_retreat_attempts", 0, 1),
+            obstacle_retreat_distance_m=_as_number(
+                _get(data, "obstacle_retreat_distance_m", path),
+                f"{path}.obstacle_retreat_distance_m", positive=True,
+                maximum=0.25),
+            obstacle_retreat_speed_mps=_as_number(
+                _get(data, "obstacle_retreat_speed_mps", path),
+                f"{path}.obstacle_retreat_speed_mps", positive=True,
+                maximum=0.10),
+            obstacle_retreat_clearance_m=_as_number(
+                _get(data, "obstacle_retreat_clearance_m", path),
+                f"{path}.obstacle_retreat_clearance_m", minimum=0.25),
+            obstacle_retreat_timeout_sec=_as_number(
+                _get(data, "obstacle_retreat_timeout_sec", path),
+                f"{path}.obstacle_retreat_timeout_sec", positive=True,
+                maximum=8.0),
+            obstacle_retreat_max_lateral_m=_as_number(
+                _get(data, "obstacle_retreat_max_lateral_m", path),
+                f"{path}.obstacle_retreat_max_lateral_m", positive=True,
+                maximum=0.10),
+            obstacle_rear_sector_half_angle_rad=_as_number(
+                _get(data, "obstacle_rear_sector_half_angle_rad", path),
+                f"{path}.obstacle_rear_sector_half_angle_rad", positive=True),
+            obstacle_rear_scan_max_age_sec=_as_number(
+                _get(data, "obstacle_rear_scan_max_age_sec", path),
+                f"{path}.obstacle_rear_scan_max_age_sec", positive=True,
+                maximum=0.50),
+            obstacle_rear_min_samples=_as_int(
+                _get(data, "obstacle_rear_min_samples", path),
+                f"{path}.obstacle_rear_min_samples", 1),
+            obstacle_rear_max_angular_gap_rad=_as_number(
+                _get(data, "obstacle_rear_max_angular_gap_rad", path),
+                f"{path}.obstacle_rear_max_angular_gap_rad", positive=True,
+                maximum=0.25),
             blank_map_resolution=_as_number(
                 _get(data, "blank_map_resolution", path),
                 f"{path}.blank_map_resolution", positive=True),
@@ -297,6 +371,10 @@ class NavigationConfig:
                 _get(data, "floor_line_distance", path),
                 f"{path}.floor_line_distance", minimum=0.0),
         )
+        if config.obstacle_rear_sector_half_angle_rad >= 1.5708:
+            raise ConfigurationError(
+                f"{path}.obstacle_rear_sector_half_angle_rad doit être < π/2.")
+        return config
 
 
 # ------------------------------------------------------------------ perception
@@ -359,6 +437,8 @@ class YoloConfig:
     enabled: bool
     model_path: str
     confidence: float
+    nms_iou_threshold: float
+    max_detections: int
     input_size: int
     person_class_index: int
     max_fps: float
@@ -368,8 +448,9 @@ class YoloConfig:
     def from_mapping(cls, data, path="perception.yolo"):
         data = _section(data, path)
         _check_keys(data, (
-            "enabled", "model_path", "confidence", "input_size",
-            "person_class_index", "max_fps", "device"), path)
+            "enabled", "model_path", "confidence", "nms_iou_threshold",
+            "max_detections", "input_size", "person_class_index",
+            "max_fps", "device"), path)
         return cls(
             enabled=_as_bool(_get(data, "enabled", path), f"{path}.enabled"),
             model_path=_as_str(
@@ -377,6 +458,12 @@ class YoloConfig:
                 allow_empty=True),
             confidence=_as_number(
                 _get(data, "confidence", path), f"{path}.confidence", 0.0, 1.0),
+            nms_iou_threshold=_as_number(
+                _get(data, "nms_iou_threshold", path),
+                f"{path}.nms_iou_threshold", 0.0, 1.0),
+            max_detections=_as_int(
+                _get(data, "max_detections", path),
+                f"{path}.max_detections", 1),
             input_size=_as_int(
                 _get(data, "input_size", path), f"{path}.input_size", 1),
             person_class_index=_as_int(
@@ -385,6 +472,35 @@ class YoloConfig:
             max_fps=_as_number(
                 _get(data, "max_fps", path), f"{path}.max_fps", positive=True),
             device=_as_str(_get(data, "device", path), f"{path}.device"),
+        )
+
+
+@dataclass(frozen=True)
+class ObstacleTrackingConfig:
+    image_cloud_sync_slop_sec: float
+    max_observation_age_sec: float
+    track_max_gap_sec: float
+    min_projected_points: int
+
+    @classmethod
+    def from_mapping(cls, data, path="perception.tracking"):
+        data = _section(data, path)
+        _check_keys(data, (
+            "image_cloud_sync_slop_sec", "max_observation_age_sec",
+            "track_max_gap_sec", "min_projected_points"), path)
+        return cls(
+            image_cloud_sync_slop_sec=_as_number(
+                _get(data, "image_cloud_sync_slop_sec", path),
+                f"{path}.image_cloud_sync_slop_sec", minimum=0.0),
+            max_observation_age_sec=_as_number(
+                _get(data, "max_observation_age_sec", path),
+                f"{path}.max_observation_age_sec", positive=True),
+            track_max_gap_sec=_as_number(
+                _get(data, "track_max_gap_sec", path),
+                f"{path}.track_max_gap_sec", positive=True),
+            min_projected_points=_as_int(
+                _get(data, "min_projected_points", path),
+                f"{path}.min_projected_points", 1),
         )
 
 
@@ -401,7 +517,6 @@ class PersonConfig:
     cluster_tolerance_m: float
     min_cluster_points: int
     tracker_match_m: float
-    bearing_tolerance_rad: float
     front_fov_rad: float
     robot_stop_threshold_mps: float
 
@@ -413,8 +528,7 @@ class PersonConfig:
             "consecutive_frames", "cooldown_sec", "dynamic_speed_mps",
             "min_height_m", "max_width_m", "cluster_tolerance_m",
             "min_cluster_points", "tracker_match_m",
-            "bearing_tolerance_rad", "front_fov_rad",
-            "robot_stop_threshold_mps"), path)
+            "front_fov_rad", "robot_stop_threshold_mps"), path)
         config = cls(
             min_distance_m=_as_number(
                 _get(data, "min_distance_m", path),
@@ -449,9 +563,6 @@ class PersonConfig:
             tracker_match_m=_as_number(
                 _get(data, "tracker_match_m", path),
                 f"{path}.tracker_match_m", positive=True),
-            bearing_tolerance_rad=_as_number(
-                _get(data, "bearing_tolerance_rad", path),
-                f"{path}.bearing_tolerance_rad", positive=True),
             front_fov_rad=_as_number(
                 _get(data, "front_fov_rad", path),
                 f"{path}.front_fov_rad", positive=True),
@@ -550,6 +661,7 @@ class PerceptionConfig:
     person_events_topic: str
     apriltag: AprilTagConfig
     yolo: YoloConfig
+    tracking: ObstacleTrackingConfig
     person: PersonConfig
     top_scan: ScanConversionConfig
     bottom_scan: ScanConversionConfig
@@ -561,7 +673,7 @@ class PerceptionConfig:
             "top_color_topic", "top_depth_topic", "top_info_topic",
             "bottom_color_topic", "bottom_depth_topic", "entities_topic",
             "tags_topic", "person_events_topic", "apriltag", "yolo",
-            "person", "top_scan", "bottom_scan"), path)
+            "tracking", "person", "top_scan", "bottom_scan"), path)
         return cls(
             top_color_topic=_as_str(
                 _get(data, "top_color_topic", path),
@@ -590,6 +702,8 @@ class PerceptionConfig:
                 _get(data, "apriltag", path), f"{path}.apriltag"),
             yolo=YoloConfig.from_mapping(
                 _get(data, "yolo", path), f"{path}.yolo"),
+            tracking=ObstacleTrackingConfig.from_mapping(
+                _get(data, "tracking", path), f"{path}.tracking"),
             person=PersonConfig.from_mapping(
                 _get(data, "person", path), f"{path}.person"),
             top_scan=ScanConversionConfig.from_mapping(

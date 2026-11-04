@@ -12,6 +12,7 @@ from caytu_nav_solution.navigation_runtime import (
     construire_but,
     est_arrive,
     Nav2Navigator,
+    secteur_arriere_est_libre,
     TaskTimer,
 )
 import pytest
@@ -113,6 +114,50 @@ def test_le_chronometre_deduit_la_marge_et_signale_l_echeance():
 
     clock.advance(589.0)
     assert timer.expired() is True
+
+
+def _scan_recul(ranges, angle_min=-math.pi, angle_increment=2 * math.pi / 360,
+                range_max=5.0):
+    return SimpleNamespace(
+        ranges=ranges,
+        angle_min=angle_min,
+        angle_increment=angle_increment,
+        range_min=0.05,
+        range_max=range_max,
+    )
+
+
+def _tf_identite(translation=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0, 1.0)):
+    return SimpleNamespace(transform=SimpleNamespace(
+        translation=SimpleNamespace(x=translation[0], y=translation[1]),
+        rotation=SimpleNamespace(
+            x=rotation[0], y=rotation[1], z=rotation[2], w=rotation[3])))
+
+
+def test_le_recul_refuse_si_un_obstacle_est_dans_le_secteur_arriere():
+    ranges = [5.0] * 360
+    ranges[0] = 0.5  # rayon centré vers l'arrière
+
+    assert not secteur_arriere_est_libre(
+        _scan_recul(ranges), _tf_identite(), 1.0, 0.7, 5, 0.2)
+
+
+def test_le_recul_refuse_si_le_secteur_arriere_n_est_pas_couvert():
+    scan = _scan_recul([5.0] * 30, angle_min=-0.5, angle_increment=0.03)
+
+    assert not secteur_arriere_est_libre(
+        scan, _tf_identite(), 1.0, 0.7, 5, 0.2)
+
+
+def test_le_recul_accepte_un_secteur_complet_et_libre():
+    assert secteur_arriere_est_libre(
+        _scan_recul([5.0] * 360), _tf_identite(), 1.0, 0.7, 5, 0.2)
+
+
+def test_le_recul_refuse_un_scan_dont_la_portee_est_trop_courte():
+    assert not secteur_arriere_est_libre(
+        _scan_recul([1.0] * 360, range_max=1.0),
+        _tf_identite(translation=(0.2, 0.0, 0.0)), 1.0, 0.7, 5, 0.2)
 
 
 def test_le_bringup_construit_une_commande_sans_shell_et_nettoie(tmp_path):

@@ -6,7 +6,10 @@ ce qui permet d'exécuter ces tests dans un environnement CI sans ROS installé.
 
 import math
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Mock de tous les modules ROS et dépendances avant tout import du paquet
@@ -54,7 +57,10 @@ from caytu_perception.detecteur_tags import (  # noqa: E402
     _tourner_vecteur,
 )
 from caytu_perception.classificateur_obstacles import (  # noqa: E402
+    _associer_boite_yolo,
+    _associer_suivis_odom,
     _composantes,
+    _extraire_boites_yolo,
     _tourner_quaternion,
 )
 
@@ -232,11 +238,9 @@ class TestComposantesConnexes:
         assert tailles == [2, 3]
 
     def test_composantes_connexes_points_adjacents_fusionnes(self):
-        """Points voisins dans la grille → une seule composante."""
-        # Deux points séparés de 0.4 m avec tolérance 0.5 m → même cellule ou adjacents
+        """Des points voisins dans la grille forment une même composante."""
         points = [(0.0, 0.0, 0.0), (0.4, 0.0, 0.0), (0.8, 0.0, 0.0)]
         composantes = list(_composantes(points, tolerance=0.5))
-        # Tous dans des cellules voisines → une seule composante
         assert len(composantes) == 1
         assert len(composantes[0]) == 3
 
@@ -245,6 +249,94 @@ class TestComposantesConnexes:
         points = [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0)]
         composantes = list(_composantes(points, tolerance=0.5))
         assert len(composantes) == 2
+
+
+class TestFusionYoloProfondeurEtSuiviOdom:
+    """Association image-profondeur et suivi corrigé du déplacement robot."""
+
+    def test_sorties_yolo_ne_gardent_que_personne_et_obstacle(self):
+        configuration = SimpleNamespace(
+            input_size=640, confidence=0.45, person_class_index=0,
+            nms_iou_threshold=0.45, max_detections=100)
+        personne = np.zeros(84, dtype=np.float32)
+        personne[:4] = (320, 320, 200, 240)
+        personne[4] = 0.90
+        personne_doublon = personne.copy()
+        personne_doublon[4] = 0.80
+        mobilier = np.zeros(84, dtype=np.float32)
+        mobilier[:4] = (160, 160, 100, 100)
+        mobilier[5] = 0.80
+        sortie = np.asarray((personne, personne_doublon, mobilier))
+
+        boites = _extraire_boites_yolo(sortie, 640, 480, configuration)
+
+        assert [boite[0] for boite in boites] == ['personne', 'obstacle']
+        assert boites[0][1] == pytest.approx(0.90)
+        assert boites[0][2:] == pytest.approx((220, 120, 420, 360))
+
+    def test_detection_yolo_associee_aux_points_projetes_dans_sa_boite(self):
+        cluster = [
+            (1.0, 0.0, 1.0, 1.0, 0.0, 101.0, 90.0),
+            (1.1, 0.0, 1.0, 1.1, 0.0, 104.0, 95.0),
+            (1.2, 0.0, 1.0, 1.2, 0.0, 106.0, 99.0),
+            (1.3, 0.0, 1.0, 1.3, 0.0, 300.0, 300.0),
+        ]
+        boite = ('personne', 0.9, 80.0, 80.0, 120.0, 120.0)
+
+        assert _associer_boite_yolo(cluster, [boite], 3) == boite
+        assert _associer_boite_yolo(cluster, [boite], 4) is None
+
+    @staticmethod
+    def _entite(categorie='obstacle'):
+        return SimpleNamespace(
+            velocity=SimpleNamespace(x=0.0, y=0.0),
+            track_id=0, is_dynamic=False, class_name=categorie)
+
+    def test_un_obstacle_fixe_reste_statique_quand_robot_change_de_pose(self):
+        premier = self._entite()
+        entites, suivis, prochain_id = _associer_suivis_odom(
+            [(premier, 2.0, 1.0)], [], 1, 1_000_000_000,
+            0.45, 0.75, 0.10, (0.0, 0.0, 0.0, 1.0))
+        second = self._entite()
+        quaternion_rotation_robot = (
+            0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4))
+        entites, suivis, prochain_id = _associer_suivis_odom(
+            [(second, 2.0, 1.0)], suivis, prochain_id, 1_100_000_000,
+            0.45, 0.75, 0.10, quaternion_rotation_robot)
+
+        assert entites[0].track_id == premier.track_id
+        assert entites[0].is_dynamic is False
+        assert entites[0].velocity.x == pytest.approx(0.0)
+        assert entites[0].velocity.y == pytest.approx(0.0)
+        assert prochain_id == 2
+
+    def test_un_changement_de_categorie_ne_reutilise_pas_le_suivi(self):
+        obstacle = self._entite('obstacle')
+        _, suivis, prochain_id = _associer_suivis_odom(
+            [(obstacle, 1.0, 0.0)], [], 1, 1_000_000_000,
+            0.45, 0.75, 0.10, (0.0, 0.0, 0.0, 1.0))
+        personne = self._entite('personne')
+        entites, _, prochain_id = _associer_suivis_odom(
+            [(personne, 1.0, 0.0)], suivis, prochain_id, 1_100_000_000,
+            0.45, 0.75, 0.10, (0.0, 0.0, 0.0, 1.0))
+
+        assert entites[0].track_id != obstacle.track_id
+        assert prochain_id == 3
+
+    def test_obstacle_mobile_recoit_vitesse_et_est_marque_dynamique(self):
+        premier = self._entite()
+        _, suivis, prochain_id = _associer_suivis_odom(
+            [(premier, 1.0, 0.0)], [], 1, 1_000_000_000,
+            0.45, 0.75, 0.10, (0.0, 0.0, 0.0, 1.0))
+        second = self._entite()
+        entites, _, _ = _associer_suivis_odom(
+            [(second, 1.2, 0.0)], suivis, prochain_id, 2_000_000_000,
+            0.45, 1.5, 0.10, (0.0, 0.0, 0.0, 1.0))
+
+        assert entites[0].track_id == 1
+        assert entites[0].is_dynamic is True
+        assert entites[0].velocity.x == pytest.approx(0.2)
+        assert entites[0].velocity.y == pytest.approx(0.0)
 
 
 # ===========================================================================

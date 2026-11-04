@@ -155,7 +155,9 @@ class GestionnaireDialogue(Node):
             if resultat == 'refuse':
                 time.sleep(self._configuration.navigation.retry_pause_sec)
             else:
-                self._navigator.vider_costmaps()
+                # Ne pas vider les observations : une personne ou un obstacle
+                # mobile doit rester marqué jusqu'à ce que les capteurs
+                # confirment que le passage est libre.
                 time.sleep(self._configuration.navigation.retry_pause_sec)
         return False, 'limite de temps atteinte'
 

@@ -36,12 +36,18 @@ def test_la_configuration_par_defaut_est_valide():
     configuration = load_config(CONFIG)
     assert configuration.system.deployment == "simulation"
     assert configuration.system.use_sim_time is True
+    assert configuration.system.odom_frame == "odom"
     assert configuration.navigation.controller == "rpp"
     assert configuration.navigation.profile == "balanced"
     assert configuration.navigation.localization == "odom_imu"
     assert configuration.navigation.time_limit_sec == 600.0
     assert configuration.perception.apriltag.family == "36h11"
     assert configuration.perception.apriltag.size_m == 0.18
+    assert configuration.perception.yolo.nms_iou_threshold == 0.45
+    assert configuration.perception.yolo.max_detections == 100
+    assert configuration.perception.tracking.image_cloud_sync_slop_sec == 0.08
+    assert configuration.navigation.obstacle_retreat_enabled is False
+    assert configuration.mission.greeting_enabled is False
     assert configuration.dialogue.llm.provider == "local"
     assert configuration.audio.sample_rate == 16000
     assert "fr" in configuration.dialogue.languages
@@ -94,6 +100,28 @@ def test_une_valeur_invalide_est_refusee(tmp_path):
 
     _modifier_yaml(dossier / "fosa.yaml", invalider)
     with pytest.raises(ConfigurationError, match="success_radius"):
+        load_config(dossier)
+
+
+def test_un_secteur_arriere_trop_large_est_refuse(tmp_path):
+    dossier = _copier_configuration(tmp_path / "config")
+
+    def invalider(contenu):
+        contenu["navigation"]["obstacle_rear_sector_half_angle_rad"] = 2.0
+
+    _modifier_yaml(dossier / "fosa.yaml", invalider)
+    with pytest.raises(ConfigurationError, match="obstacle_rear_sector_half_angle_rad"):
+        load_config(dossier)
+
+
+def test_une_vitesse_de_recul_superieure_a_la_limite_est_refusee(tmp_path):
+    dossier = _copier_configuration(tmp_path / "config")
+
+    def invalider(contenu):
+        contenu["navigation"]["obstacle_retreat_speed_mps"] = 0.11
+
+    _modifier_yaml(dossier / "fosa.yaml", invalider)
+    with pytest.raises(ConfigurationError, match="obstacle_retreat_speed_mps"):
         load_config(dossier)
 
 
