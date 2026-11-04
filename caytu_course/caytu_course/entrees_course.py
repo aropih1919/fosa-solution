@@ -8,7 +8,6 @@ from collections import deque
 from dataclasses import dataclass
 import json
 import math
-import time
 
 from nav_msgs.msg import OccupancyGrid
 from rclpy.qos import (
@@ -42,7 +41,7 @@ class DetectionRobot:
     y: float
     cap: float          # normale du tag dans le repère du robot
     distance: float
-    instant: float      # time.monotonic() de réception
+    instant: float      # horloge ROS à la réception (simulée dans Gazebo)
 
 
 def _qos(fiabilite, durabilite, profondeur):
@@ -193,7 +192,7 @@ class EntreesCourse:
 
     # -------------------------------------------------------------- détections
     def _recevoir_detections(self, message):
-        maintenant = time.monotonic()
+        maintenant = self._maintenant()
         for detection in message.detections:
             if detection.has_pose_map:
                 pose = detection.pose_map.pose
@@ -217,9 +216,13 @@ class EntreesCourse:
                         detection.distance_m, maintenant)
             self._stamps_tag[detection.tag_id] = _cle_image(detection.header)
 
+    def _maintenant(self):
+        """Horloge ROS : Gazebo peut tourner bien plus lentement que le temps réel."""
+        return self._node.get_clock().now().nanoseconds * 1e-9
+
     def detection_recente(self, tag_id, age_max):
         detection = self._detections_robot.get(tag_id)
-        if detection is None or time.monotonic() - detection.instant > age_max:
+        if detection is None or self._maintenant() - detection.instant > age_max:
             return None
         return detection
 

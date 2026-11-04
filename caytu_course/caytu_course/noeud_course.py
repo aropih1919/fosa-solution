@@ -99,6 +99,8 @@ class NoeudCourse(Node):
             self._memoire_tf, self, spin_thread=False)
         self._memoire = self._charger_memoire()
         self._tags_reperes.update(self._memoire.ids())
+        # Minuteur : les tags repérés sont annoncés aussi pendant un trajet Nav2.
+        self.create_timer(0.5, self._annoncer_tags_reperes)
         self._entrees = EntreesCourse(
             self, configuration, self._memoire, self._memoire_tf,
             lambda: self._en_attente)
@@ -140,6 +142,7 @@ class NoeudCourse(Node):
         course, alignement = self._course, self._course.alignment
         return ReglagesAlignement(
             tolerance_cap=math.radians(course.heading_tolerance_deg),
+            tolerance_laterale=course.lateral_tolerance_m,
             gain_lineaire=alignement.linear_gain,
             gain_angulaire=alignement.angular_gain,
             max_lineaire=alignement.max_linear_mps,
@@ -201,7 +204,6 @@ class NoeudCourse(Node):
             if restant <= 0.0:
                 break
             rclpy.spin_once(self, timeout_sec=min(0.05, restant))
-        self._annoncer_tags_reperes()
 
     def publier_vitesse(self, lineaire, angulaire):
         commande = Twist()
@@ -473,7 +475,11 @@ class NoeudCourse(Node):
         memoire = self._memoire.pose(tag_id)
         if memoire is None:
             return None
-        return memoire.x, memoire.y, memoire.cap, memoire.distance_min
+        # Distance depuis la position ACTUELLE du robot : distance_min est celle
+        # de la meilleure vue (souvent faite en préparation, ailleurs dans l'arène).
+        distance = (math.hypot(memoire.x - robot.x, memoire.y - robot.y)
+                    if robot is not None else memoire.distance_min)
+        return memoire.x, memoire.y, memoire.cap, distance
 
     def _visiter(self, tag_id, abandonner):
         """Approche Nav2 puis alignement visuel ; retourne visite/perdu/echec/temps_ecoule.
@@ -536,10 +542,15 @@ class NoeudCourse(Node):
             self._raison_echec = 'nav2'
             self.traiter_pendant(0.5)
             return 'reessayer'
-        courante = self._pose_tag_courante(tag_id)
-        if courante is not None and courante[3] <= (
-                course.approach_distance_m + course.preapproach_margin_m):
-            return 'arrive'   # même si Nav2 a abandonné : le tag est à portée
+        # Le tag doit être REVU de près (la mémoire seule ne prouve rien) ; la
+        # caméra a jusqu'à une seconde pour le détecter après l'arrêt.
+        portee = course.approach_distance_m + course.preapproach_margin_m
+        fin = self._temps() + 1.0      # horloge ROS : Gazebo peut être lent
+        while rclpy.ok() and self._temps() < fin:
+            vue = self._entrees.detection_recente(tag_id, course.detection_max_age_sec)
+            if vue is not None and vue.distance <= portee:
+                return 'arrive'   # même si Nav2 a abandonné : le tag est à portée
+            self.traiter_pendant(PERIODE_BOUCLE)
         if resultat == 'reessayer':
             self._raison_echec = 'nav2'
             return 'reessayer'

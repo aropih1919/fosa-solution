@@ -8,6 +8,11 @@ le trajet en deux temps :
    puis rouler en corrigeant le cap, en marche arrière s'il est derrière ;
 2. une fois au point, tourner sur place pour faire face au tag.
 
+« Au point » : bonne distance, et écart latéral dans la tolérance. Vouloir
+rattraper quelques centimètres de côté faisait pivoter le robot vers le point
+(jusqu'à 80°), le tag sortait du champ de la caméra et le robot oscillait au
+bord du champ jusqu'au délai (simulation).
+
 Un écart latéral se corrige donc en roulant ; seul un écart très grand (tag
 vu de biais, ou trop loin) redemande une navigation Nav2.
 """
@@ -24,6 +29,7 @@ HYSTERESIS_POINT = 2.0
 @dataclass(frozen=True)
 class ReglagesAlignement:
     tolerance_cap: float         # au-delà, tourner sur place avant de rouler
+    tolerance_laterale: float    # écart latéral accepté une fois à bonne distance
     gain_lineaire: float
     gain_angulaire: float
     max_lineaire: float
@@ -68,7 +74,9 @@ def commande_alignement(erreurs, reglages, au_point=False):
         return CommandeAlignement(0.0, 0.0, 'renaviguer')
     ecart = math.hypot(erreurs.vers_point_x, erreurs.vers_point_y)
     seuil = reglages.precision_point * (HYSTERESIS_POINT if au_point else 1.0)
-    if ecart <= seuil:
+    bonne_distance = (abs(erreurs.distance) <= seuil
+                      and abs(erreurs.laterale) <= reglages.tolerance_laterale)
+    if ecart <= seuil or bonne_distance:
         if abs(erreurs.cap) <= reglages.precision_cap:
             return CommandeAlignement(0.0, 0.0, 'aligne', True)
         return _tourner(erreurs.cap, reglages, au_point=True)

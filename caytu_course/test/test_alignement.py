@@ -18,7 +18,7 @@ from caytu_course.alignement import (
 from caytu_course.geometrie_tags import erreurs_visite
 
 REGLAGES = ReglagesAlignement(
-    tolerance_cap=math.radians(5.0), gain_lineaire=0.6, gain_angulaire=1.2,
+    tolerance_cap=math.radians(5.0), tolerance_laterale=0.06, gain_lineaire=0.6, gain_angulaire=1.2,
     max_lineaire=0.08, max_angulaire=0.35, min_lineaire=0.03, min_angulaire=0.10,
     precision_point=0.025, precision_cap=math.radians(2.0),
     erreur_distance_max=0.75, erreur_laterale_max=0.30)
@@ -119,6 +119,24 @@ def test_trop_loin_pour_l_asservissement_visuel_on_renavigue():
     """Revue : sans borne, le robot pouvait rouler 1,6 m sans planification."""
     assert _commande(1.3, 0.0).etat == 'renaviguer'
     assert _commande(1.2, 0.0).etat == 'en_cours'
+
+
+def test_a_bonne_distance_un_petit_ecart_lateral_ne_fait_pas_pivoter():
+    """Régression de la simulation : 4 mm de la bonne distance, 2,7 cm de côté,
+    tag à 38° à droite. L'ancienne loi pivotait de 80° à gauche vers le point,
+    le tag sortait du champ de la caméra. Il faut tourner face au tag."""
+    angle = math.radians(38.0)
+    x, y = 0.504 * math.cos(-angle), 0.504 * math.sin(-angle)
+    commande = _commande(x, y, math.pi - angle + math.atan2(0.027, 0.504))
+    assert commande.au_point
+    assert commande.lineaire == 0.0
+    assert commande.angulaire < 0.0
+
+
+def test_un_ecart_lateral_hors_tolerance_se_corrige_encore_en_roulant():
+    commande = _commande(0.5, 0.09)
+    assert not commande.au_point
+    assert commande.etat == 'en_cours'
 
 
 def test_la_garde_avant_detecte_un_obstacle_dans_le_couloir():

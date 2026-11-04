@@ -31,8 +31,17 @@ class _Minuterie:
         self.annulee = True
 
 
+class _Horloge:
+    def __init__(self):
+        self.secondes = 100.0
+
+    def now(self):
+        return SimpleNamespace(nanoseconds=int(self.secondes * 1e9))
+
+
 class _FauxNoeud:
     def __init__(self):
+        self.horloge = _Horloge()
         self.journal = _Journal()
         self.abonnements = {}
         self.types_abonnes = {}
@@ -41,6 +50,9 @@ class _FauxNoeud:
 
     def get_logger(self):
         return self.journal
+
+    def get_clock(self):
+        return self.horloge
 
     def create_subscription(self, type_message, topic, rappel, qos):
         self.abonnements.setdefault(topic, []).append(rappel)
@@ -172,3 +184,21 @@ def test_le_type_de_l_ordre_est_decouvert_sur_le_graphe():
     assert len(noeud.abonnements['/ordre']) == 2
     noeud.abonnements['/ordre'][0](Int32MultiArray(data=[9, 4, 7, 1]))
     assert entrees.ordre == (9, 4, 7, 1)
+
+
+def test_l_age_d_une_detection_suit_l_horloge_ros():
+    """Gazebo lent : une image par seconde réelle ne doit pas paraître périmée."""
+    import math
+    from caytu_interfaces.msg import TagDetection, TagDetectionArray
+    noeud, entrees = _entrees({'valeur': True})
+    detection = TagDetection(tag_id=7, has_pose_robot=True, distance_m=0.8)
+    detection.pose_robot.pose.position.x = 0.8
+    demi = math.sqrt(0.5)
+    detection.pose_robot.pose.orientation.y = demi
+    detection.pose_robot.pose.orientation.w = demi
+    for rappel in noeud.abonnements['/tags']:
+        rappel(TagDetectionArray(detections=[detection]))
+    noeud.horloge.secondes += 0.5
+    assert entrees.detection_recente(7, 0.6) is not None
+    noeud.horloge.secondes += 0.2
+    assert entrees.detection_recente(7, 0.6) is None
