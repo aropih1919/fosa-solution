@@ -29,7 +29,7 @@ class Mesures(Node):
         self.configuration = configuration
         self.infos = {}
         self.scans = {}
-        self.audio = []
+        self.audio = {}
         self.tf = Buffer()
         TransformListener(self.tf, self, spin_thread=False)
         for camera in configuration.perception.apriltag.cameras:
@@ -44,9 +44,13 @@ class Mesures(Node):
                 qos_profile_sensor_data)
         try:
             from rosidl_runtime_py.utilities import get_message
-            self.create_subscription(
-                get_message('audio_common_msgs/msg/AudioData'), '/audio',
-                lambda m: self.audio.append((time.monotonic(), len(m.data))), 50)
+            type_audio = get_message('audio_common_msgs/msg/AudioData')
+            for topic in ('/audio', configuration.start_word.audio_topic):
+                self.audio.setdefault(topic, [])
+                self.create_subscription(
+                    type_audio, topic,
+                    lambda m, t=topic: self.audio[t].append(
+                        (time.monotonic(), len(m.data))), 50)
         except (AttributeError, ModuleNotFoundError, ValueError) as erreur:
             print(f'  [ÉCHEC] audio_common_msgs indisponible : {erreur}')
 
@@ -59,6 +63,15 @@ class Mesures(Node):
         tangage = math.asin(max(-1.0, min(1.0, 2 * (q.w * q.y - q.z * q.x))))
         lacet = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y ** 2 + q.z ** 2))
         return t.translation, math.degrees(tangage), math.degrees(lacet)
+
+    def axe_optique(self, cible, source):
+        """Direction de l'axe z (visée) du repère optique dans `cible`."""
+        try:
+            q = self.tf.lookup_transform(cible, source, Time()).transform.rotation
+        except TransformException:
+            return None
+        return (2 * (q.x * q.z + q.w * q.y), 2 * (q.y * q.z - q.w * q.x),
+                1 - 2 * (q.x * q.x + q.y * q.y))
 
 
 def main():
@@ -77,6 +90,13 @@ def main():
         if mesure:
             p, tangage, lacet = mesure
             print(f'     dans {base} : x={p.x:.3f} y={p.y:.3f} z={p.z:.3f}')
+        axe = noeud.axe_optique(base, info.header.frame_id)
+        if axe:
+            pente = math.degrees(math.asin(max(-1.0, min(1.0, axe[2]))))
+            print(f'     visée dans {base} : ({axe[0]:+.2f}, {axe[1]:+.2f}, {axe[2]:+.2f}), '
+                  f'pente {pente:+.0f}°'
+                  + ('' if axe[0] > 0.7 else
+                     f'  [À VÉRIFIER] l\'axe x de {base} n\'est pas la direction de visée'))
     for camera in noeud.configuration.perception.apriltag.cameras:
         if camera.name not in noeud.infos:
             print(f'  [ÉCHEC] {camera.name} : aucune calibration reçue')
@@ -98,14 +118,18 @@ def main():
         present = noeud.tf.can_transform(base, repere, Time())
         print(f'  {repere} relié à {base} : {"oui" if present else "non"}')
 
-    print('\n== Audio (/audio)')
-    if len(noeud.audio) >= 2:
-        duree = noeud.audio[-1][0] - noeud.audio[0][0]
-        debit = sum(taille for _, taille in noeud.audio[1:]) / max(duree, 1e-3)
-        print(f'  {len(noeud.audio)} messages, {noeud.audio[-1][1]} octets/message, '
-              f'{debit:.0f} octets/s -> {debit / 2:.0f} Hz si mono int16')
-    else:
-        print('  [ÉCHEC] pas de message audio reçu')
+    print('\n== Audio')
+    for topic, messages in noeud.audio.items():
+        if len(messages) >= 2:
+            duree = messages[-1][0] - messages[0][0]
+            debit = sum(taille for _, taille in messages[1:]) / max(duree, 1e-3)
+            print(f'  {topic} : {len(messages)} messages, {messages[-1][1]} octets/message, '
+                  f'{debit:.0f} octets/s -> {debit / 2:.0f} Hz si mono int16')
+        elif messages:
+            print(f'  {topic} : 1 message de {messages[0][1]} octets '
+                  '(une phrase par message ? parler pendant la mesure)')
+        else:
+            print(f'  {topic} : aucun message (pour /speech_audio, parler pendant la mesure)')
     noeud.destroy_node()
     rclpy.shutdown()
 

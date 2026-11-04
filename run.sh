@@ -11,7 +11,9 @@ afficher_aide() {
 Usage : ./run.sh [MODE] [arguments ROS]
 
 Modes de la course (phase réelle, robot réel par défaut) :
-  course        SLAM + Nav2 + détection des tags + mot de départ + mission
+  course        SLAM + Nav2 + détection des tags + mot de départ + mission,
+                détachée de la session SSH (tmux ou nohup), journal conservé
+  arreter       arrêter la course lancée par « course » (essais)
   cartographie  idem sans la mission (essais : carte, réglages, rosbag)
   depart        donner le départ par commande (la mission doit attendre)
   ordre-test O  publier un ordre de test, ex. "7,1,9,4" (ESSAIS SEULEMENT)
@@ -105,6 +107,10 @@ if [[ -f "$ESPACE_TRAVAIL/.venv/bin/activate" ]]; then
         export PYTHONPATH="$DOSSIER_PAQUETS_PYTHON${PYTHONPATH:+:$PYTHONPATH}"
     fi
 fi
+if [[ -d "$ESPACE_TRAVAIL/.fosa_python" ]]; then
+    # Vosk installé par deployer_robot.sh, sans venv.
+    export PYTHONPATH="$ESPACE_TRAVAIL/.fosa_python${PYTHONPATH:+:$PYTHONPATH}"
+fi
 set -u
 
 # Valeur lue dans la configuration active (profil compris) : le robot est sur
@@ -139,9 +145,36 @@ arreter_simulation() {
 case "$mode" in
     course)
         verifier_paquet caytu_course
+        DONNEES="${FOSA_DONNEES:-$HOME/.ros/fosa}"
+        mkdir -p "$DONNEES"
+        JOURNAL="$DONNEES/course_$(date +%Y%m%d_%H%M%S).log"
         echo "Course : profil ${FOSA_PROFIL:-robot}, ROS_DOMAIN_ID=$ROS_DOMAIN_ID."
         echo "Le robot attend l'ordre puis le départ (./run.sh depart ou « allez »)."
+        # Détachée de la session SSH : une coupure Wi-Fi n'arrête pas la course.
+        INTERNE=(env "FOSA_PROFIL=${FOSA_PROFIL:-robot}" "FOSA_BASE_WS=${FOSA_BASE_WS:-}"
+            "ROS_DOMAIN_ID=$ROS_DOMAIN_ID" "$DOSSIER_SCRIPT/run.sh" course-premier-plan "$@")
+        if command -v tmux >/dev/null 2>&1; then
+            tmux new-session -d -s fosa_course "$(printf '%q ' "${INTERNE[@]}") 2>&1 | tee $(printf '%q' "$JOURNAL")"
+            echo "Session tmux « fosa_course » (Ctrl-b d pour la quitter sans l'arrêter)."
+            echo "Journal : $JOURNAL"
+            if [[ -t 0 ]]; then exec tmux attach -t fosa_course; fi
+        else
+            setsid nohup "${INTERNE[@]}" > "$JOURNAL" 2>&1 < /dev/null &
+            echo "Course lancée en arrière-plan (PID $!). Journal : $JOURNAL"
+            echo "Ctrl-C quitte l'affichage sans arrêter la course (./run.sh arreter)."
+            if [[ -t 0 ]]; then exec tail -n +1 -f "$JOURNAL"; fi
+        fi
+        ;;
+    course-premier-plan)
         ros2 launch caytu_course course.launch.py "$@"
+        ;;
+    arreter)
+        if command -v tmux >/dev/null 2>&1 && tmux has-session -t fosa_course 2>/dev/null; then
+            tmux send-keys -t fosa_course C-c
+        else
+            pkill -INT -f "ros2 launch caytu_course course.launch.py" \
+                || echo "Aucune course en cours."
+        fi
         ;;
     cartographie)
         verifier_paquet caytu_course
@@ -149,11 +182,13 @@ case "$mode" in
         ;;
     depart)
         topic="$(lire_config c.course.start_topic)"
-        ros2 topic pub --once "$topic" std_msgs/msg/String "{data: commande}"
+        # Attend que la course écoute (10 s au plus) : le départ n'est pas perdu.
+        ros2 topic pub --once -w 1 --max-wait-time-secs 10 \
+            "$topic" std_msgs/msg/String "{data: commande}"
         ;;
     ordre-test)
         ordre="${1:-}"
-        if [[ -z "$ordre" ]]; then
+        if [[ ! "$ordre" =~ ^[0-9][0-9\ ,\[\]]*$ ]]; then
             echo "Usage : ./run.sh ordre-test \"7,1,9,4\"  (essais seulement)" >&2
             exit 2
         fi
