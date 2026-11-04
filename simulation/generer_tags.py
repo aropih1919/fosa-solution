@@ -50,7 +50,6 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
 
 
 def modele(tag_id, dossier):
-    demi = COTE_NOIR * CASES_TOTALES / CASES_NOIRES / 2.0
     return f"""<?xml version="1.0"?>
 <sdf version="1.9">
   <model name="tag{tag_id}">
