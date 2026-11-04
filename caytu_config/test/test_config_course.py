@@ -28,7 +28,7 @@ def _course_minimale(**surcharges):
         "order_topic": "/ordre",
         "order_type": "string",
         "start_topic": "/depart",
-        "state_topic": "/etat", "map_topic": "/map",
+        "state_topic": "/etat", "events_topic": "/evenements", "map_topic": "/map",
         "referee": {
             "start_topic": "/parc/start", "start_type": "parc_msgs/msg/StartSignal",
             "start_method_command": 0, "start_method_voice": 1,
@@ -62,8 +62,9 @@ def _course_minimale(**surcharges):
             "search_time_sec": 90.0, "unknown_leg_m": 2.5, "time_margin": 0.2,
             "success_known": 0.9, "success_unknown": 0.6, "failure_decay": 0.6,
             "min_skip_gain_points": 5.0, "replan_period_sec": 2.0},
-        "slam_map_file": "", "memorized_tags_file": "",
-        "tags_output_file": "~/.ros/fosa_tags_course.yaml",
+        "preparation": {
+            "directory": "~/.ros/fosa/preparation", "max_duration_sec": 720.0,
+            "close_view_m": 1.3, "approach_attempts": 2},
     }
     base.update(surcharges)
     return base

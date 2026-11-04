@@ -10,16 +10,19 @@ afficher_aide() {
     cat <<'AIDE'
 Usage : ./run.sh [MODE] [arguments ROS]
 
-Modes de la course (robot réel par défaut) :
-  course        SLAM + Nav2 + détection des tags + mot de départ + mission,
-                détachée de la session SSH (tmux ou nohup), journal conservé
-  arreter       arrêter la course lancée par « course »
-  cartographie  idem sans la mission (essais : carte, réglages, rosbag)
-  depart        donner le départ par commande (la mission doit attendre)
+Modes (robot réel par défaut) :
+  preparation   les 15 min avant le match : nouvelle carte, recherche et
+                mesure des 4 tags, enregistrement (exploration autonome)
+  course        le match : se localise sur la carte de la préparation (ou
+                cartographie en direct), attend l'ordre puis le départ
+  suivi         afficher en phrases ce que fait le robot (tags, plans, sauts…)
+  arreter       arrêter la préparation ou la course
+  depart        donner le départ par commande (la course doit attendre)
   ordre-test O  publier un ordre de test, ex. "7,1,9,4" (ESSAIS SEULEMENT)
-  etat          suivre l'état de la course
-  sauver-carte  sérialiser la carte SLAM (option : nom du fichier)
-  diagnostic-robot  vérifier topics, TF, caméras, audio (premier créneau)
+  etat          état brut de la course
+  cartographie  SLAM, Nav2 et perception sans mission (réglages)
+  sauver-carte  enregistrer tout de suite la carte dans la préparation
+  diagnostic-robot  vérifier topics, TF, caméras, audio, arbitre (1er créneau)
   mesure-rotation   deux tours lents sur place : odométrie contre gyromètre
                     et lidar (robot dégagé, course arrêtée, ~1 min)
 
@@ -28,13 +31,9 @@ Espace de travail de base du robot (parc_msgs de l'arbitre) : FOSA_BASE_WS,
 ~/ros2_ws par défaut (sourcé avant le nôtre).
 
 Exemples :
-  ./run.sh course
+  ./run.sh preparation      puis, une fois terminée :   ./run.sh course
+  ./run.sh suivi            (dans un second terminal)
   ./run.sh depart
-  FOSA_PROFIL=simulation ./run.sh course
-  ./run.sh ordre-test "7,1,9,4"
-
-Options ROS supplémentaires (mission:=false, -p ..., etc.) après le mode
-sont transmises au launch ou à l'exécutable concerné.
 AIDE
 }
 
@@ -42,14 +41,15 @@ mode="${1:-}"
 if [[ -z "$mode" ]]; then
     if [[ -t 0 ]]; then
         echo "Que souhaitez-vous lancer ?"
-        select choix in "course" "cartographie (sans mission)" "départ par commande" "diagnostic robot" "quitter"; do
+        select choix in "préparation (carte + tags)" "course (match)" "suivi" "départ par commande" "diagnostic robot" "quitter"; do
             case "$REPLY" in
-                1) mode="course"; break ;;
-                2) mode="cartographie"; break ;;
-                3) mode="depart"; break ;;
-                4) mode="diagnostic-robot"; break ;;
-                5) exit 0 ;;
-                *) echo "Choisissez un numéro de 1 à 5." ;;
+                1) mode="preparation"; break ;;
+                2) mode="course"; break ;;
+                3) mode="suivi"; break ;;
+                4) mode="depart"; break ;;
+                5) mode="diagnostic-robot"; break ;;
+                6) exit 0 ;;
+                *) echo "Choisissez un numéro de 1 à 6." ;;
             esac
         done
     else
@@ -102,6 +102,36 @@ if [[ -z "${ROS_DOMAIN_ID:-}" ]]; then
     export ROS_DOMAIN_ID="$(lire_config c.system.ros_domain_id)"
 fi
 
+verifier_arbitre() {
+    if ! python3 -c 'import parc_msgs.msg' 2>/dev/null; then
+        echo "ATTENTION : parc_msgs introuvable (FOSA_BASE_WS=$FOSA_BASE_WS)." >&2
+        echo "Les visites ne seront PAS signalées à l'arbitre." >&2
+    fi
+}
+
+# Lance la course (match ou préparation) détachée de la session SSH : une
+# coupure Wi-Fi ne l'arrête pas. Journal conservé dans ~/.ros/fosa.
+lancer_detache() {
+    local nom="$1"; shift
+    local donnees="${FOSA_DONNEES:-$HOME/.ros/fosa}" journal
+    mkdir -p "$donnees"
+    journal="$donnees/${nom}_$(date +%Y%m%d_%H%M%S).log"
+    local interne=(env "FOSA_PROFIL=${FOSA_PROFIL:-robot}" "FOSA_BASE_WS=${FOSA_BASE_WS:-}"
+        "ROS_DOMAIN_ID=$ROS_DOMAIN_ID" "$DOSSIER_SCRIPT/run.sh" course-premier-plan "$@")
+    echo "Suivi lisible dans un autre terminal : ./run.sh suivi"
+    if command -v tmux >/dev/null 2>&1; then
+        tmux new-session -d -s fosa_course "$(printf '%q ' "${interne[@]}") 2>&1 | tee $(printf '%q' "$journal")"
+        echo "Session tmux « fosa_course » (Ctrl-b d pour la quitter sans l'arrêter)."
+        echo "Journal : $journal"
+        if [[ -t 0 ]]; then exec tmux attach -t fosa_course; fi
+    else
+        setsid nohup "${interne[@]}" > "$journal" 2>&1 < /dev/null &
+        echo "Lancé en arrière-plan (PID $!). Journal : $journal"
+        echo "Ctrl-C quitte l'affichage sans arrêter (./run.sh arreter)."
+        if [[ -t 0 ]]; then exec tail -n +1 -f "$journal"; fi
+    fi
+}
+
 verifier_paquet() {
     local paquet="$1"
     if ! ros2 pkg prefix "$paquet" >/dev/null 2>&1; then
@@ -113,29 +143,28 @@ verifier_paquet() {
 case "$mode" in
     course)
         verifier_paquet caytu_course
-        if ! python3 -c 'import parc_msgs.msg' 2>/dev/null; then
-            echo "ATTENTION : parc_msgs introuvable (FOSA_BASE_WS=$FOSA_BASE_WS)." >&2
-            echo "Les visites ne seront PAS signalées à l'arbitre." >&2
-        fi
-        DONNEES="${FOSA_DONNEES:-$HOME/.ros/fosa}"
-        mkdir -p "$DONNEES"
-        JOURNAL="$DONNEES/course_$(date +%Y%m%d_%H%M%S).log"
-        echo "Course : profil ${FOSA_PROFIL:-robot}, ROS_DOMAIN_ID=$ROS_DOMAIN_ID."
+        verifier_arbitre
+        echo "Match : profil ${FOSA_PROFIL:-robot}, ROS_DOMAIN_ID=$ROS_DOMAIN_ID."
+        python3 -c "
+from caytu_config import load_config
+from caytu_course.lancement import carte_preparee, fichier_tags
+c = load_config(); carte = carte_preparee(c)
+if carte is None:
+    print('Aucune préparation : carte construite en direct, tags à chercher.')
+else:
+    print(f'Préparation utilisée : {carte}.posegraph et {fichier_tags(c)}.')
+    print('Le robot doit partir de la position où la préparation a commencé.')"
         echo "Le robot attend l'ordre puis le départ (./run.sh depart ou « allez »)."
-        # Détachée de la session SSH : une coupure Wi-Fi n'arrête pas la course.
-        INTERNE=(env "FOSA_PROFIL=${FOSA_PROFIL:-robot}" "FOSA_BASE_WS=${FOSA_BASE_WS:-}"
-            "ROS_DOMAIN_ID=$ROS_DOMAIN_ID" "$DOSSIER_SCRIPT/run.sh" course-premier-plan "$@")
-        if command -v tmux >/dev/null 2>&1; then
-            tmux new-session -d -s fosa_course "$(printf '%q ' "${INTERNE[@]}") 2>&1 | tee $(printf '%q' "$JOURNAL")"
-            echo "Session tmux « fosa_course » (Ctrl-b d pour la quitter sans l'arrêter)."
-            echo "Journal : $JOURNAL"
-            if [[ -t 0 ]]; then exec tmux attach -t fosa_course; fi
-        else
-            setsid nohup "${INTERNE[@]}" > "$JOURNAL" 2>&1 < /dev/null &
-            echo "Course lancée en arrière-plan (PID $!). Journal : $JOURNAL"
-            echo "Ctrl-C quitte l'affichage sans arrêter la course (./run.sh arreter)."
-            if [[ -t 0 ]]; then exec tail -n +1 -f "$JOURNAL"; fi
-        fi
+        lancer_detache course "$@"
+        ;;
+    preparation)
+        verifier_paquet caytu_course
+        echo "Préparation : robot posé à la POSITION DE DÉPART du match, arène dégagée."
+        echo "Le robot explore seul, mesure les tags et enregistre tout (12 min au plus)."
+        lancer_detache preparation mode:=preparation "$@"
+        ;;
+    suivi)
+        ros2 run caytu_course suivi_course "$@"
         ;;
     course-premier-plan)
         ros2 launch caytu_course course.launch.py "$@"
@@ -150,7 +179,7 @@ case "$mode" in
         ;;
     cartographie)
         verifier_paquet caytu_course
-        ros2 launch caytu_course course.launch.py mission:=false "$@"
+        ros2 launch caytu_course course.launch.py mode:=cartographie "$@"
         ;;
     depart)
         topic="$(lire_config c.course.start_topic)"
@@ -174,12 +203,12 @@ case "$mode" in
         ros2 topic echo "$(lire_config c.course.state_topic)" std_msgs/msg/String
         ;;
     sauver-carte)
-        nom="${1:-arene_$(date +%H%M%S)}"
-        dossier="${FOSA_DONNEES:-$HOME/.ros/fosa}/cartes"
+        dossier="$(lire_config 'c.course.preparation.directory')"
+        dossier="${dossier/#\~/$HOME}"
         mkdir -p "$dossier"
         ros2 service call /slam_toolbox/serialize_map \
-            slam_toolbox/srv/SerializePoseGraph "{filename: '$dossier/$nom'}"
-        echo "Carte : $dossier/$nom.posegraph (course.slam_map_file si autorisé)."
+            slam_toolbox/srv/SerializePoseGraph "{filename: '$dossier/carte'}"
+        echo "Carte : $dossier/carte.posegraph (utilisée par ./run.sh course)."
         ;;
     diagnostic-robot)
         "$DOSSIER_SCRIPT/outils/diagnostic_robot.sh" "$@"

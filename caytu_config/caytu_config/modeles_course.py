@@ -326,6 +326,33 @@ class StrategyConfig:
             for cle, bornes in cls._BORNES.items()})
 
 
+@dataclass(frozen=True)
+class PreparationConfig:
+    """Période de préparation avant le match : carte et tags enregistrés."""
+
+    directory: str
+    max_duration_sec: float
+    close_view_m: float
+    approach_attempts: int
+
+    @classmethod
+    def from_mapping(cls, data, path="course.preparation"):
+        data = _section(data, path)
+        _check_keys(data, ("directory", "max_duration_sec", "close_view_m",
+                           "approach_attempts"), path)
+        return cls(
+            directory=_as_str(_get(data, "directory", path), f"{path}.directory"),
+            max_duration_sec=_as_number(
+                _get(data, "max_duration_sec", path), f"{path}.max_duration_sec",
+                positive=True),
+            close_view_m=_as_number(
+                _get(data, "close_view_m", path), f"{path}.close_view_m",
+                positive=True),
+            approach_attempts=_as_int(
+                _get(data, "approach_attempts", path), f"{path}.approach_attempts", 0),
+        )
+
+
 # (clé, bornes) des réglages numériques de la course.
 _NOMBRES_COURSE = (
     ("time_limit_sec", {"positive": True}),
@@ -351,8 +378,8 @@ _NOMBRES_COURSE = (
     ("search_spin_speed_rps", {"positive": True, "maximum": 1.0}),
     ("search_max_radius_m", {"positive": True}),
 )
-_TEXTES_COURSE = ("order_topic", "start_topic", "state_topic", "map_topic")
-_CHEMINS_COURSE = ("slam_map_file", "memorized_tags_file", "tags_output_file")
+_TEXTES_COURSE = ("order_topic", "start_topic", "state_topic", "events_topic",
+                  "map_topic")
 
 
 @dataclass(frozen=True)
@@ -364,6 +391,7 @@ class CourseConfig:
     order_type: str
     start_topic: str
     state_topic: str
+    events_topic: str
     map_topic: str
     referee: RefereeConfig
     time_limit_sec: float
@@ -390,17 +418,15 @@ class CourseConfig:
     search_max_radius_m: float
     alignment: AlignmentConfig
     strategy: StrategyConfig
-    slam_map_file: str
-    memorized_tags_file: str
-    tags_output_file: str
+    preparation: PreparationConfig
 
     @classmethod
     def from_mapping(cls, data, path="course"):
         data = _section(data, path)
         _check_keys(data, (
             "tag_ids", "order_type", "referee", "stable_cycles", "alignment",
-            "strategy")
-            + _TEXTES_COURSE + _CHEMINS_COURSE
+            "strategy", "preparation")
+            + _TEXTES_COURSE
             + tuple(cle for cle, _ in _NOMBRES_COURSE), path)
         valeurs = {
             cle: _as_number(_get(data, cle, path), f"{path}.{cle}", **bornes)
@@ -408,10 +434,6 @@ class CourseConfig:
         valeurs.update({
             cle: _as_str(_get(data, cle, path), f"{path}.{cle}")
             for cle in _TEXTES_COURSE})
-        valeurs.update({
-            cle: _as_str(_get(data, cle, path), f"{path}.{cle}",
-                         allow_empty=True)
-            for cle in _CHEMINS_COURSE})
         course = cls(
             tag_ids=_as_int_list(_get(data, "tag_ids", path), f"{path}.tag_ids"),
             order_type=_choice(
@@ -425,6 +447,8 @@ class CourseConfig:
                 _get(data, "alignment", path), f"{path}.alignment"),
             strategy=StrategyConfig.from_mapping(
                 _get(data, "strategy", path), f"{path}.strategy"),
+            preparation=PreparationConfig.from_mapping(
+                _get(data, "preparation", path), f"{path}.preparation"),
             **valeurs,
         )
         if course.stop_margin_sec >= course.time_limit_sec:

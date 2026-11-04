@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'course_parc = caytu_course.noeud_course:main',
             'mot_depart = caytu_course.noeud_mot_depart:main',
+            'suivi_course = caytu_course.suivi:main',
         ],
     },
 )

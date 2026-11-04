@@ -50,6 +50,10 @@ perception:
       min_points: 3
       rate_hz: 5.0
   apriltag:
+    # Taille APPARENTE dans le rendu Gazebo : les bords flous font paraître le
+    # tag 3,8 % plus grand (66 px mesurés au lieu de 63,6 à 0,83 m), d’où une
+    # distance estimée 3 cm trop courte. Robot réel : 0,165 (fosa.yaml).
+    size_m: 0.171
     cameras:
       - name: haute
         color_topic: /top_camera_color/image_raw
@@ -57,3 +61,8 @@ perception:
 
 start_word:
   enabled: false                    # pas de ReSpeaker dans Gazebo
+
+course:
+  preparation:
+    # Séparée de celle du robot réel (~/.ros/fosa/preparation).
+    directory: ~/.fosa_simulation/preparation

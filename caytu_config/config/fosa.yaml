@@ -142,6 +142,7 @@ course:
   order_type: auto                # auto | string | int32_multi_array
   start_topic: /fosa/course/depart   # départ interne (./run.sh depart ou voix), relayé à l'arbitre
   state_topic: /fosa/course/etat
+  events_topic: /fosa/course/evenements   # ce que fait le robot, en phrases (./run.sh suivi)
   map_topic: /map                 # carte publiée par slam_toolbox
   # Arbitre officiel (parc_msgs, installé dans l'espace de travail de base du
   # robot) : départ, visites avec image JPEG, fin. Consignes du 04/11.
@@ -188,7 +189,9 @@ course:
     min_linear_mps: 0.03          # À AJUSTER : seuil de démarrage de la base
     min_angular_rps: 0.10
     # Objectif d'arrêt (plus strict que les tolérances d'acceptation ci-dessus).
-    precision_point_m: 0.025      # distance au point de visite (0,5 m sur la normale)
+    # Distance au point de visite (0,5 m sur la normale). Le robot arrive
+    # toujours de loin : avec 2,5 cm, il s'arrêtait du côté éloigné (simulation).
+    precision_point_m: 0.012
     precision_heading_deg: 2.0
     # Nav2 s'arrête à approach_distance_m ; l'asservissement visuel finit.
     # Au-delà de ces écarts, retour à Nav2 (pas de longue ligne droite).
@@ -212,12 +215,16 @@ course:
     failure_decay: 0.6            # probabilité x 0,6 à chaque échec
     min_skip_gain_points: 5.0     # sauter la cible seulement si cela rapporte 5 points de plus
     replan_period_sec: 2.0
-  # Vide = cartographie en direct. Sinon : posegraph slam_toolbox sérialisé
-  # pendant les essais (seulement si les cartes pré-construites sont autorisées).
-  slam_map_file: ""
-  # Vide = aucune pose de tag mémorisée (à n'utiliser que si c'est autorisé).
-  memorized_tags_file: ""
-  tags_output_file: ~/.ros/fosa_tags_course.yaml
+  # Préparation avant le match (15 min accordées par les organisateurs) :
+  # `./run.sh preparation` cartographie l'arène, cherche les tags, s'en
+  # approche pour bien les mesurer, puis enregistre carte et tags ici.
+  # `./run.sh course` se localise ensuite sur cette carte et part des tags
+  # enregistrés ; sans préparation, il cartographie en direct.
+  preparation:
+    directory: ~/.ros/fosa/preparation
+    max_duration_sec: 720.0       # 12 min sur 15 : marge pour vérifier et relancer
+    close_view_m: 1.3             # tag vu plus loin : on va le mesurer de près
+    approach_attempts: 2          # rapprochements tentés par tag
 
 # Démarrage vocal hors ligne (bonus de 5 points) : Vosk, grammaire restreinte.
 start_word:

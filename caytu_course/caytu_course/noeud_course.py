@@ -13,12 +13,12 @@ Déroulement (guide officiel) :
   4. signaler la fin et s'arrêter, au plus tard à 10 minutes.
 """
 
+from datetime import datetime
 import json
 import math
 import signal
 import sys
 import time
-from pathlib import Path
 
 from geometry_msgs.msg import Twist
 import rclpy
@@ -37,12 +37,25 @@ from caytu_course.alignement import (
     obstacle_devant,
 )
 from caytu_course.entrees_course import EntreesCourse
+from caytu_course import recit
 from caytu_course.geometrie_tags import erreurs_visite, pose_approche, visite_valide
+from caytu_course.lancement import (
+    NOM_CARTE,
+    carte_preparee,
+    dossier_preparation,
+    fichier_tags,
+)
 from caytu_course.memoire_tags import MemoireTags
 from caytu_course.recherche import points_recherche
 from caytu_course.sequence import SequenceTags
-from caytu_course.strategie import ModeleStrategie, TagRestant, decider
-from caytu_course.statut import PublicateurArbitre, qos_statut
+from caytu_course.strategie import (
+    ModeleStrategie,
+    TagRestant,
+    decider,
+    duree_tag,
+    planifier,
+)
+from caytu_course.statut import PublicateurArbitre, qos_evenements, qos_statut
 from caytu_nav_solution.nav_math import Pose2D, lacet_depuis_quaternion
 from caytu_nav_solution.navigation_runtime import (
     ChronometreCourse,
@@ -50,6 +63,7 @@ from caytu_nav_solution.navigation_runtime import (
 )
 
 PERIODE_BOUCLE = 0.1
+DELAI_SERVICE_SLAM = 30.0
 
 
 class NoeudCourse(Node):
@@ -59,6 +73,7 @@ class NoeudCourse(Node):
         self._configuration = configuration
         self._course = configuration.course
         self._navigation = configuration.navigation
+        self._mode = self.declare_parameter('mode', 'course').value
         self._etat = None
         self._en_attente = True
         self._tours = []           # positions où un tour sur place a été fait
@@ -68,12 +83,22 @@ class NoeudCourse(Node):
         self._plan = None          # dernier plan de la stratégie
         self._plan_instant = None
         self._garder = True
+        self._position_plan = None
         self._modele_strategie = self._modele()
+        self._tags_reperes = set()     # tags déjà annoncés dans le récit
+        self._raison_echec = None      # dernière raison d'échec d'une visite
+        self._dernieres_erreurs = None  # placement mesuré à la fin de l'alignement
+        self._raisons = {}             # tag non visité -> pourquoi
+        self._passages = 0             # parcours complets de la carte
+        self._preparation_enregistree = False
+        self._publicateur_evenements = self.create_publisher(
+            String, self._course.events_topic, qos_evenements())
 
         self._memoire_tf = Buffer()
         self._ecouteur_tf = TransformListener(
             self._memoire_tf, self, spin_thread=False)
         self._memoire = self._charger_memoire()
+        self._tags_reperes.update(self._memoire.ids())
         self._entrees = EntreesCourse(
             self, configuration, self._memoire, self._memoire_tf,
             lambda: self._en_attente)
@@ -83,9 +108,10 @@ class NoeudCourse(Node):
         self._publicateur_vitesse = self.create_publisher(
             Twist, self._navigation.cmd_vel_topic, 10)
 
+        duree = (self._course.preparation.max_duration_sec if self._mode == 'preparation'
+                 else self._course.time_limit_sec)
         self._chrono = ChronometreCourse(
-            self.get_clock().now, self._course.time_limit_sec,
-            self._course.stop_margin_sec)
+            self.get_clock().now, duree, self._course.stop_margin_sec)
         self._navigateur = NavigateurNav2(
             self, self._navigation, self._chrono, self.pose_robot)
         self._reglages = self._reglages_alignement()
@@ -93,11 +119,13 @@ class NoeudCourse(Node):
 
     # -------------------------------------------------------------- outils
     def _charger_memoire(self):
+        """Match sur la carte de la préparation : les tags enregistrés sont
+        dans le même repère. Sinon (préparation, carte en direct) : vide."""
         distance_max = self._configuration.perception.apriltag.max_distance_m
-        fichier = self._course.memorized_tags_file
-        if not fichier:
+        chemin = fichier_tags(self._configuration)
+        if (self._mode != 'course' or carte_preparee(self._configuration) is None
+                or not chemin.is_file()):
             return MemoireTags(distance_max)
-        chemin = Path(fichier).expanduser()
         try:
             donnees = yaml.safe_load(chemin.read_text(encoding='utf-8')) or {}
             memoire = MemoireTags.importer(donnees, distance_max)
@@ -122,6 +150,26 @@ class NoeudCourse(Node):
             precision_cap=math.radians(alignement.precision_heading_deg),
             erreur_distance_max=alignement.max_distance_error_m,
             erreur_laterale_max=alignement.max_lateral_error_m)
+
+    def evenement(self, genre, texte, **donnees):
+        """Une étape de la course, en clair (topic des événements et journal)."""
+        donnees.update(type=genre, texte=texte,
+                       temps_ecoule=round(self._chrono.ecoule(), 1),
+                       temps_restant=round(self._chrono.restant(), 1))
+        self._publicateur_evenements.publish(
+            String(data=json.dumps(donnees, ensure_ascii=False)))
+        self.get_logger().info(f'» {texte}')
+
+    def _annoncer_tags_reperes(self):
+        cible = self._sequence.cible() if self._sequence is not None else None
+        for tag_id in self._memoire.ids():
+            if tag_id in self._tags_reperes:
+                continue
+            self._tags_reperes.add(tag_id)
+            pose = self._memoire.pose(tag_id)
+            self.evenement('tag_repere', recit.phrase_tag_repere(
+                tag_id, pose.distance_min, cible), tag=tag_id,
+                x=round(pose.x, 2), y=round(pose.y, 2))
 
     def publier_etat(self, etat, cible=None, detail=''):
         if (etat, cible, detail) == self._etat:
@@ -153,6 +201,7 @@ class NoeudCourse(Node):
             if restant <= 0.0:
                 break
             rclpy.spin_once(self, timeout_sec=min(0.05, restant))
+        self._annoncer_tags_reperes()
 
     def publier_vitesse(self, lineaire, angulaire):
         commande = Twist()
@@ -174,12 +223,19 @@ class NoeudCourse(Node):
 
     # ------------------------------------------------------------- course
     def executer(self):
+        if self._mode == 'preparation':
+            self.preparer()
+            return
+        self.evenement('donnees', recit.phrase_donnees_match(
+            carte_preparee(self._configuration), self._memoire.ids()))
         self._attendre_ordre_et_depart()
         if not rclpy.ok():
             return
         self._en_attente = False
         self._chrono.demarrer()
         self.publier_etat('DEMARRAGE', detail=self._entrees.source_depart)
+        self.evenement('depart', recit.phrase_depart(
+            self._entrees.source_depart, self._entrees.mot_entendu))
         # Le départ est signalé à l'arbitre dès qu'il est donné, même avant
         # l'ordre : son chronomètre démarre à ce signal. Un départ publié
         # directement sur /parc/start est déjà connu de l'arbitre.
@@ -191,6 +247,8 @@ class NoeudCourse(Node):
             self._terminer('ordre_absent')
             return
         self._sequence = SequenceTags(self._entrees.ordre)
+        self.evenement('ordre', recit.phrase_ordre(self._sequence.ordre),
+                       ordre=list(self._sequence.ordre))
         self._attendre_nav2()
 
         while rclpy.ok() and not self._sequence.terminee():
@@ -210,8 +268,6 @@ class NoeudCourse(Node):
             if resultat == 'visite':
                 self._sequence.marquer_visite(cible)
             elif resultat == 'saute':
-                self.get_logger().warning(
-                    f'Tag {cible} sauté : le plan {list(self._plan.tags)} rapporte plus.')
                 self._sequence.sauter()
             self._plan_instant = None   # nouvelle cible : replanifier
         self._terminer('terminee' if self._sequence.terminee() else 'temps_ecoule')
@@ -237,7 +293,11 @@ class NoeudCourse(Node):
             self.get_logger().error('Nav2 ou la localisation SLAM ne répond pas.')
 
     def _traiter_tag(self, tag_id):
-        self._debut_cible.setdefault(tag_id, self._temps())
+        if tag_id not in self._debut_cible:
+            self._debut_cible[tag_id] = self._temps()
+            pose = self._memoire.pose(tag_id)
+            self.evenement('cible', recit.phrase_cible(
+                tag_id, pose is not None, pose.distance_min if pose else None), tag=tag_id)
 
         def abandonner():
             return not self._garder_cible(tag_id)
@@ -246,17 +306,22 @@ class NoeudCourse(Node):
             if self._temps_ecoule():
                 return 'temps_ecoule'
             if abandonner():
+                self._expliquer_saut(tag_id)
                 return 'saute'
             if self._memoire.connait(tag_id):
                 resultat = self._visiter(tag_id, abandonner)
                 if resultat in ('visite', 'temps_ecoule'):
                     return resultat
                 if resultat == 'perdu':
-                    self.get_logger().warning(
-                        f'Tag {tag_id} introuvable à sa pose mémorisée : recherche.')
+                    self.evenement('perdu', f'Tag {tag_id} introuvable à sa position '
+                                   'mémorisée : on le cherche à nouveau.', tag=tag_id)
                     self._memoire.oublier(tag_id)
-                elif resultat == 'echec':
+                    self._tags_reperes.discard(tag_id)
+                elif resultat == 'echec' and self._garder:
                     self._echecs[tag_id] = self._echecs.get(tag_id, 0) + 1
+                    self.evenement('echec', recit.phrase_echec(
+                        tag_id, self._raison_echec or 'alignement', self._echecs[tag_id]),
+                        tag=tag_id, raison=self._raison_echec)
                     self._plan_instant = None   # replanifier tout de suite
                     self.traiter_pendant(0.5)
             else:
@@ -306,12 +371,23 @@ class NoeudCourse(Node):
             garder, plan = decider(position, self._tags_restants(),
                                    self._chrono.restant(), self._modele_strategie)
             if self._plan is None or plan.tags != self._plan.tags:
-                self.get_logger().info(
-                    f'Plan : {list(plan.tags)} (durée estimée {plan.duree_s:.0f} s, '
-                    f'{self._chrono.restant():.0f} s restantes, '
-                    f'{plan.valeur:.0f} points espérés).')
+                self.evenement('plan', recit.phrase_plan(plan, self._chrono.restant()),
+                               plan=list(plan.tags), duree=round(plan.duree_s))
             self._plan, self._plan_instant, self._garder = plan, maintenant, garder
+            self._position_plan = position
         return self._garder
+
+    def _expliquer_saut(self, tag_id):
+        restants = self._tags_restants()
+        cout, _ = duree_tag(self._position_plan, restants[0], self._modele_strategie)
+        avec = planifier(self._position_plan, restants, self._chrono.restant(),
+                         self._modele_strategie, avec_premier=True)
+        texte = recit.phrase_saut(tag_id, cout, self._chrono.restant(), self._plan, avec)
+        self._raisons[tag_id] = (f'sauté par la stratégie (≈ {cout:.0f} s nécessaires, '
+                                 f'{self._chrono.restant():.0f} s restantes ; '
+                                 f'{list(self._plan.tags)} rapportait plus)')
+        self.evenement('saut', texte, tag=tag_id, cout=round(cout),
+                       restant=round(self._chrono.restant()), plan=list(self._plan.tags))
 
     # ---------------------------------------------------------- recherche
     def _interruption_recherche(self, tag_id, abandonner):
@@ -340,6 +416,7 @@ class NoeudCourse(Node):
         point = self._prochain_point(pose)
         if point is None:
             # Toute la carte a été parcourue : nouveau passage.
+            self._passages += 1
             self.publier_etat('RECHERCHE', tag_id, 'nouveau passage')
             self._tours.clear()
             self._points_essayes.clear()
@@ -450,6 +527,7 @@ class NoeudCourse(Node):
         if resultat == 'interrompu':
             return 'echec'
         if resultat == 'refuse':
+            self._raison_echec = 'nav2'
             self.traiter_pendant(0.5)
             return 'reessayer'
         courante = self._pose_tag_courante(tag_id)
@@ -457,6 +535,7 @@ class NoeudCourse(Node):
                 course.approach_distance_m + course.preapproach_margin_m):
             return 'arrive'   # même si Nav2 a abandonné : le tag est à portée
         if resultat == 'reessayer':
+            self._raison_echec = 'nav2'
             return 'reessayer'
         # Arrivé mais tag pas revu de près : la pose mémorisée est fausse.
         return 'perdu'
@@ -478,6 +557,8 @@ class NoeudCourse(Node):
                 return 'temps_ecoule'
             if abandonner() or maintenant - debut > course.alignment.timeout_sec:
                 self.arreter_robot()
+                self._raison_echec = 'alignement'
+                self._dernieres_erreurs = erreurs
                 return ('aligne' if self._position_acceptable(erreurs, tolerance_laterale)
                         else 'echec')
             vue = self._entrees.detection_recente(tag_id, course.detection_max_age_sec)
@@ -507,11 +588,13 @@ class NoeudCourse(Node):
                     f'(v={commande.lineaire:+.2f}, w={commande.angulaire:+.2f})')
             if commande.etat == 'renaviguer':
                 self.arreter_robot()
+                self._raison_echec = 'biais'
                 return 'renaviguer'
             if commande.etat == 'aligne':
                 self.publier_vitesse(0.0, 0.0)
                 stables += 1
                 if stables >= course.stable_cycles:
+                    self._dernieres_erreurs = erreurs
                     return 'aligne'
             else:
                 stables = 0
@@ -566,6 +649,12 @@ class NoeudCourse(Node):
     def _valider_visite(self, tag_id):
         self.arreter_robot()
         self._statut.signaler_visite(tag_id, self._entrees.image_preuve(tag_id))
+        erreurs = self._dernieres_erreurs
+        if erreurs is not None:
+            self.evenement('visite', recit.phrase_visite(
+                tag_id, len(self._sequence.visites) + 1, len(self._sequence.ordre),
+                self._course.visit_distance_m + erreurs.distance,
+                math.degrees(erreurs.cap)), tag=tag_id)
         self.publier_etat('VISITE', tag_id, f'maintien {self._course.hold_sec:.0f} s')
         fin = self._temps() + self._course.hold_sec
         while rclpy.ok() and self._temps() < fin and not self._temps_ecoule():
@@ -581,21 +670,126 @@ class NoeudCourse(Node):
                   else {'ordre': [], 'visites': [], 'sautes': []})
         resume['temps_ecoule_s'] = round(self._chrono.ecoule(), 1)
         self._statut.signaler_fin(motif, resume)
-        self._exporter_memoire()
+        if self._sequence is not None and not self._sequence.terminee():
+            cible = self._sequence.cible()
+            self._raisons.setdefault(cible, (
+                'temps écoulé pendant la recherche' if not self._memoire.connait(cible)
+                else 'temps écoulé pendant l’approche ou le placement'))
+        lignes = recit.resume_fin(resume['ordre'], resume['visites'], self._raisons)
+        if motif == 'ordre_absent':
+            lignes.insert(0, "Aucun ordre reçu de l'arbitre : rien n'a pu être visité.")
+        self.evenement('fin', ' '.join(lignes), lignes=lignes, motif=motif)
         self.publier_etat('TERMINEE', detail=motif)
 
-    def _exporter_memoire(self):
-        fichier = self._course.tags_output_file
-        if not fichier:
-            return
-        chemin = Path(fichier).expanduser()
+    # -------------------------------------------------------- préparation
+    def preparer(self):
+        """Exploration autonome avant le match : carte neuve et tags mesurés.
+
+        Fin quand toute la carte a été parcourue et les 4 tags mesurés de
+        près, ou à la limite de temps. Les tags sont réécrits à chaque étape :
+        un arrêt anticipé ne perd rien ; la carte est enregistrée à la fin.
+        """
+        preparation = self._course.preparation
+        dossier = self._nouveau_dossier_preparation()
+        self._en_attente = False
+        self._chrono.demarrer()
+        self.evenement('preparation', recit.phrase_preparation(
+            dossier, preparation.max_duration_sec))
+        self._attendre_nav2()
+        tentatives = {}
+        while rclpy.ok() and not self._temps_ecoule():
+            self._enregistrer_tags()
+            a_mesurer = [
+                tag for tag in self._course.tag_ids if self._memoire.connait(tag)
+                and self._memoire.pose(tag).distance_min > preparation.close_view_m
+                and tentatives.get(tag, 0) < preparation.approach_attempts]
+            if a_mesurer:
+                tag = a_mesurer[0]
+                tentatives[tag] = tentatives.get(tag, 0) + 1
+                self._mesurer_de_pres(tag)
+                continue
+            if self._exploration_terminee():
+                break
+            self._chercher(None, self._temps_ecoule)
+        self.arreter_robot()
+        self.enregistrer_preparation()
+
+    def _exploration_terminee(self):
+        tous = all(self._memoire.connait(tag) for tag in self._course.tag_ids)
+        return (tous and self._passages >= 1) or self._passages >= 2
+
+    def _mesurer_de_pres(self, tag_id):
+        pose = self._memoire.pose(tag_id)
+        self.evenement('mesure', f'Tag {tag_id} vu de loin ({pose.distance_min:.1f} m) : '
+                       'on s\'en approche pour mesurer précisément sa position.', tag=tag_id)
+        resultat = self._approcher(
+            tag_id, (pose.x, pose.y, pose.cap, pose.distance_min), self._temps_ecoule)
+        self.traiter_pendant(1.0)
+        nouvelle = self._memoire.pose(tag_id)
+        if nouvelle is not None:
+            self.evenement('mesure', f'Tag {tag_id} mesuré à {nouvelle.distance_min:.1f} m '
+                           f'(approche : {resultat}).', tag=tag_id)
+
+    def _nouveau_dossier_preparation(self):
+        """Archive la préparation précédente : la carte de mardi peut être fausse
+        vendredi, chaque préparation repart de zéro."""
+        dossier = dossier_preparation(self._configuration)
+        if dossier.exists() and any(dossier.iterdir()):
+            archive = dossier.with_name(
+                f'{dossier.name}_{datetime.now():%Y%m%d_%H%M%S}')
+            dossier.rename(archive)
+            self.get_logger().info(f'Préparation précédente archivée : {archive}')
+        dossier.mkdir(parents=True, exist_ok=True)
+        return dossier
+
+    def _enregistrer_tags(self):
+        chemin = fichier_tags(self._configuration)
         try:
-            chemin.parent.mkdir(parents=True, exist_ok=True)
             chemin.write_text(yaml.safe_dump(
                 self._memoire.exporter(), allow_unicode=True), encoding='utf-8')
-            self.get_logger().info(f'Poses des tags vus enregistrées : {chemin}')
         except OSError as erreur:
-            self.get_logger().error(f'Export des tags impossible : {erreur}')
+            self.get_logger().error(f'Enregistrement des tags impossible : {erreur}',
+                                    throttle_duration_sec=10.0)
+
+    def enregistrer_preparation(self):
+        """Tags puis carte slam_toolbox (posegraph pour le match, image pour voir)."""
+        if self._mode != 'preparation' or self._preparation_enregistree:
+            return
+        self._preparation_enregistree = True
+        self._enregistrer_tags()
+        base = dossier_preparation(self._configuration) / NOM_CARTE
+        from slam_toolbox.srv import SaveMap, SerializePoseGraph
+        from std_msgs.msg import String as Texte
+        reponse = self._appeler_slam(
+            SerializePoseGraph, '/slam_toolbox/serialize_map',
+            SerializePoseGraph.Request(filename=str(base)))
+        serialisee = reponse is not None and reponse.result == 0
+        self._appeler_slam(SaveMap, '/slam_toolbox/save_map',
+                           SaveMap.Request(name=Texte(data=str(base))))
+        manquants = [tag for tag in self._course.tag_ids if not self._memoire.connait(tag)]
+        lignes = [
+            f'Carte enregistrée : {base}.posegraph' if serialisee
+            else 'ÉCHEC de l’enregistrement de la carte : relancer ./run.sh preparation.',
+            f'Tags enregistrés : {", ".join(map(str, self._memoire.ids())) or "aucun"} '
+            f'({fichier_tags(self._configuration)}).']
+        if manquants:
+            lignes.append(f'Tags non trouvés : {", ".join(map(str, manquants))} '
+                          '(le match les cherchera).')
+        lignes.append('Pour le match : replacer le robot à la position de départ de la '
+                      'préparation, puis ./run.sh course.')
+        self.evenement('fin', ' '.join(lignes), lignes=lignes, motif='preparation')
+        self.publier_etat('TERMINEE', detail='preparation')
+
+    def _appeler_slam(self, type_service, nom, requete):
+        client = self.create_client(type_service, nom)
+        if not client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error(f'Service {nom} indisponible.')
+            return None
+        future = client.call_async(requete)
+        fin = time.monotonic() + DELAI_SERVICE_SLAM
+        while rclpy.ok() and not future.done() and time.monotonic() < fin:
+            rclpy.spin_once(self, timeout_sec=0.1)
+        return future.result() if future.done() else None
 
     def arret_urgence(self):
         """Arrêt sur Ctrl-C ou SIGTERM : plus aucune commande, robot immobile."""
@@ -638,6 +832,8 @@ def main(args=None):
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
         if rclpy.ok():
             noeud.arret_urgence()
+            # Préparation arrêtée avant la fin : on garde ce qui a été appris.
+            noeud.enregistrer_preparation()
         noeud.destroy_node()
         rclpy.try_shutdown()
 

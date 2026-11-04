@@ -17,6 +17,11 @@ def qos_statut(profondeur=10):
         durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
 
+def qos_evenements():
+    """Historique gardé : un afficheur lancé en retard reçoit tout le récit."""
+    return qos_statut(200)
+
+
 def charger_type(nom):
     """Classe du message `paquet/msg/Type`, ou None s'il est introuvable."""
     try:
