@@ -59,8 +59,12 @@ perception:
         color_topic: /top_camera_color/image_raw
         info_topic: /top_camera_color/camera_info
 
+# Départ vocal avec le micro du PC (simulation/micro_pc.py publie un flux
+# continu, pas une phrase par message comme le ReSpeaker du robot). Sans
+# micro ni Vosk, le nœud le signale et le départ par commande reste possible.
 start_word:
-  enabled: false                    # pas de ReSpeaker dans Gazebo
+  enabled: true
+  mode: stream
 
 course:
   preparation:

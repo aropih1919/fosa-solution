@@ -2,15 +2,18 @@
 # Simulation Gazebo de la course, sur le PC uniquement (jamais sur le robot).
 #
 #   simulation/simulation.sh preparer          une fois : parc_msgs de simulation + tags
+#   simulation/simulation.sh voix-preparer     une fois : Vosk + modèle FR (départ vocal)
 #   simulation/simulation.sh essai [ordre]     répétition du jour J : préparation puis match
 #   simulation/simulation.sh preparation       préparation seule (carte + tags enregistrés)
 #   simulation/simulation.sh course [ordre]    match seul (avec la préparation si elle existe)
 #   simulation/simulation.sh monde             monde + robot + tags seuls (essais manuels)
 #   simulation/simulation.sh moniteur          récit + arbitre et juges simulés
+#   simulation/simulation.sh micro             micro du PC -> /speech_audio (essais manuels)
 #   simulation/simulation.sh arreter           tout arrêter (Gazebo, course, moniteur)
 #
 # Gazebo s'affiche (FOSA_SIM_GUI=0 pour le masquer, plus rapide).
 # FOSA_SIM_ODOM_CORRIGEE=1 : odométrie du modèle corrigée (recommandé).
+# FOSA_SIM_VOIX=1 : au match, départ à la voix dans le micro du PC (« allez »).
 set -uo pipefail
 
 DOSSIER_SIM="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,6 +50,30 @@ preparer() {
     echo "Simulation prête dans $CACHE."
 }
 
+MODELE_VOSK="vosk-model-small-fr-0.22"
+
+voix_preparer() {
+    local cible="$ESPACE_TRAVAIL/.fosa_python" modeles="$DEPOT/caytu_config/config/models"
+    echo "[1/3] Vosk dans $cible (sans sudo)..."
+    PYTHONPATH="$cible" python3 -c 'import vosk' 2>/dev/null \
+        || python3 -m pip install --quiet --target "$cible" vosk || exit 1
+    echo "[2/3] Modèle français $MODELE_VOSK..."
+    if [[ ! -d "$modeles/$MODELE_VOSK" ]]; then
+        mkdir -p "$modeles" "$CACHE"
+        curl -fsSL "https://alphacephei.com/vosk/models/$MODELE_VOSK.zip" \
+            -o "$CACHE/$MODELE_VOSK.zip" || exit 1
+        python3 -m zipfile -e "$CACHE/$MODELE_VOSK.zip" "$modeles" || exit 1
+    fi
+    echo "[3/3] Messages audio de ROS..."
+    set +u; source /opt/ros/jazzy/setup.bash; set -u
+    if python3 -c 'import audio_common_msgs.msg' 2>/dev/null; then
+        echo "Départ vocal prêt. Micros disponibles : arecord -L (choix : FOSA_SIM_MICRO)."
+    else
+        echo "Il manque un paquet système :  sudo apt install ros-jazzy-audio-common-msgs" >&2
+        exit 1
+    fi
+}
+
 verifier_preparation() {
     if [[ ! -f "$FOSA_BASE_WS/install/setup.bash" || ! -f "$FOSA_SIM_TAGS/tag1/tag1.obj" ]]; then
         echo "Lancez d'abord : simulation/simulation.sh preparer" >&2
@@ -71,6 +98,7 @@ arreter() {
     pkill -INT -f "[c]ourse.launch.py"
     pkill -INT -f "[m]onde_tags.launch.py"
     pkill -INT -f "[m]oniteur.py"
+    pkill -INT -f "[m]icro_pc.py"
     sleep 10
     # Lanceurs d'abord : ils relanceraient les nœuds de perception (respawn).
     pkill -9 -f "[c]ourse.launch.py"
@@ -103,6 +131,13 @@ phase() {
     # setsid lancé directement : $! est le chef du groupe à arrêter ensuite.
     setsid "$DEPOT/run.sh" course-premier-plan "${arguments[@]}" > "$course" 2>&1 &
     local pid_course=$!
+    local pid_micro=""
+    if [[ "$mode" == course && "${FOSA_SIM_VOIX:-0}" == 1 ]]; then
+        setsid python3 -u "$DOSSIER_SIM/micro_pc.py" > "$JOURNAUX/micro.log" 2>&1 &
+        pid_micro=$!
+        echo ">>> Départ À LA VOIX : quand le récit affiche « À l'écoute du mot de départ »,"
+        echo ">>> dites « allez » distinctement dans le micro du PC."
+    fi
     if [[ "$mode" == course ]]; then
         (
             for _ in $(seq 120); do
@@ -112,12 +147,15 @@ phase() {
             sleep 3
             (cd "$DEPOT" && timeout 20 ./run.sh ordre-test "$ordre" > /dev/null 2>&1)
             sleep 2
-            (cd "$DEPOT" && timeout 20 ./run.sh depart > /dev/null 2>&1)
+            if [[ "${FOSA_SIM_VOIX:-0}" != 1 ]]; then
+                (cd "$DEPOT" && timeout 20 ./run.sh depart > /dev/null 2>&1)
+            fi
         ) &
     fi
     timeout "$DUREE_MAX" python3 -u "$DOSSIER_SIM/moniteur.py" --quitter-a-la-fin \
         | tee "$moniteur"
     echo "Arrêt de la phase ${mode}..."
+    arreter_groupe "$pid_micro"
     arreter_groupe "$pid_course"
     sleep 5
     arreter_groupe "$pid_monde"
@@ -128,7 +166,9 @@ phase() {
 
 case "${1:-}" in
     preparer) preparer ;;
+    voix-preparer) voix_preparer ;;
     arreter) arreter ;;
+    micro) verifier_preparation; sourcer; exec python3 -u "$DOSSIER_SIM/micro_pc.py" ;;
     essai)
         verifier_preparation; sourcer
         phase preparation && phase course "${2:-7,1,9,4}"
@@ -137,5 +177,5 @@ case "${1:-}" in
     course) verifier_preparation; sourcer; phase course "${2:-7,1,9,4}" ;;
     monde) verifier_preparation; sourcer; exec ros2 launch "$DOSSIER_SIM/monde_tags.launch.py" ;;
     moniteur) verifier_preparation; sourcer; exec python3 -u "$DOSSIER_SIM/moniteur.py" ;;
-    *) sed -n '2,13p' "$0"; exit 2 ;;
+    *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
