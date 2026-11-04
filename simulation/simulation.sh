@@ -22,7 +22,7 @@ export FOSA_SIM_TAGS="$CACHE/tags"
 export FOSA_BASE_WS="$CACHE/parc_ws"      # parc_msgs de simulation, pour run.sh
 export FOSA_PROFIL=simulation
 export FOSA_SIM_GUI="${FOSA_SIM_GUI:-1}"
-DUREE_MAX="${FOSA_SIM_DUREE_MAX:-3600}"   # secondes réelles, par phase
+DUREE_MAX="${FOSA_SIM_DUREE_MAX:-7200}"   # secondes réelles par phase (Gazebo peut être 10 fois plus lent)
 
 sourcer() {
     set +u
