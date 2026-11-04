@@ -188,7 +188,8 @@ case "$mode" in
         ;;
     ordre-test)
         ordre="${1:-}"
-        if [[ ! "$ordre" =~ ^[0-9][0-9\ ,\[\]]*$ ]]; then
+        motif_ordre='^[][0-9 ,]+$'     # chiffres, virgules, espaces, crochets
+        if [[ -z "$ordre" || ! "$ordre" =~ $motif_ordre ]]; then
             echo "Usage : ./run.sh ordre-test \"7,1,9,4\"  (essais seulement)" >&2
             exit 2
         fi
