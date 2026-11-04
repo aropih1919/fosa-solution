@@ -18,9 +18,10 @@ from caytu_course.alignement import (
 from caytu_course.geometrie_tags import erreurs_visite
 
 REGLAGES = ReglagesAlignement(
-    tolerance_cap=math.radians(5.0), tolerance_laterale=0.06, gain_lineaire=0.6, gain_angulaire=1.2,
+    tolerance_cap=math.radians(5.0), tolerance_laterale=0.06, tolerance_distance=0.04,
+    gain_lineaire=0.6, gain_angulaire=1.2,
     max_lineaire=0.08, max_angulaire=0.35, min_lineaire=0.03, min_angulaire=0.10,
-    precision_point=0.025, precision_cap=math.radians(2.0),
+    precision_point=0.012, precision_cap=math.radians(2.0),
     erreur_distance_max=0.75, erreur_laterale_max=0.30)
 
 
@@ -104,9 +105,11 @@ def test_hors_precision_le_robot_continue_meme_dans_la_tolerance():
     assert commande.lineaire == pytest.approx(0.03)
 
 
-def test_l_hysteresis_evite_de_repartir_pendant_la_rotation_finale():
-    assert _commande(0.54, 0.0).etat == 'en_cours'
-    assert _commande(0.54, 0.0, au_point=True).etat == 'aligne'
+def test_au_point_3_cm_d_ecart_se_corrigent_sans_quitter_le_mode():
+    assert not _commande(0.535, 0.0).au_point
+    commande = _commande(0.535, 0.0, au_point=True)
+    assert commande.au_point
+    assert commande.lineaire > 0.0
 
 
 def test_un_tag_vu_tres_de_biais_redemande_nav2():
@@ -137,6 +140,30 @@ def test_un_ecart_lateral_hors_tolerance_se_corrige_encore_en_roulant():
     commande = _commande(0.5, 0.09)
     assert not commande.au_point
     assert commande.etat == 'en_cours'
+
+
+def test_au_point_le_robot_ne_repart_pas_vers_le_point():
+    """Régression du tag 9 : à 2,2 cm de la distance, tag à 22° à gauche,
+    le robot alternait « aller au point » (à droite) et « face au tag » (à
+    gauche). Au point, il doit rester face au tag et tourner à gauche."""
+    angle = math.radians(22.0)
+    x, y = 0.522 * math.cos(angle), 0.522 * math.sin(angle)
+    commande = _commande(x, y, math.pi + angle, au_point=True)
+    assert commande.au_point
+    assert commande.lineaire == 0.0
+    assert commande.angulaire > 0.0
+
+
+def test_au_point_et_face_au_tag_la_distance_se_corrige_en_ligne_droite():
+    commande = _commande(0.53, 0.0, math.pi + math.radians(3.0), au_point=True)
+    assert commande.au_point
+    assert commande.lineaire > 0.0
+
+
+def test_au_point_un_grand_ecart_relance_le_deplacement():
+    commande = _commande(0.6, 0.0, au_point=True)
+    assert not commande.au_point
+    assert commande.lineaire > 0.0
 
 
 def test_la_garde_avant_detecte_un_obstacle_dans_le_couloir():

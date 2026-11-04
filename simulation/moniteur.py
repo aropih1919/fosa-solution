@@ -31,13 +31,24 @@ def juge(noeud, texte):
     print(f'    [juge simulé] {texte}', flush=True)
 
 
+def _lire_poses_gazebo():
+    """Une capture des poses du monde ; deux essais (Gazebo chargé : lent)."""
+    for _ in range(2):
+        try:
+            sortie = subprocess.run(
+                ['gz', 'topic', '-e', '-t', '/world/task/pose/info', '-n', '1'],
+                capture_output=True, text=True, timeout=20).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if sortie:
+            return sortie
+    return None
+
+
 def pose_gazebo(modele='sitoe_robot'):
     """(x, y, cap) du modèle dans le monde Gazebo, ou None."""
-    try:
-        sortie = subprocess.run(
-            ['gz', 'topic', '-e', '-t', '/world/task/pose/info', '-n', '1'],
-            capture_output=True, text=True, timeout=10).stdout
-    except (OSError, subprocess.TimeoutExpired):
+    sortie = _lire_poses_gazebo()
+    if sortie is None:
         return None
     bloc = re.search(r'name: "' + modele + r'".*?position \{(.*?)\}.*?orientation \{(.*?)\}',
                      sortie, re.S)

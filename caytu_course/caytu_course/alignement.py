@@ -13,6 +13,12 @@ rattraper quelques centimètres de côté faisait pivoter le robot vers le point
 (jusqu'à 80°), le tag sortait du champ de la caméra et le robot oscillait au
 bord du champ jusqu'au délai (simulation).
 
+Une fois au point, le robot y reste tant que l'écart tient dans la tolérance
+d'acceptation : il corrige la distance par de petits mouvements avant ou
+arrière, face au tag. Avec des seuils d'entrée et de sortie trop proches, la
+distance mesurée (qui varie pendant la rotation, la caméra n'étant pas au
+centre de rotation) faisait alterner les deux modes : 4 minutes perdues.
+
 Un écart latéral se corrige donc en roulant ; seul un écart très grand (tag
 vu de biais, ou trop loin) redemande une navigation Nav2.
 """
@@ -20,9 +26,7 @@ vu de biais, ou trop loin) redemande une navigation Nav2.
 from dataclasses import dataclass
 import math
 
-# Une fois au point, il faut s'en écarter de HYSTERESIS_POINT fois la
-# précision pour relancer le déplacement : la rotation finale déplace un peu
-# le centre quand base_link n'y est pas.
+# Au point, la distance est jugée bonne à HYSTERESIS_POINT fois la précision.
 HYSTERESIS_POINT = 2.0
 
 
@@ -30,6 +34,7 @@ HYSTERESIS_POINT = 2.0
 class ReglagesAlignement:
     tolerance_cap: float         # au-delà, tourner sur place avant de rouler
     tolerance_laterale: float    # écart latéral accepté une fois à bonne distance
+    tolerance_distance: float    # au point, on n'en sort qu'au-delà
     gain_lineaire: float
     gain_angulaire: float
     max_lineaire: float
@@ -67,19 +72,33 @@ def _tourner(angle, reglages, au_point=False):
         reglages.max_angulaire), 'en_cours', au_point)
 
 
+def _face_au_tag(erreurs, reglages):
+    """Au point : tourner face au tag, puis ajuster la distance en ligne droite."""
+    distance_bonne = abs(erreurs.distance) <= reglages.precision_point * HYSTERESIS_POINT
+    if abs(erreurs.cap) <= reglages.precision_cap and distance_bonne:
+        return CommandeAlignement(0.0, 0.0, 'aligne', True)
+    if abs(erreurs.cap) > reglages.tolerance_cap or distance_bonne:
+        return _tourner(erreurs.cap, reglages, au_point=True)
+    return CommandeAlignement(
+        _saturer(reglages.gain_lineaire * erreurs.distance,
+                 reglages.min_lineaire, reglages.max_lineaire),
+        _borner(reglages.gain_angulaire * erreurs.cap, reglages.max_angulaire),
+        'en_cours', True)
+
+
 def commande_alignement(erreurs, reglages, au_point=False):
     """Commande de vitesse ; au_point : valeur rendue au cycle précédent."""
     if (abs(erreurs.laterale) > reglages.erreur_laterale_max
             or abs(erreurs.distance) > reglages.erreur_distance_max):
         return CommandeAlignement(0.0, 0.0, 'renaviguer')
+    if au_point and (abs(erreurs.distance) <= reglages.tolerance_distance
+                     and abs(erreurs.laterale) <= reglages.tolerance_laterale):
+        return _face_au_tag(erreurs, reglages)
     ecart = math.hypot(erreurs.vers_point_x, erreurs.vers_point_y)
-    seuil = reglages.precision_point * (HYSTERESIS_POINT if au_point else 1.0)
-    bonne_distance = (abs(erreurs.distance) <= seuil
+    bonne_distance = (abs(erreurs.distance) <= reglages.precision_point
                       and abs(erreurs.laterale) <= reglages.tolerance_laterale)
-    if ecart <= seuil or bonne_distance:
-        if abs(erreurs.cap) <= reglages.precision_cap:
-            return CommandeAlignement(0.0, 0.0, 'aligne', True)
-        return _tourner(erreurs.cap, reglages, au_point=True)
+    if ecart <= reglages.precision_point or bonne_distance:
+        return _face_au_tag(erreurs, reglages)
     angle = math.atan2(erreurs.vers_point_y, erreurs.vers_point_x)
     sens = 1.0
     if abs(angle) > math.pi / 2.0:

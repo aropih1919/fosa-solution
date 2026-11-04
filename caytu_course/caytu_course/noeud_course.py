@@ -144,6 +144,7 @@ class NoeudCourse(Node):
         return ReglagesAlignement(
             tolerance_cap=math.radians(course.heading_tolerance_deg),
             tolerance_laterale=course.lateral_tolerance_m,
+            tolerance_distance=course.distance_tolerance_m,
             gain_lineaire=alignement.linear_gain,
             gain_angulaire=alignement.angular_gain,
             max_lineaire=alignement.max_linear_mps,

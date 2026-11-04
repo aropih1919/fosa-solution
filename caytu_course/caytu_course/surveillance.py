@@ -3,7 +3,8 @@
 Complète le récit de la course par des événements bas niveau, dans l'esprit
 du moniteur de la branche benchmark : trajets Nav2, chemins, rotations,
 arrêts prolongés, et surtout le robot BLOQUÉ (commandes envoyées mais aucun
-mouvement mesuré par l'odométrie). Chaque méthode reçoit le temps `t`
+mouvement mesuré par l'odométrie) ou qui OSCILLE (tourne à gauche puis à
+droite sans progresser). Chaque méthode reçoit le temps `t`
 (horloge ROS) et renvoie une liste de lignes `[ÉTIQUETTE] texte`.
 """
 
@@ -47,6 +48,8 @@ class Surveillance:
         self._commande_depuis = None    # instant où une commande non nulle a commencé
         self._reference = None          # (t, x, y, cap) au début de la fenêtre
         self._blocage_rappel = -math.inf
+        self._sens_rotation = 0         # signe de la dernière rotation commandée
+        self._inversions = 0            # changements de sens dans la fenêtre
 
     # ---------------------------------------------------------------- Nav2
     def statut_nav2(self, code, t):
@@ -100,6 +103,11 @@ class Surveillance:
                 lignes.append(f"[ARRÊT] immobile depuis {duree:.0f} s pendant un trajet Nav2")
         else:
             self._arret_debut = None
+        if tourne:
+            sens = 1 if angulaire > 0.0 else -1
+            if self._sens_rotation and sens != self._sens_rotation:
+                self._inversions += 1
+            self._sens_rotation = sens
         if arret:
             self._commande_depuis = None
         elif self._commande_depuis is None:
@@ -116,18 +124,23 @@ class Surveillance:
             return []
         if self._reference is None:
             self._reference = (t, x, y, cap)
+            self._inversions = 0
             return []
         debut, x0, y0, cap0 = self._reference
         if t - debut < BLOCAGE_FENETRE:
             return []
         deplacement = math.hypot(x - x0, y - y0)
         rotation = abs(math.atan2(math.sin(cap - cap0), math.cos(cap - cap0)))
+        inversions, self._inversions = self._inversions, 0
         self._reference = (t, x, y, cap)
         if deplacement >= BLOCAGE_DEPLACEMENT_MIN or rotation >= BLOCAGE_ROTATION_MIN:
             return []
         if t - self._blocage_rappel < BLOCAGE_RAPPEL:
             return []
         self._blocage_rappel = t
+        if inversions >= 2:
+            return [f'[OSCILLATION] le robot tourne à gauche puis à droite sans progresser '
+                    f'({inversions} changements de sens en {BLOCAGE_FENETRE:.0f} s)']
         lineaire, angulaire = self._commande
         return [f'[BLOQUÉ] commandes envoyées (v={lineaire:+.2f}, w={angulaire:+.2f}) '
                 f'mais le robot ne bouge pas depuis {BLOCAGE_FENETRE:.0f} s']

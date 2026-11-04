@@ -55,6 +55,19 @@ def test_des_commandes_sans_mouvement_signalent_un_blocage():
     assert surveillance.mouvement(1.0, 1.01, 0.0, 7.0) == []
 
 
+def test_une_rotation_qui_change_de_sens_sans_progresser_est_une_oscillation():
+    """Régression du tag 9 : gauche, droite, gauche... pendant 4 minutes."""
+    surveillance = Surveillance()
+    surveillance.commande(0.0, 0.35, 0.0)
+    surveillance.mouvement(1.0, 1.0, 0.0, 0.0)
+    surveillance.commande(0.0, -0.35, 1.0)
+    surveillance.commande(0.0, 0.35, 2.0)
+    surveillance.commande(0.0, -0.35, 3.0)
+    lignes = surveillance.mouvement(1.0, 1.0, 0.02, 5.5)
+    assert lignes[0].startswith('[OSCILLATION]')
+    assert '3 changements de sens' in lignes[0]
+
+
 def test_un_robot_qui_avance_n_est_pas_bloque():
     surveillance = Surveillance()
     surveillance.commande(0.2, 0.0, 0.0)
