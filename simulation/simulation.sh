@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Simulation Gazebo de la course, sur le PC uniquement (jamais sur le robot).
 #
-#   simulation/simulation.sh preparer        une fois : parc_msgs de simulation + tags
-#   simulation/simulation.sh essai [ordre]   course complète automatique (≈ 30-45 min)
-#   simulation/simulation.sh monde           monde + robot + tags seuls (essais manuels)
-#   simulation/simulation.sh moniteur        arbitre et juges simulés (essais manuels)
+#   simulation/simulation.sh preparer          une fois : parc_msgs de simulation + tags
+#   simulation/simulation.sh essai [ordre]     répétition du jour J : préparation puis match
+#   simulation/simulation.sh preparation       préparation seule (carte + tags enregistrés)
+#   simulation/simulation.sh course [ordre]    match seul (avec la préparation si elle existe)
+#   simulation/simulation.sh monde             monde + robot + tags seuls (essais manuels)
+#   simulation/simulation.sh moniteur          récit + arbitre et juges simulés
+#   simulation/simulation.sh arreter           tout arrêter (Gazebo, course, moniteur)
 #
-# Variables : FOSA_SIM_ODOM_CORRIGEE=1 (recommandé), FOSA_SIM_GUI=1 (affichage).
+# Gazebo s'affiche (FOSA_SIM_GUI=0 pour le masquer, plus rapide).
+# FOSA_SIM_ODOM_CORRIGEE=1 : odométrie du modèle corrigée (recommandé).
 set -uo pipefail
 
 DOSSIER_SIM="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,6 +21,8 @@ JOURNAUX="$CACHE/journaux"
 export FOSA_SIM_TAGS="$CACHE/tags"
 export FOSA_BASE_WS="$CACHE/parc_ws"      # parc_msgs de simulation, pour run.sh
 export FOSA_PROFIL=simulation
+export FOSA_SIM_GUI="${FOSA_SIM_GUI:-1}"
+DUREE_MAX="${FOSA_SIM_DUREE_MAX:-3600}"   # secondes réelles, par phase
 
 sourcer() {
     set +u
@@ -42,8 +48,17 @@ preparer() {
 }
 
 verifier_preparation() {
-    if [[ ! -f "$FOSA_BASE_WS/install/setup.bash" || ! -d "$FOSA_SIM_TAGS/tag1" ]]; then
+    if [[ ! -f "$FOSA_BASE_WS/install/setup.bash" || ! -f "$FOSA_SIM_TAGS/tag1/tag1.obj" ]]; then
         echo "Lancez d'abord : simulation/simulation.sh preparer" >&2
+        exit 1
+    fi
+}
+
+# Une course ou un Gazebo restés d'un essai précédent pilotent le même robot
+# simulé et faussent tout : on refuse de démarrer.
+verifier_rien_ne_tourne() {
+    if pgrep -f "[c]ourse_parc|[g]z sim|[c]ourse.launch.py|[t]ag_detector|[d]epth_scan" >/dev/null; then
+        echo "Une course ou Gazebo tourne déjà : simulation/simulation.sh arreter" >&2
         exit 1
     fi
 }
@@ -52,53 +67,76 @@ arreter_groupe() {
     [[ -n "${1:-}" ]] && kill -INT -- "-$1" 2>/dev/null
 }
 
-essai() {
-    local ordre="${1:-7,1,9,4}" duree_max="${2:-2700}"
-    verifier_preparation
-    sourcer
-    mkdir -p "$JOURNAUX"
-    local monde="$JOURNAUX/monde.log" course="$JOURNAUX/course.log" moniteur="$JOURNAUX/moniteur.log"
-    echo "Essai : ordre $ordre, ROS_DOMAIN_ID=$ROS_DOMAIN_ID, journaux dans $JOURNAUX"
+arreter() {
+    pkill -INT -f "[c]ourse.launch.py"
+    pkill -INT -f "[m]onde_tags.launch.py"
+    pkill -INT -f "[m]oniteur.py"
+    sleep 10
+    # Lanceurs d'abord : ils relanceraient les nœuds de perception (respawn).
+    pkill -9 -f "[c]ourse.launch.py"
+    pkill -9 -f "[m]onde_tags.launch.py"
+    local noeud
+    for noeud in course_parc mot_depart tag_detector depth_scan scan_to_scan_filter_chain \
+        slam_toolbox controller_server planner_server behavior_server bt_navigator \
+        lifecycle_manager robot_state_publisher parameter_bridge image_bridge "gz sim"; do
+        pkill -9 -f "[${noeud:0:1}]${noeud:1}"
+    done
+    echo "Simulation arrêtée."
+}
 
+# Une phase complète dans un monde neuf (robot à la position de départ) :
+# Gazebo, course (match ou préparation), puis le moniteur au premier plan
+# jusqu'au résumé final.
+phase() {
+    local mode="$1" ordre="${2:-}"
+    verifier_rien_ne_tourne
+    mkdir -p "$JOURNAUX"
+    local monde="$JOURNAUX/monde_$mode.log" course="$JOURNAUX/course_$mode.log"
+    local moniteur="$JOURNAUX/moniteur_$mode.log"
+    echo "=== ${mode^^} (ROS_DOMAIN_ID=$ROS_DOMAIN_ID, journaux : $JOURNAUX) ==="
     setsid ros2 launch "$DOSSIER_SIM/monde_tags.launch.py" > "$monde" 2>&1 &
     local pid_monde=$!
+    echo "Démarrage de Gazebo (environ 40 s)..."
     sleep 40
-    (cd "$DEPOT" && setsid ./run.sh course-premier-plan > "$course" 2>&1) &
+    local arguments=()
+    [[ "$mode" == preparation ]] && arguments=(mode:=preparation)
+    # setsid lancé directement : $! est le chef du groupe à arrêter ensuite.
+    setsid "$DEPOT/run.sh" course-premier-plan "${arguments[@]}" > "$course" 2>&1 &
     local pid_course=$!
-    for _ in $(seq 120); do
-        grep -q "ATTENTE_ORDRE" "$course" && break
-        sleep 1
-    done
-    setsid python3 -u "$DOSSIER_SIM/moniteur.py" > "$moniteur" 2>&1 &
-    local pid_moniteur=$!
-    sleep 3
-    (cd "$DEPOT" && timeout 20 ./run.sh ordre-test "$ordre" > /dev/null 2>&1)
-    sleep 2
-    (cd "$DEPOT" && timeout 20 ./run.sh depart > /dev/null 2>&1)
-    echo "Départ donné. Suivi : tail -f $moniteur"
-
-    local debut
-    debut=$(date +%s)
-    while (( $(date +%s) - debut < duree_max )); do
-        grep -q '"etat": "TERMINEE"' "$moniteur" && break
-        sleep 10
-    done
-    sleep 5
-    arreter_groupe "$pid_moniteur"
+    if [[ "$mode" == course ]]; then
+        (
+            for _ in $(seq 120); do
+                grep -q "ATTENTE_ORDRE" "$course" && break
+                sleep 1
+            done
+            sleep 3
+            (cd "$DEPOT" && timeout 20 ./run.sh ordre-test "$ordre" > /dev/null 2>&1)
+            sleep 2
+            (cd "$DEPOT" && timeout 20 ./run.sh depart > /dev/null 2>&1)
+        ) &
+    fi
+    timeout "$DUREE_MAX" python3 -u "$DOSSIER_SIM/moniteur.py" --quitter-a-la-fin \
+        | tee "$moniteur"
     arreter_groupe "$pid_course"
     sleep 12
     arreter_groupe "$pid_monde"
     sleep 8
-    pkill -f "[g]z sim -r" 2>/dev/null
-    echo "Essai terminé. Résumé :"
-    grep -aE "VISITE|ARBITRE|sauté|TERMINEE" "$moniteur" | cut -c1-200
-    grep -aE "Plan :|sauté" "$course" | sed 's/\x1b\[[0-9;]*m//g' | cut -c40-220
+    pkill -9 -f "[g]z sim" 2>/dev/null
+    if pgrep -f "[c]ourse_parc" >/dev/null; then
+        echo "ATTENTION : des nœuds de course tournent encore : simulation/simulation.sh arreter" >&2
+    fi
 }
 
 case "${1:-}" in
     preparer) preparer ;;
-    essai) shift; essai "$@" ;;
+    arreter) arreter ;;
+    essai)
+        verifier_preparation; sourcer
+        phase preparation && phase course "${2:-7,1,9,4}"
+        ;;
+    preparation) verifier_preparation; sourcer; phase preparation ;;
+    course) verifier_preparation; sourcer; phase course "${2:-7,1,9,4}" ;;
     monde) verifier_preparation; sourcer; exec ros2 launch "$DOSSIER_SIM/monde_tags.launch.py" ;;
     moniteur) verifier_preparation; sourcer; exec python3 -u "$DOSSIER_SIM/moniteur.py" ;;
-    *) sed -n '2,9p' "$0"; exit 2 ;;
+    *) sed -n '2,13p' "$0"; exit 2 ;;
 esac
