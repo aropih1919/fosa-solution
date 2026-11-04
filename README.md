@@ -389,11 +389,13 @@ mécanique (dans l'esprit du moniteur de la branche benchmark) :
         [ROTATION] rotation sur place de 9 s
         [ARRÊT] immobile depuis 6 s pendant un trajet Nav2
         [BLOQUÉ] commandes envoyées (v=-0.08, w=+0.00) mais le robot ne bouge pas depuis 5 s
+        [OSCILLATION] le robot tourne à gauche puis à droite sans progresser (3 changements de sens en 5 s)
         [NAV2] ÉCHEC : Nav2 a abandonné le trajet
         [ÉTAT] position (1,23 ; -0,50), cap +90° | v=+0.20 w=+0.00 | Nav2 actif | chemins 7 | contacts 0
 ```
 
-Les alertes (`[BLOQUÉ]`, `[CONTACT]`, échec de Nav2) sont en rouge.
+Les alertes (`[BLOQUÉ]`, `[OSCILLATION]`, `[CONTACT]`, échec de Nav2) sont en
+rouge.
 `./run.sh suivi --sans-technique` n'affiche que le récit.
 
 ## 1.15 Se dégager quand le robot est coincé
@@ -408,7 +410,7 @@ une garde lidar à l'arrière :
 
 ## 1.16 Comment nous l'avons vérifié
 
-- **198 tests automatiques**, sans robot ni simulateur : géométrie,
+- **202 tests automatiques**, sans robot ni simulateur : géométrie,
   alignement, stratégie, lecture de l'ordre, messages de l'arbitre,
   configuration, détection sur images synthétiques.
 - **Simulation Gazebo** : le monde officiel PARC, avec quatre tags ajoutés, et
@@ -525,7 +527,7 @@ But : pouvoir construire la solution, lancer les tests et la simulation.
    ```bash
    cd ~/ros2_ws
    colcon test --packages-select caytu_config caytu_perception caytu_course caytu_nav_solution
-   colcon test-result --verbose          # attendu : 198 tests, 0 errors, 0 failures
+   colcon test-result --verbose          # attendu : 202 tests, 0 errors, 0 failures
    ```
 
 **Après chaque modification du code** : `cd ~/ros2_ws && colcon build
