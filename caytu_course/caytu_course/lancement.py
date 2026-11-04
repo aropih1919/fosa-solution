@@ -5,6 +5,14 @@ from pathlib import Path
 EXTENSIONS_POSEGRAPH = ('.posegraph', '.data')
 
 
+def executable_slam(configuration):
+    """Le nœud asynchrone ignore `mode` : la localisation sur une carte des
+    essais demande le nœud dédié de slam_toolbox (comme localization_launch)."""
+    if configuration.course.slam_map_file:
+        return 'localization_slam_toolbox_node'
+    return 'async_slam_toolbox_node'
+
+
 def parametres_slam(configuration):
     """Surcharges de slam_toolbox : repères, scan, mode et carte éventuelle.
 

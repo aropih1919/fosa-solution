@@ -15,7 +15,7 @@ import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 from caytu_config import load_config
-from caytu_course.lancement import parametres_slam
+from caytu_course.lancement import executable_slam, parametres_slam
 from caytu_nav_solution.parametres_nav2 import ecrire_parametres_course
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
@@ -44,7 +44,7 @@ def _pile_navigation(configuration, fichier_nav2, dossier_bringup, dossier_cours
     arbre = os.path.join(
         dossier_bringup, 'behavior_trees', 'navigate_bounded_recovery.xml')
     return [
-        Node(package='slam_toolbox', executable='async_slam_toolbox_node',
+        Node(package='slam_toolbox', executable=executable_slam(configuration),
              name='slam_toolbox', output='screen',
              parameters=[os.path.join(dossier_course, 'config', 'slam_toolbox.yaml'),
                          parametres_slam(configuration)]),
