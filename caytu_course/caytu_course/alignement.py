@@ -1,39 +1,47 @@
 """Asservissement visuel final : amener le robot à 0,5 m face au tag.
 
-D'abord tourner pour faire face au tag, puis avancer ou reculer en ligne
-droite en corrigeant le cap. Un écart latéral trop grand ne se corrige pas
-sur place : on redemande une navigation Nav2 vers la pose d'approche.
+Nav2 s'arrête au point de pré-approche (0,9 m) : plus près, son contrôle de
+collision refusait d'avancer vers le support du tag. L'asservissement finit
+le trajet en deux temps :
 
-Deux niveaux : le robot ne s'arrête qu'à l'objectif de précision ; les
-tolérances (plus larges) servent à accepter la position si le temps manque.
-S'arrêter dès l'entrée dans la tolérance laissait le robot à son bord.
+1. aller au point de visite (0,5 m sur la normale du tag) : tourner vers lui,
+   puis rouler en corrigeant le cap, en marche arrière s'il est derrière ;
+2. une fois au point, tourner sur place pour faire face au tag.
+
+Un écart latéral se corrige donc en roulant ; seul un écart très grand (tag
+vu de biais, ou trop loin) redemande une navigation Nav2.
 """
 
 from dataclasses import dataclass
 import math
 
+# Une fois au point, il faut s'en écarter de HYSTERESIS_POINT fois la
+# précision pour relancer le déplacement : la rotation finale déplace un peu
+# le centre quand base_link n'y est pas.
+HYSTERESIS_POINT = 2.0
+
 
 @dataclass(frozen=True)
 class ReglagesAlignement:
-    tolerance_distance: float
-    tolerance_laterale: float
-    tolerance_cap: float
+    tolerance_cap: float         # au-delà, tourner sur place avant de rouler
     gain_lineaire: float
     gain_angulaire: float
     max_lineaire: float
     max_angulaire: float
     min_lineaire: float
     min_angulaire: float
-    precision_distance: float
+    precision_point: float       # distance au point de visite pour s'arrêter
     precision_cap: float
     erreur_distance_max: float   # au-delà : Nav2, pas l'asservissement visuel
+    erreur_laterale_max: float
 
 
 @dataclass(frozen=True)
 class CommandeAlignement:
     lineaire: float
     angulaire: float
-    etat: str   # 'en_cours' | 'aligne' | 'renaviguer'
+    etat: str                    # 'en_cours' | 'aligne' | 'renaviguer'
+    au_point: bool = False       # rotation finale en cours
 
 
 def _saturer(valeur, minimum, maximum):
@@ -47,21 +55,35 @@ def _borner(valeur, maximum):
     return max(-maximum, min(maximum, valeur))
 
 
-def commande_alignement(erreurs, reglages):
-    if (abs(erreurs.laterale) > reglages.tolerance_laterale
+def _tourner(angle, reglages, au_point=False):
+    return CommandeAlignement(0.0, _saturer(
+        reglages.gain_angulaire * angle, reglages.min_angulaire,
+        reglages.max_angulaire), 'en_cours', au_point)
+
+
+def commande_alignement(erreurs, reglages, au_point=False):
+    """Commande de vitesse ; au_point : valeur rendue au cycle précédent."""
+    if (abs(erreurs.laterale) > reglages.erreur_laterale_max
             or abs(erreurs.distance) > reglages.erreur_distance_max):
         return CommandeAlignement(0.0, 0.0, 'renaviguer')
-    distance_atteinte = abs(erreurs.distance) <= reglages.precision_distance
-    if distance_atteinte and abs(erreurs.cap) <= reglages.precision_cap:
-        return CommandeAlignement(0.0, 0.0, 'aligne')
-    if abs(erreurs.cap) > reglages.tolerance_cap or distance_atteinte:
-        return CommandeAlignement(0.0, _saturer(
-            reglages.gain_angulaire * erreurs.cap,
-            reglages.min_angulaire, reglages.max_angulaire), 'en_cours')
+    ecart = math.hypot(erreurs.vers_point_x, erreurs.vers_point_y)
+    seuil = reglages.precision_point * (HYSTERESIS_POINT if au_point else 1.0)
+    if ecart <= seuil:
+        if abs(erreurs.cap) <= reglages.precision_cap:
+            return CommandeAlignement(0.0, 0.0, 'aligne', True)
+        return _tourner(erreurs.cap, reglages, au_point=True)
+    angle = math.atan2(erreurs.vers_point_y, erreurs.vers_point_x)
+    sens = 1.0
+    if abs(angle) > math.pi / 2.0:
+        # Point derrière (robot trop près) : reculer, l'arrière vers le point.
+        angle = math.atan2(math.sin(angle + math.pi), math.cos(angle + math.pi))
+        sens = -1.0
+    if abs(angle) > reglages.tolerance_cap:
+        return _tourner(angle, reglages)
     return CommandeAlignement(
-        _saturer(reglages.gain_lineaire * erreurs.distance,
-                 reglages.min_lineaire, reglages.max_lineaire),
-        _borner(reglages.gain_angulaire * erreurs.cap, reglages.max_angulaire),
+        sens * _saturer(reglages.gain_lineaire * ecart,
+                        reglages.min_lineaire, reglages.max_lineaire),
+        _borner(reglages.gain_angulaire * angle, reglages.max_angulaire),
         'en_cours')
 
 

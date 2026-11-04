@@ -189,10 +189,13 @@ course:
     min_linear_mps: 0.03          # À AJUSTER : seuil de démarrage de la base
     min_angular_rps: 0.10
     # Objectif d'arrêt (plus strict que les tolérances d'acceptation ci-dessus).
-    precision_distance_m: 0.015
+    precision_point_m: 0.025      # distance au point de visite (0,5 m sur la normale)
     precision_heading_deg: 2.0
-    max_distance_error_m: 0.25    # au-delà, Nav2 replanifie (pas de longue ligne droite)
-    timeout_sec: 20.0
+    # Nav2 s'arrête à approach_distance_m ; l'asservissement visuel finit.
+    # Au-delà de ces écarts, retour à Nav2 (pas de longue ligne droite).
+    max_distance_error_m: 0.75    # tag vu jusqu'à 1,25 m
+    max_lateral_error_m: 0.30     # tag vu trop de biais
+    timeout_sec: 30.0
     max_renavigations: 2
   # Vide = cartographie en direct. Sinon : posegraph slam_toolbox sérialisé
   # pendant les essais (seulement si les cartes pré-construites sont autorisées).

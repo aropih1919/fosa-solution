@@ -12,7 +12,6 @@ Déroulement (guide officiel) :
   4. signaler la fin et s'arrêter, au plus tard à 10 minutes.
 """
 
-from dataclasses import replace
 import json
 import math
 import signal
@@ -105,8 +104,6 @@ class NoeudCourse(Node):
     def _reglages_alignement(self):
         course, alignement = self._course, self._course.alignment
         return ReglagesAlignement(
-            tolerance_distance=course.distance_tolerance_m,
-            tolerance_laterale=course.lateral_tolerance_m,
             tolerance_cap=math.radians(course.heading_tolerance_deg),
             gain_lineaire=alignement.linear_gain,
             gain_angulaire=alignement.angular_gain,
@@ -114,9 +111,10 @@ class NoeudCourse(Node):
             max_angulaire=alignement.max_angular_rps,
             min_lineaire=alignement.min_linear_mps,
             min_angulaire=alignement.min_angular_rps,
-            precision_distance=alignement.precision_distance_m,
+            precision_point=alignement.precision_point_m,
             precision_cap=math.radians(alignement.precision_heading_deg),
-            erreur_distance_max=alignement.max_distance_error_m)
+            erreur_distance_max=alignement.max_distance_error_m,
+            erreur_laterale_max=alignement.max_lateral_error_m)
 
     def publier_etat(self, etat, cible=None, detail=''):
         if (etat, cible, detail) == self._etat:
@@ -336,9 +334,14 @@ class NoeudCourse(Node):
         return memoire.x, memoire.y, memoire.cap, memoire.distance_min
 
     def _visiter(self, tag_id, echeance):
-        """Approche Nav2 puis alignement visuel ; retourne visite/perdu/echec/temps_ecoule."""
+        """Approche Nav2 puis alignement visuel ; retourne visite/perdu/echec/temps_ecoule.
+
+        Nav2 ne vise jamais le point de visite lui-même : il s'arrête à
+        `approach_distance_m`, l'asservissement visuel fait le reste.
+        """
         course = self._course
         renavigations = 0
+        forcer_nav2 = False
         while rclpy.ok() and renavigations <= course.alignment.max_renavigations:
             if self._temps_ecoule():
                 return 'temps_ecoule'
@@ -347,32 +350,16 @@ class NoeudCourse(Node):
             tag = self._pose_tag_courante(tag_id)
             if tag is None:
                 return 'perdu'
-            tag_x, tag_y, tag_cap, tag_distance = tag
-            pre_approche = (tag_distance
-                            > course.approach_distance_m + course.preapproach_margin_m)
-            distance = course.approach_distance_m if pre_approche else course.visit_distance_m
-            x, y, cap = pose_approche(tag_x, tag_y, tag_cap, distance)
-            x, y = self._but_pour_centre(x, y, cap)
-            self.publier_etat('APPROCHE', tag_id, f'{distance:.2f} m du tag')
-            resultat = self._navigateur.naviguer_une_fois(
-                x, y, self._configuration.system.global_frame, Pose2D(0.0, 0.0, 0.0),
-                cap=cap, interrompre=lambda: self._temps() > echeance)
-            if resultat == 'temps_ecoule':
-                return resultat
-            if resultat == 'interrompu':
-                return 'echec'
-            if resultat == 'refuse':
-                self.traiter_pendant(0.5)
-                continue
-            if resultat == 'reessayer' and pre_approche:
-                renavigations += 1
-                continue
-            if pre_approche:
-                courante = self._pose_tag_courante(tag_id)
-                if courante is None or courante[3] > distance + course.preapproach_margin_m:
-                    # Toujours pas vu de près depuis la pré-approche : on cherche.
-                    return 'perdu'
-                continue
+            portee = course.approach_distance_m + course.preapproach_margin_m
+            if forcer_nav2 or tag[3] > portee:
+                resultat = self._approcher(tag_id, tag, echeance)
+                if resultat in ('temps_ecoule', 'perdu'):
+                    return resultat
+                if resultat == 'echec':
+                    return 'echec'
+                if resultat == 'reessayer':
+                    renavigations += 1
+                    continue
             # Dernier essai : on accepte un écart latéral double plutôt que de
             # perdre la visite (le cap reste aligné sur la normale du tag).
             dernier_essai = renavigations >= course.alignment.max_renavigations
@@ -383,16 +370,46 @@ class NoeudCourse(Node):
             if resultat in ('perdu', 'temps_ecoule'):
                 return resultat
             renavigations += 1
+            forcer_nav2 = resultat == 'renaviguer'
         return 'echec'
+
+    def _approcher(self, tag_id, tag, echeance):
+        """Nav2 jusqu'au point de pré-approche, face au tag.
+
+        Retourne 'arrive', 'reessayer', 'perdu', 'echec' ou 'temps_ecoule'.
+        """
+        course = self._course
+        tag_x, tag_y, tag_cap, _ = tag
+        x, y, cap = pose_approche(tag_x, tag_y, tag_cap, course.approach_distance_m)
+        x, y = self._but_pour_centre(x, y, cap)
+        self.publier_etat('APPROCHE', tag_id, f'{course.approach_distance_m:.2f} m du tag')
+        resultat = self._navigateur.naviguer_une_fois(
+            x, y, self._configuration.system.global_frame, Pose2D(0.0, 0.0, 0.0),
+            cap=cap, interrompre=lambda: self._temps() > echeance)
+        if resultat == 'temps_ecoule':
+            return resultat
+        if resultat == 'interrompu':
+            return 'echec'
+        if resultat == 'refuse':
+            self.traiter_pendant(0.5)
+            return 'reessayer'
+        courante = self._pose_tag_courante(tag_id)
+        if courante is not None and courante[3] <= (
+                course.approach_distance_m + course.preapproach_margin_m):
+            return 'arrive'   # même si Nav2 a abandonné : le tag est à portée
+        if resultat == 'reessayer':
+            return 'reessayer'
+        # Arrivé mais tag pas revu de près : la pose mémorisée est fausse.
+        return 'perdu'
 
     def _aligner(self, tag_id, echeance, tolerance_laterale):
         course = self._course
-        reglages = replace(self._reglages, tolerance_laterale=tolerance_laterale)
         x_avant = max(x for x, _ in self._navigation.footprint)
         x_arriere = min(x for x, _ in self._navigation.footprint)
         demi_largeur = max(abs(y) for _, y in self._navigation.footprint)
         debut = dernier_vu = dernier_journal = self._temps()
         stables = 0
+        au_point = False
         erreurs = None
         self.publier_etat('ALIGNEMENT', tag_id)
         while rclpy.ok():
@@ -420,8 +437,9 @@ class NoeudCourse(Node):
             erreurs = erreurs_visite(
                 vue.x, vue.y, vue.cap, self._navigation.center_offset_x,
                 course.visit_distance_m)
-            commande = commande_alignement(erreurs, reglages)
-            if maintenant - dernier_journal >= 1.0:
+            commande = commande_alignement(erreurs, self._reglages, au_point)
+            au_point = commande.au_point
+            if commande.etat == 'renaviguer' or maintenant - dernier_journal >= 1.0:
                 dernier_journal = maintenant
                 self.get_logger().info(
                     f'Alignement tag {tag_id} : distance {erreurs.distance:+.3f} m, '
@@ -438,19 +456,25 @@ class NoeudCourse(Node):
                     return 'aligne'
             else:
                 stables = 0
-                lineaire = commande.lineaire
-                points = self._entrees.points_scan_robot() if lineaire else []
-                if (lineaire > 0.0 and obstacle_devant(
-                        points, x_avant, demi_largeur, course.front_guard_m)) or (
-                        lineaire < 0.0 and obstacle_derriere(
-                            points, x_arriere, demi_largeur, course.front_guard_m)):
-                    lineaire = 0.0
-                    self.get_logger().warning(
-                        'Obstacle sur le trajet : déplacement bloqué.',
-                        throttle_duration_sec=2.0)
-                self.publier_vitesse(lineaire, commande.angulaire)
+                self.publier_vitesse(*self._vitesse_gardee(
+                    commande, x_avant, x_arriere, demi_largeur))
             self.traiter_pendant(PERIODE_BOUCLE)
         return 'echec'
+
+    def _vitesse_gardee(self, commande, x_avant, x_arriere, demi_largeur):
+        """Annule l'avance (ou le recul) si un obstacle occupe le couloir."""
+        lineaire = commande.lineaire
+        if lineaire == 0.0:
+            return 0.0, commande.angulaire
+        points = self._entrees.points_scan_robot()
+        garde = self._course.front_guard_m
+        bloque = (obstacle_devant(points, x_avant, demi_largeur, garde) if lineaire > 0.0
+                  else obstacle_derriere(points, x_arriere, demi_largeur, garde))
+        if bloque:
+            self.get_logger().warning(
+                'Obstacle sur le trajet : déplacement bloqué.', throttle_duration_sec=2.0)
+            return 0.0, commande.angulaire
+        return lineaire, commande.angulaire
 
     def _rotation_vers_memoire(self, tag_id):
         """Vitesse angulaire pour regarder vers le tag mémorisé (0 si inconnu)."""

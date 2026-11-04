@@ -90,6 +90,16 @@ def test_le_centre_du_robot_est_pris_en_compte():
     assert erreurs_visite(0.45, 0.0, math.pi, -0.05, 0.5).distance == pytest.approx(0.0)
 
 
+def test_le_point_de_visite_est_sur_la_normale_du_tag():
+    """Tag 1 m devant, décalé de 10 cm : le point de visite est 0,5 m devant
+    et 10 cm à gauche ; bien placé, le vecteur est nul."""
+    erreurs = erreurs_visite(1.0, 0.1, math.pi, 0.0, 0.5)
+    assert (erreurs.vers_point_x, erreurs.vers_point_y) == pytest.approx((0.5, 0.1))
+    centre_derriere = erreurs_visite(0.45, 0.0, math.pi, -0.05, 0.5)
+    assert (centre_derriere.vers_point_x, centre_derriere.vers_point_y) == pytest.approx(
+        (0.0, 0.0), abs=1e-9)
+
+
 def test_visite_valide_selon_les_tolerances():
     bonne = erreurs_visite(0.52, 0.03, math.pi, 0.0, 0.5)
     assert visite_valide(bonne, 0.04, 0.06, math.radians(5.0))

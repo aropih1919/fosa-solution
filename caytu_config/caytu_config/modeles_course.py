@@ -224,9 +224,10 @@ class AlignmentConfig:
     max_angular_rps: float
     min_linear_mps: float
     min_angular_rps: float
-    precision_distance_m: float
+    precision_point_m: float
     precision_heading_deg: float
     max_distance_error_m: float
+    max_lateral_error_m: float
     timeout_sec: float
     max_renavigations: int
 
@@ -235,9 +236,9 @@ class AlignmentConfig:
         data = _section(data, path)
         _check_keys(data, (
             "linear_gain", "angular_gain", "max_linear_mps", "max_angular_rps",
-            "min_linear_mps", "min_angular_rps", "precision_distance_m",
-            "precision_heading_deg", "max_distance_error_m", "timeout_sec",
-            "max_renavigations"), path)
+            "min_linear_mps", "min_angular_rps", "precision_point_m",
+            "precision_heading_deg", "max_distance_error_m",
+            "max_lateral_error_m", "timeout_sec", "max_renavigations"), path)
         alignement = cls(
             linear_gain=_as_number(
                 _get(data, "linear_gain", path), f"{path}.linear_gain",
@@ -258,15 +259,18 @@ class AlignmentConfig:
             min_angular_rps=_as_number(
                 _get(data, "min_angular_rps", path), f"{path}.min_angular_rps",
                 minimum=0.0),
-            precision_distance_m=_as_number(
-                _get(data, "precision_distance_m", path),
-                f"{path}.precision_distance_m", positive=True),
+            precision_point_m=_as_number(
+                _get(data, "precision_point_m", path),
+                f"{path}.precision_point_m", positive=True),
             precision_heading_deg=_as_number(
                 _get(data, "precision_heading_deg", path),
                 f"{path}.precision_heading_deg", positive=True),
             max_distance_error_m=_as_number(
                 _get(data, "max_distance_error_m", path),
                 f"{path}.max_distance_error_m", positive=True),
+            max_lateral_error_m=_as_number(
+                _get(data, "max_lateral_error_m", path),
+                f"{path}.max_lateral_error_m", positive=True),
             timeout_sec=_as_number(
                 _get(data, "timeout_sec", path), f"{path}.timeout_sec",
                 positive=True),
@@ -386,6 +390,12 @@ class CourseConfig:
         if course.approach_distance_m < course.visit_distance_m:
             raise ConfigurationError(
                 f"{path}: approach_distance_m doit être >= visit_distance_m.")
+        # Un tag jugé proche (sans Nav2) doit rester à portée de l'asservissement.
+        if (course.approach_distance_m + course.preapproach_margin_m
+                - course.visit_distance_m > course.alignment.max_distance_error_m):
+            raise ConfigurationError(
+                f"{path}: approach_distance_m + preapproach_margin_m - "
+                "visit_distance_m dépasse alignment.max_distance_error_m.")
         return course
 
 

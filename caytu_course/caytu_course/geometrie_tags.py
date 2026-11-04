@@ -37,6 +37,9 @@ class ErreursVisite:
     distance: float   # > 0 : trop loin du tag
     laterale: float   # écart du centre à l'axe de la normale du tag
     cap: float        # rotation à faire pour faire face au tag (> 0 : à gauche)
+    # Vecteur du centre du robot vers le point de visite (repère du robot).
+    vers_point_x: float = 0.0
+    vers_point_y: float = 0.0
 
 
 def erreurs_visite(x_tag, y_tag, cap_normale_tag, decalage_centre_x, distance_cible):
@@ -51,6 +54,8 @@ def erreurs_visite(x_tag, y_tag, cap_normale_tag, decalage_centre_x, distance_ci
         laterale=(-vers_centre_x * math.sin(cap_normale_tag)
                   + vers_centre_y * math.cos(cap_normale_tag)),
         cap=normaliser_angle(cap_normale_tag + math.pi),
+        vers_point_x=x_tag + distance_cible * math.cos(cap_normale_tag) - decalage_centre_x,
+        vers_point_y=y_tag + distance_cible * math.sin(cap_normale_tag),
     )
 
 

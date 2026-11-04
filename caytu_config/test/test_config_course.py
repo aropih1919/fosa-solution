@@ -52,9 +52,9 @@ def _course_minimale(**surcharges):
         "alignment": {
             "linear_gain": 0.6, "angular_gain": 1.2, "max_linear_mps": 0.08,
             "max_angular_rps": 0.35, "min_linear_mps": 0.03,
-            "min_angular_rps": 0.1, "precision_distance_m": 0.015,
-            "precision_heading_deg": 2.0, "max_distance_error_m": 0.25,
-            "timeout_sec": 20.0,
+            "min_angular_rps": 0.1, "precision_point_m": 0.025,
+            "precision_heading_deg": 2.0, "max_distance_error_m": 0.75,
+            "max_lateral_error_m": 0.30, "timeout_sec": 30.0,
             "max_renavigations": 2},
         "slam_map_file": "", "memorized_tags_file": "",
         "tags_output_file": "~/.ros/fosa_tags_course.yaml",
@@ -99,6 +99,13 @@ def test_l_arbitre_officiel_est_configure(robot):
     assert arbitre.visit_topic == "/parc/tag_visit"
     assert arbitre.finish_topic == "/parc/finish"
     assert (arbitre.start_method_command, arbitre.start_method_voice) == (0, 1)
+
+
+def test_la_pre_approche_reste_a_portee_de_l_asservissement():
+    base = _course_minimale()
+    base["alignment"] = dict(base["alignment"], max_distance_error_m=0.5)
+    with pytest.raises(ConfigurationError, match="max_distance_error_m"):
+        CourseConfig.from_mapping(base)
 
 
 def test_des_methodes_de_depart_identiques_sont_refusees():
