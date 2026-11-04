@@ -4,7 +4,6 @@ import math
 
 import numpy as np
 
-
 def quaternion_depuis_matrice(matrice):
     """Quaternion (x, y, z, w) d'une matrice de rotation 3x3."""
     trace = matrice[0, 0] + matrice[1, 1] + matrice[2, 2]

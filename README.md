@@ -13,22 +13,25 @@ alignement à 0,5 m face au tag et départ à la voix.
 
 ## 1. Ce que fait le robot
 
-1. Attend l'ordre des tags publié par les organisateurs.
-2. Attend le départ : commande `./run.sh depart` ou mot « allez ».
+1. Lit l'ordre des tags publié par l'arbitre sur `/parc/tag_order`.
+2. Attend le départ : commande `./run.sh depart` ou mot « allez », signalé à
+   l'arbitre sur `/parc/start`.
 3. Pour chaque tag, dans l'ordre : le cherche (tours sur place et points de la
-   carte SLAM), s'en approche avec Nav2, s'aligne à 0,5 m face à lui, publie
-   l'identifiant et une image, puis garde la position.
-4. Signale la fin et s'arrête, au plus tard à 10 minutes.
+   carte SLAM), s'en approche avec Nav2 jusqu'à 0,9 m, finit à 0,5 m face à
+   lui par asservissement visuel, signale la visite avec une image JPEG sur
+   `/parc/tag_visit`, puis garde la position.
+4. Signale la fin sur `/parc/finish` et s'arrête, au plus tard à 10 minutes.
 
-Un tag dont le budget de temps est épuisé est sauté, jamais revisité. Aucun
-mouvement n'a lieu avant le départ.
+Une stratégie replanifie en continu les tags à tenter selon le temps restant :
+un tag est sauté (jamais revisité) quand le tenter coûterait plus de points
+qu'il n'en rapporte. Aucun mouvement n'a lieu avant le départ.
 
 ## 2. Paquets
 
 | Paquet | Rôle |
 |---|---|
 | `caytu_config` | Toutes les valeurs métier : robot, navigation, perception, course, mot de départ. |
-| `caytu_course` | Machine à états de la course, ordre des tags, recherche, alignement, statut, lancement. |
+| `caytu_course` | Machine à états de la course, stratégie, recherche, alignement, interface de l'arbitre, lancement. |
 | `caytu_perception` | Détection AprilTag par OpenCV et obstacles hauts par profondeur. |
 | `caytu_nav_solution` | Chronomètre de course, client Nav2 et génération du YAML Nav2. |
 | `caytu_nav_bringup` | Paramètres Nav2, filtre du lidar et arbre de comportement. |
@@ -95,16 +98,28 @@ FOSA_PROFIL=simulation ./run.sh course
 Variables utiles : `FOSA_BASE_WS` (workspace des paquets organisateurs),
 `FOSA_CONFIG_OVERRIDE` (surcharge YAML), `FOSA_DONNEES` (journaux et cartes).
 
-## 6. Points à confirmer avec les organisateurs
+## 6. Arbitre officiel
 
-Le paquet de statut officiel n'est pas encore publié. En attendant, les
-événements partent sur `/fosa/statut/depart`, `/fosa/statut/tag`,
-`/fosa/statut/image` et `/fosa/statut/fin` (QoS fiable, transient local).
-Seul `caytu_course/caytu_course/statut.py` sera à adapter.
+L'arbitre tourne sur le robot ; `parc_msgs` est dans l'espace de travail de
+base (`~/ros2_ws`), que `run.sh` source avant le nôtre (`FOSA_BASE_WS` pour un
+autre dossier). `./run.sh course` prévient si `parc_msgs` est introuvable.
 
-Restent à confirmer sur place : le topic et le type de l'ordre des tags, le
-type de `/cmd_vel`, le format de `/speech_audio` et l'identité de la caméra
-haute. `./run.sh diagnostic-robot` affiche l'état réel des interfaces.
+| Événement | Topic |
+|---|---|
+| Ordre des tags (lu) | `/parc/tag_order` |
+| Départ | `/parc/start` (`method` 0 commande, 1 voix, `heard`) |
+| Visite | `/parc/tag_visit` (`tag_id` + image JPEG) |
+| Fin | `/parc/finish` (`reason`) |
+
+Pendant un créneau d'essai : demander à un organisateur d'armer une course,
+suivre `ros2 topic echo /parc/run_status`, puis vérifier sur
+`http://ROBOT_IP:8080/` ce que l'arbitre a reçu. Consignes complètes :
+[`docs/parc-phase-finale-docs/informations-parc.txt`](docs/parc-phase-finale-docs/informations-parc.txt).
+
+Restent à confirmer sur place : la valeur de `reason` pour la fin, le champ
+image de `TagVisit`, le format de `/speech_audio` et l'identité de la caméra
+haute. `./run.sh diagnostic-robot` enregistre les définitions de `parc_msgs`
+et l'état réel des interfaces.
 
 ## 7. Tests
 
@@ -113,6 +128,13 @@ colcon test --packages-select caytu_config caytu_perception caytu_course caytu_n
 colcon test-result --verbose
 ```
 
-Les tests ne demandent ni robot ni Gazebo. Les guides détaillés sont
-[`docs/GUIDE_DE_TEST.md`](docs/GUIDE_DE_TEST.md) et
-[`docs/FLUX_DE_LA_SOLUTION.md`](docs/FLUX_DE_LA_SOLUTION.md).
+Les tests ne demandent ni robot ni Gazebo.
+
+## 8. Documentation
+
+- [`docs/CHOIX_TECHNIQUES.md`](docs/CHOIX_TECHNIQUES.md) : comment nous avons
+  résolu chaque difficulté, et pourquoi (préparation de l'oral) ;
+- [`docs/FLUX_DE_LA_SOLUTION.md`](docs/FLUX_DE_LA_SOLUTION.md) : déroulement
+  détaillé d'une course dans le code ;
+- [`docs/GUIDE_DE_TEST.md`](docs/GUIDE_DE_TEST.md) : tests, simulation et
+  créneaux sur le robot.

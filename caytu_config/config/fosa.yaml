@@ -168,7 +168,6 @@ course:
   heading_tolerance_deg: 5.0      # règlement : ±12°
   stable_cycles: 5                # cycles consécutifs dans les tolérances
   hold_sec: 5.0                   # maintien après le signalement (À CONFIRMER)
-  min_tag_budget_sec: 45.0
   detection_max_age_sec: 0.6
   search_spin_time_sec: 25.0
   search_grid_step_m: 0.8
@@ -197,6 +196,22 @@ course:
     max_lateral_error_m: 0.30     # tag vu trop de biais
     timeout_sec: 30.0
     max_renavigations: 2
+  # Stratégie de visite (caytu_course/strategie.py) : replanification
+  # continue des tags à tenter selon le temps restant. Durées estimées :
+  # À RECALER sur les essais (journal « Plan : ... »).
+  strategy:
+    points_per_tag: 25.0          # règlement : 20 par visite + 5 de navigation sûre
+    travel_speed_mps: 0.15        # vitesse moyenne réelle, virages compris
+    detour_factor: 1.4            # mobilier : trajet ≈ 1,4 x vol d'oiseau
+    visit_time_sec: 45.0          # pré-approche, alignement, maintien
+    search_time_sec: 90.0         # trouver un tag jamais vu
+    unknown_leg_m: 2.5            # trajet moyen depuis une position inconnue
+    time_margin: 0.2              # durées majorées de 20 %
+    success_known: 0.9
+    success_unknown: 0.6
+    failure_decay: 0.6            # probabilité x 0,6 à chaque échec
+    min_skip_gain_points: 5.0     # sauter la cible seulement si cela rapporte 5 points de plus
+    replan_period_sec: 2.0
   # Vide = cartographie en direct. Sinon : posegraph slam_toolbox sérialisé
   # pendant les essais (seulement si les cartes pré-construites sont autorisées).
   slam_map_file: ""

@@ -1,9 +1,9 @@
-"""Ordre publié par les organisateurs, séquence de visite et budget de temps."""
+"""Ordre publié par les organisateurs et séquence de visite."""
 
 import pytest
 
 from caytu_course.ordre_tags import OrdreInvalide, lire_ordre
-from caytu_course.sequence import SequenceTags, budget_pour_tag
+from caytu_course.sequence import SequenceTags
 
 TAGS = (1, 4, 7, 9)
 
@@ -27,7 +27,7 @@ def test_un_ordre_incomplet_ou_inconnu_est_refuse(valeur):
 def test_la_sequence_suit_l_ordre_et_n_y_revient_jamais():
     sequence = SequenceTags((7, 1, 9, 4))
     assert sequence.cible() == 7
-    assert sequence.restants() == 4
+    assert sequence.restants() == (7, 1, 9, 4)
     sequence.marquer_visite(7)
     assert sequence.cible() == 1
     sequence.sauter()
@@ -54,12 +54,3 @@ def test_sauter_une_sequence_terminee_est_refuse():
     with pytest.raises(ValueError):
         sequence.sauter()
 
-
-@pytest.mark.parametrize('restant, tags, minimum, attendu', [
-    (300.0, 2, 45.0, 150.0),
-    (60.0, 3, 45.0, 45.0),
-    (10.0, 1, 45.0, 10.0),
-    (0.0, 2, 45.0, 0.0),
-])
-def test_le_budget_partage_le_temps_restant(restant, tags, minimum, attendu):
-    assert budget_pour_tag(restant, tags, minimum) == pytest.approx(attendu)

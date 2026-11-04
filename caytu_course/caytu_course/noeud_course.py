@@ -7,8 +7,9 @@ Déroulement (guide officiel) :
      mouvement avant ;
   3. pour chaque tag, dans l'ordre : chercher (tours sur place, points de la
      carte SLAM), approcher avec Nav2, s'aligner à 0,5 m face au tag, signaler
-     la visite avec une image, garder la position ; sauter le tag si son
-     budget de temps est épuisé (il ne sera jamais revisité) ;
+     la visite avec une image, garder la position ; la stratégie
+     (`strategie.py`) replanifie en continu et fait sauter un tag quand le
+     tenter coûterait plus de points qu'il n'en rapporte (jamais revisité) ;
   4. signaler la fin et s'arrêter, au plus tard à 10 minutes.
 """
 
@@ -39,7 +40,8 @@ from caytu_course.entrees_course import EntreesCourse
 from caytu_course.geometrie_tags import erreurs_visite, pose_approche, visite_valide
 from caytu_course.memoire_tags import MemoireTags
 from caytu_course.recherche import points_recherche
-from caytu_course.sequence import SequenceTags, budget_pour_tag
+from caytu_course.sequence import SequenceTags
+from caytu_course.strategie import ModeleStrategie, TagRestant, decider
 from caytu_course.statut import PublicateurArbitre, qos_statut
 from caytu_nav_solution.nav_math import Pose2D, lacet_depuis_quaternion
 from caytu_nav_solution.navigation_runtime import (
@@ -61,7 +63,12 @@ class NoeudCourse(Node):
         self._en_attente = True
         self._tours = []           # positions où un tour sur place a été fait
         self._points_essayes = []  # points de recherche déjà tentés
-        self._echeances = {}       # échéance de chaque tag (horloge de course)
+        self._echecs = {}          # visites ratées par tag
+        self._debut_cible = {}     # instant où chaque tag est devenu la cible
+        self._plan = None          # dernier plan de la stratégie
+        self._plan_instant = None
+        self._garder = True
+        self._modele_strategie = self._modele()
 
         self._memoire_tf = Buffer()
         self._ecouteur_tf = TransformListener(
@@ -194,7 +201,7 @@ class NoeudCourse(Node):
                 resultat = self._traiter_tag(cible)
             except KeyboardInterrupt:
                 raise
-            except Exception as erreur:  # le budget du tag borne les reprises
+            except Exception as erreur:  # la stratégie borne les reprises
                 self.get_logger().error(f'Erreur pendant le tag {cible} : {erreur!r}')
                 self._navigateur.annuler_but()
                 self.arreter_robot()
@@ -203,8 +210,10 @@ class NoeudCourse(Node):
             if resultat == 'visite':
                 self._sequence.marquer_visite(cible)
             elif resultat == 'saute':
-                self.get_logger().warning(f'Tag {cible} sauté (budget épuisé).')
+                self.get_logger().warning(
+                    f'Tag {cible} sauté : le plan {list(self._plan.tags)} rapporte plus.')
                 self._sequence.sauter()
+            self._plan_instant = None   # nouvelle cible : replanifier
         self._terminer('terminee' if self._sequence.terminee() else 'temps_ecoule')
 
     def _attendre_ordre_et_depart(self):
@@ -228,20 +237,18 @@ class NoeudCourse(Node):
             self.get_logger().error('Nav2 ou la localisation SLAM ne répond pas.')
 
     def _traiter_tag(self, tag_id):
-        if tag_id not in self._echeances:
-            budget = budget_pour_tag(
-                self._chrono.restant(), self._sequence.restants(),
-                self._course.min_tag_budget_sec)
-            self._echeances[tag_id] = self._temps() + budget
-            self.get_logger().info(f'Tag {tag_id} : budget {budget:.0f} s.')
-        echeance = self._echeances[tag_id]
+        self._debut_cible.setdefault(tag_id, self._temps())
+
+        def abandonner():
+            return not self._garder_cible(tag_id)
+
         while rclpy.ok():
             if self._temps_ecoule():
                 return 'temps_ecoule'
-            if self._temps() > echeance:
+            if abandonner():
                 return 'saute'
             if self._memoire.connait(tag_id):
-                resultat = self._visiter(tag_id, echeance)
+                resultat = self._visiter(tag_id, abandonner)
                 if resultat in ('visite', 'temps_ecoule'):
                     return resultat
                 if resultat == 'perdu':
@@ -249,19 +256,71 @@ class NoeudCourse(Node):
                         f'Tag {tag_id} introuvable à sa pose mémorisée : recherche.')
                     self._memoire.oublier(tag_id)
                 elif resultat == 'echec':
+                    self._echecs[tag_id] = self._echecs.get(tag_id, 0) + 1
+                    self._plan_instant = None   # replanifier tout de suite
                     self.traiter_pendant(0.5)
             else:
-                self._chercher(tag_id, echeance)
+                self._chercher(tag_id, abandonner)
         return 'temps_ecoule'
 
-    # ---------------------------------------------------------- recherche
-    def _interruption_recherche(self, tag_id, echeance):
-        return lambda: (self._memoire.connait(tag_id)
-                        or self._temps() > echeance or self._temps_ecoule())
+    # ---------------------------------------------------------- stratégie
+    def _modele(self):
+        strategie = self._course.strategy
+        return ModeleStrategie(
+            points_par_tag=strategie.points_per_tag,
+            vitesse_mps=strategie.travel_speed_mps,
+            facteur_detour=strategie.detour_factor,
+            temps_visite_s=strategie.visit_time_sec,
+            temps_recherche_s=strategie.search_time_sec,
+            trajet_inconnu_m=strategie.unknown_leg_m,
+            marge=strategie.time_margin,
+            reussite_connu=strategie.success_known,
+            reussite_inconnu=strategie.success_unknown,
+            baisse_par_echec=strategie.failure_decay,
+            gain_min_saut=strategie.min_skip_gain_points)
 
-    def _chercher(self, tag_id, echeance):
+    def _tags_restants(self):
+        """Tags restants avec ce que la course en sait (point d'approche, échecs)."""
+        cible = self._sequence.cible()
+        restants = []
+        for tag_id in self._sequence.restants():
+            pose = self._memoire.pose(tag_id)
+            position = None
+            if pose is not None:
+                x, y, _ = pose_approche(
+                    pose.x, pose.y, pose.cap, self._course.approach_distance_m)
+                position = (x, y)
+            passe = (self._temps() - self._debut_cible[tag_id]
+                     if tag_id == cible and tag_id in self._debut_cible else 0.0)
+            restants.append(TagRestant(
+                tag_id, position, self._echecs.get(tag_id, 0), passe))
+        return tuple(restants)
+
+    def _garder_cible(self, tag_id):
+        """Replanifie au plus toutes les `replan_period_sec` (horizon glissant)."""
+        maintenant = self._temps()
+        periode = self._course.strategy.replan_period_sec
+        if self._plan_instant is None or maintenant - self._plan_instant >= periode:
+            pose = self.pose_robot()
+            position = (pose.x, pose.y) if pose is not None else None
+            garder, plan = decider(position, self._tags_restants(),
+                                   self._chrono.restant(), self._modele_strategie)
+            if self._plan is None or plan.tags != self._plan.tags:
+                self.get_logger().info(
+                    f'Plan : {list(plan.tags)} (durée estimée {plan.duree_s:.0f} s, '
+                    f'{self._chrono.restant():.0f} s restantes, '
+                    f'{plan.valeur:.0f} points espérés).')
+            self._plan, self._plan_instant, self._garder = plan, maintenant, garder
+        return self._garder
+
+    # ---------------------------------------------------------- recherche
+    def _interruption_recherche(self, tag_id, abandonner):
+        return lambda: (self._memoire.connait(tag_id)
+                        or abandonner() or self._temps_ecoule())
+
+    def _chercher(self, tag_id, abandonner):
         """Un pas de recherche : tour sur place, sinon aller au point suivant."""
-        interrompre = self._interruption_recherche(tag_id, echeance)
+        interrompre = self._interruption_recherche(tag_id, abandonner)
         pose = self.pose_robot()
         if pose is None:
             self.publier_etat('RECHERCHE', tag_id, 'pose inconnue')
@@ -333,7 +392,7 @@ class NoeudCourse(Node):
             return None
         return memoire.x, memoire.y, memoire.cap, memoire.distance_min
 
-    def _visiter(self, tag_id, echeance):
+    def _visiter(self, tag_id, abandonner):
         """Approche Nav2 puis alignement visuel ; retourne visite/perdu/echec/temps_ecoule.
 
         Nav2 ne vise jamais le point de visite lui-même : il s'arrête à
@@ -345,14 +404,14 @@ class NoeudCourse(Node):
         while rclpy.ok() and renavigations <= course.alignment.max_renavigations:
             if self._temps_ecoule():
                 return 'temps_ecoule'
-            if self._temps() > echeance:
+            if abandonner():
                 return 'echec'
             tag = self._pose_tag_courante(tag_id)
             if tag is None:
                 return 'perdu'
             portee = course.approach_distance_m + course.preapproach_margin_m
             if forcer_nav2 or tag[3] > portee:
-                resultat = self._approcher(tag_id, tag, echeance)
+                resultat = self._approcher(tag_id, tag, abandonner)
                 if resultat in ('temps_ecoule', 'perdu'):
                     return resultat
                 if resultat == 'echec':
@@ -364,7 +423,7 @@ class NoeudCourse(Node):
             # perdre la visite (le cap reste aligné sur la normale du tag).
             dernier_essai = renavigations >= course.alignment.max_renavigations
             tolerance_laterale = course.lateral_tolerance_m * (2.0 if dernier_essai else 1.0)
-            resultat = self._aligner(tag_id, echeance, tolerance_laterale)
+            resultat = self._aligner(tag_id, abandonner, tolerance_laterale)
             if resultat == 'aligne':
                 return self._valider_visite(tag_id)
             if resultat in ('perdu', 'temps_ecoule'):
@@ -373,7 +432,7 @@ class NoeudCourse(Node):
             forcer_nav2 = resultat == 'renaviguer'
         return 'echec'
 
-    def _approcher(self, tag_id, tag, echeance):
+    def _approcher(self, tag_id, tag, abandonner):
         """Nav2 jusqu'au point de pré-approche, face au tag.
 
         Retourne 'arrive', 'reessayer', 'perdu', 'echec' ou 'temps_ecoule'.
@@ -385,7 +444,7 @@ class NoeudCourse(Node):
         self.publier_etat('APPROCHE', tag_id, f'{course.approach_distance_m:.2f} m du tag')
         resultat = self._navigateur.naviguer_une_fois(
             x, y, self._configuration.system.global_frame, Pose2D(0.0, 0.0, 0.0),
-            cap=cap, interrompre=lambda: self._temps() > echeance)
+            cap=cap, interrompre=abandonner)
         if resultat == 'temps_ecoule':
             return resultat
         if resultat == 'interrompu':
@@ -402,7 +461,7 @@ class NoeudCourse(Node):
         # Arrivé mais tag pas revu de près : la pose mémorisée est fausse.
         return 'perdu'
 
-    def _aligner(self, tag_id, echeance, tolerance_laterale):
+    def _aligner(self, tag_id, abandonner, tolerance_laterale):
         course = self._course
         x_avant = max(x for x, _ in self._navigation.footprint)
         x_arriere = min(x for x, _ in self._navigation.footprint)
@@ -417,7 +476,7 @@ class NoeudCourse(Node):
             if self._temps_ecoule():
                 self.arreter_robot()
                 return 'temps_ecoule'
-            if maintenant > echeance or maintenant - debut > course.alignment.timeout_sec:
+            if abandonner() or maintenant - debut > course.alignment.timeout_sec:
                 self.arreter_robot()
                 return ('aligne' if self._position_acceptable(erreurs, tolerance_laterale)
                         else 'echec')

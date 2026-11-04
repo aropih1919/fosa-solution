@@ -33,17 +33,22 @@ Ce que couvrent les tests :
 |---|---|
 | `caytu_config` | Validation du YAML, profil simulation, cohérence tags/portées des scans. |
 | `caytu_perception` | Détection AprilTag sur images synthétiques, estimation de distance et de cap, conversion profondeur → LaserScan. |
-| `caytu_course` | Lecture de l'ordre, séquence et budgets, alignement, recherche, mémoire des tags, mot de départ. |
+| `caytu_course` | Lecture de l'ordre, séquence, stratégie (sauts), alignement, recherche, mémoire des tags, messages de l'arbitre, mot de départ. |
 | `caytu_nav_solution` | Chronomètre, génération du YAML Nav2 (robot et simulation), client Nav2. |
 
 ## 2. Course en simulation
 
 Prérequis : le dépôt de simulation PARC (`parc_robot_bringup`,
-`parc_robot_description`, `ros_gz_*`) installé dans le workspace.
+`parc_robot_description`, `ros_gz_*`) installé dans le workspace, et un
+paquet `parc_msgs` pour l'arbitre. Il n'existe que sur le robot : pour la
+simulation, en compiler une copie locale avec les champs connus
+(`StartSignal` : `uint8 method`, `string heard` ; `TagVisit` : `int32 tag_id`,
+`sensor_msgs/CompressedImage image` ; `Finish` : `uint8 reason`) et la
+désigner par `FOSA_BASE_WS`.
 
 ```bash
 colcon build --packages-up-to caytu_course
-FOSA_PROFIL=simulation ./run.sh course
+FOSA_PROFIL=simulation FOSA_BASE_WS=<copie de parc_msgs> ./run.sh course
 ```
 
 Dans un autre terminal, une fois le nœud de course lancé :
@@ -62,8 +67,9 @@ tags 1, 4, 7 et 9 (36h11, 16,5 cm, centre à 1 m du sol) avant l'essai.
 Points à contrôler dans le journal :
 
 - `ATTENTE_ORDRE` puis `DEMARRAGE` : le robot n'a pas bougé avant le départ.
-- `RECHERCHE`, `NAVIGATION`, `ALIGNEMENT` : progression tag par tag.
-- `VISITE` avec identifiant et image, puis `TERMINEE`.
+- `Plan : [...]` : plan de la stratégie et durée estimée.
+- `RECHERCHE`, `APPROCHE`, `ALIGNEMENT` : progression tag par tag.
+- `ARBITRE visite du tag N (image : image)`, puis `ARBITRE fin de course`.
 - Aucun contact, aucune visite hors ordre, aucun tag revisité après un saut.
 
 Le modèle Gazebo du robot sur-estime d'environ 15 % les rotations dans
@@ -95,6 +101,21 @@ les topics de la configuration, les TF et les caméras. Noter :
 
 Corriger `caytu_config/config/fosa.yaml` si un nom diffère, puis relancer le
 diagnostic.
+
+### Arbitre
+
+```bash
+source ~/ros2_ws/install/setup.bash          # parc_msgs (run.sh le fait seul)
+ros2 topic echo /parc/run_status             # second terminal, garder ouvert
+```
+
+1. Demander à un organisateur d'armer une course d'essai : l'ordre est publié.
+2. `./run.sh course`, puis `./run.sh depart` (ou « allez »).
+3. Vérifier sur `http://ROBOT_IP:8080/` : départ, visites avec image, fin.
+
+Ne publier sur `/parc/*` que pendant notre créneau, jamais sur l'odométrie.
+Le rapport du diagnostic contient les définitions de `parc_msgs` : vérifier
+la valeur de `reason` et le champ image de `TagVisit`.
 
 ### Cartographie et réglages
 
@@ -141,6 +162,9 @@ recherche : corriger l'écartement des roues ou les coefficients du plugin.
 | Aucun tag détecté | Caméra ou `camera_info` erroné, taille du tag, distance trop grande, TF absente. |
 | Le robot ne bouge pas après le départ | Nav2 non prêt, carte SLAM absente, `/cmd_vel` mal remappé. |
 | Visite refusée | Distance ou cap hors tolérance, tag non stable, image de preuve absente. |
+| « No image » sur la page de l'arbitre | Champ image de `TagVisit` différent : lire le diagnostic, adapter `caytu_course/arbitre.py`. |
+| Rien sur la page de l'arbitre | `parc_msgs` non sourcé (avertissement de `run.sh course`), `FOSA_BASE_WS` faux. |
+| Tags sautés trop tôt ou trop tard | Recaler `course.strategy` (vitesse, temps de visite et de recherche) sur le journal `Plan : ...`. |
 | Le robot visite dans le désordre | Ordre mal lu : vérifier le topic, le type et la QoS (`transient_local`). |
 | Dérive pendant les rotations | Odométrie en rotation ; lancer `mesure-rotation`. |
 | Départ vocal absent | Vosk ou modèle non installé, format de `/speech_audio` différent, seuil de confiance trop haut. |

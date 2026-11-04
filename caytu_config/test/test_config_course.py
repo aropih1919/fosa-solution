@@ -42,7 +42,7 @@ def _course_minimale(**surcharges):
         "visit_distance_m": 0.5, "approach_distance_m": 0.9,
         "distance_tolerance_m": 0.04, "lateral_tolerance_m": 0.06,
         "heading_tolerance_deg": 5.0, "stable_cycles": 5, "hold_sec": 5.0,
-        "min_tag_budget_sec": 45.0, "detection_max_age_sec": 0.6,
+        "detection_max_age_sec": 0.6,
         "search_spin_time_sec": 25.0, "search_grid_step_m": 0.8,
         "search_clearance_m": 0.45, "search_visited_radius_m": 0.8,
         "front_guard_m": 0.10, "goal_xy_tolerance_m": 0.08,
@@ -56,6 +56,12 @@ def _course_minimale(**surcharges):
             "precision_heading_deg": 2.0, "max_distance_error_m": 0.75,
             "max_lateral_error_m": 0.30, "timeout_sec": 30.0,
             "max_renavigations": 2},
+        "strategy": {
+            "points_per_tag": 25.0, "travel_speed_mps": 0.15,
+            "detour_factor": 1.4, "visit_time_sec": 45.0,
+            "search_time_sec": 90.0, "unknown_leg_m": 2.5, "time_margin": 0.2,
+            "success_known": 0.9, "success_unknown": 0.6, "failure_decay": 0.6,
+            "min_skip_gain_points": 5.0, "replan_period_sec": 2.0},
         "slam_map_file": "", "memorized_tags_file": "",
         "tags_output_file": "~/.ros/fosa_tags_course.yaml",
     }

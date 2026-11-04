@@ -1,4 +1,4 @@
-"""Séquence de visite des tags et partage du temps de course.
+"""Séquence de visite des tags.
 
 Règlement : les tags se visitent dans l'ordre publié ; un tag introuvable peut
 être sauté mais ne peut plus être visité ensuite.
@@ -18,8 +18,8 @@ class SequenceTags:
         return self.ordre[self._index] if not self.terminee() else None
 
     def restants(self):
-        """Nombre de tags encore à traiter, cible comprise."""
-        return len(self.ordre) - self._index
+        """Tags encore à traiter, dans l'ordre, cible comprise."""
+        return self.ordre[self._index:]
 
     def terminee(self):
         return self._index >= len(self.ordre)
@@ -47,12 +47,3 @@ class SequenceTags:
             'sautes': list(self.sautes),
         }
 
-
-def budget_pour_tag(temps_restant, tags_restants, minimum):
-    """Temps accordé à la cible : part égale, au moins `minimum`, jamais plus
-    que le temps restant."""
-    temps_restant = max(0.0, float(temps_restant))
-    if tags_restants <= 0:
-        return 0.0
-    part = temps_restant / tags_restants
-    return min(temps_restant, max(part, float(minimum)))

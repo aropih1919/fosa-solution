@@ -32,7 +32,7 @@ run.sh course
     ├── tag_detector_camera1/2      → /perception/tags, /perception/tags/image
     ├── scan_profondeur_camera1/2   → /fosa/scan_camera1, /fosa/scan_camera2
     ├── mot_depart                  → /fosa/course/depart
-    └── course_parc                 → /fosa/course/etat, /fosa/statut/*
+    └── course_parc                 → /fosa/course/etat, /parc/start, /parc/tag_visit, /parc/finish
 ```
 
 ## 2. Entrées du nœud de course
@@ -42,8 +42,10 @@ de `NoeudCourse`.
 
 | Entrée | Topic | Usage |
 |---|---|---|
-| Ordre des tags | `course.order_topic` (`/parc/tag_order`) | Séquence imposée par les organisateurs. |
-| Départ | `course.start_topic` (`/fosa/course/depart`) | Commande `./run.sh depart` ou mot « allez ». |
+| Ordre des tags | `/parc/tag_order` | Séquence imposée par l'arbitre ; type découvert sur le graphe ROS. |
+| Départ interne | `/fosa/course/depart` | Commande `./run.sh depart` ou mot « allez » (relayé à l'arbitre). |
+| Départ arbitre | `/parc/start` | Un départ publié directement par l'équipe lance aussi la course. |
+| Statut arbitre | `/parc/run_status` | Simple suivi dans le journal. |
 | Détections | `/perception/tags` | Dernière pose de chaque tag dans le repère robot. |
 | Images | `/camera{1,2}/.../color/image_raw` | Image de preuve associée à la visite. |
 | Carte | `/map` | Grille d'occupation pour choisir les points de recherche. |
@@ -54,69 +56,95 @@ de `NoeudCourse`.
 
 ```text
 ATTENTE_ORDRE / ATTENTE_DEPART
-        │ départ (commande ou voix)
+        │ départ (commande ou voix) → /parc/start
         ▼
-DEMARRAGE  (chrono lancé, signal de départ publié)
+DEMARRAGE  (chronomètre lancé)
         │ Nav2 prêt + robot localisé
         ▼
 pour chaque tag de l'ordre :
+        ├── la stratégie garde-t-elle ce tag ? sinon : saut (jamais revisité)
         ├── RECHERCHE   tours sur place, puis points libres de la carte
-        ├── APPROCHE    but Nav2 à 0,9 m (ou 0,5 m si le tag est proche)
-        ├── ALIGNEMENT  asservissement visuel à 0,5 m, cap ±5°
-        ├── VISITE      position stable, image + identifiant publiés
-        └── saut        budget du tag épuisé, jamais revisité
+        ├── APPROCHE    Nav2 jusqu'à 0,9 m, face au tag
+        ├── ALIGNEMENT  asservissement visuel jusqu'au point à 0,5 m, puis face au tag
+        └── VISITE      position stable → /parc/tag_visit (identifiant + JPEG), maintien
         ▼
-TERMINEE / TEMPS_ECOULE  (fin publiée, robot arrêté)
+TERMINEE / TEMPS_ECOULE  → /parc/finish, robot arrêté
 ```
 
 Règles de temps :
 
 - chronomètre officiel sur l'horloge ROS, marge de sécurité déduite ;
-- budget par tag calculé sur le temps restant et le nombre de tags restants ;
+- la stratégie est réévaluée toutes les 2 s, y compris pendant une
+  navigation ou un alignement, qu'elle peut interrompre ;
 - un tag sauté n'est jamais remis dans la séquence ;
 - à l'échéance, le but Nav2 en cours est annulé et le robot s'arrête.
 
-## 4. Visite d'un tag
+## 4. Stratégie de visite
+
+`caytu_course/strategie.py` (pur, sans ROS) répond à la question : « faut-il
+continuer sur la cible actuelle ? ».
+
+1. `_tags_restants` décrit chaque tag restant : point d'approche s'il est en
+   mémoire, nombre d'échecs, temps déjà passé dessus.
+2. `planifier` évalue toutes les sous-séquences des tags restants (16 au plus) :
+   - durée = trajets (distance × détour ÷ vitesse) + temps de visite, plus le
+     temps de recherche pour un tag jamais vu ;
+   - valeur = points par tag × probabilité de réussite (qui baisse avec les
+     échecs et la recherche) ;
+   - seuls les plans dont la durée majorée de la marge tient dans le temps
+     restant sont retenus ; le plus rentable gagne, puis le plus court.
+3. `garder_cible` : si le meilleur plan ne commence plus par la cible, elle
+   est sautée. Un plan vide (plus rien ne tient) ne fait rien sauter.
+
+Le journal affiche chaque changement de plan :
+`Plan : [1, 9, 4] (durée estimée 132 s, 180 s restantes, 68 points espérés)`.
+Les durées (`course.strategy`) sont à recaler sur les essais réels.
+
+## 5. Visite d'un tag
 
 1. `_pose_tag_courante` compose la dernière détection avec la pose actuelle du
    robot. À défaut, la mémoire des tags prend le relais.
-2. `pose_approche` calcule le point à 0,5 m sur la normale du tag.
-3. Nav2 rejoint ce point avec le cap final imposé (le planificateur ne remplace
-   pas l'orientation d'arrivée).
-4. `_aligner` corrige distance, décalage latéral et cap par petites vitesses,
-   avec une garde d'obstacle frontale et arrière.
-5. Quand la position est stable, `_valider_visite` publie l'identifiant et
+2. Si le tag est à plus de 1,2 m, `_approcher` envoie Nav2 au point à 0,9 m
+   sur la normale du tag, cap final imposé. Nav2 ne vise jamais le point à
+   0,5 m : son contrôle de collision refusait d'approcher le support du tag.
+3. `_aligner` applique `commande_alignement` à chaque image :
+   - rouler vers le point de visite (0,5 m sur la normale), en marche arrière
+     s'il est derrière, en corrigeant le cap ;
+   - au point (2,5 cm), tourner sur place face au tag (2°) ;
+   - garde d'obstacle avant et arrière sur le lidar ;
+   - retour à Nav2 seulement si le tag est trop loin ou vu trop de biais.
+4. Après plusieurs mesures stables, `_valider_visite` publie l'identifiant et
    l'image, puis le robot garde la position.
 
-## 5. Publication du statut
+## 6. Arbitre
 
-`caytu_course/statut.py` est le seul point à adapter quand le paquet officiel
-sera publié. En attendant :
+`caytu_course/statut.py` publie vers l'arbitre officiel (`parc_msgs`, installé
+dans l'espace de travail de base du robot, sourcé par `run.sh`) :
 
 | Événement | Topic | Message |
 |---|---|---|
-| Départ | `/fosa/statut/depart` | `String` JSON (ordre, source) |
-| Visite | `/fosa/statut/tag` | `Int32` identifiant |
-| Image | `/fosa/statut/image` | `Image` de la caméra |
-| Fin | `/fosa/statut/fin` | `String` JSON (motif, résumé) |
+| Départ | `/parc/start` | `StartSignal` : `method` 0 (commande) ou 1 (voix), `heard` |
+| Visite | `/parc/tag_visit` | `TagVisit` : `tag_id` + image JPEG de la caméra |
+| Fin | `/parc/finish` | `Finish` : `reason` |
 
-QoS fiable et transient local : un écran lancé en retard reçoit le dernier
-état.
+`caytu_course/arbitre.py` remplit ces messages d'après leur définition réelle
+(`get_fields_and_field_types`) : le champ de l'image et le type de l'ordre ne
+sont pas documentés, le code s'adapte à ce qui est installé sur le robot.
 
-## 6. Configuration
+## 7. Configuration
 
 Tout vient de `caytu_config/config/fosa.yaml` :
 
 - `system` : domaine ROS, repères, horloge ;
 - `navigation` : topics, empreinte, vitesses, sources d'obstacles, costmaps ;
 - `perception` : tags, caméras, conversion profondeur → scan ;
-- `course` : ordre, départ, statut, seuils de visite, budgets, recherche ;
+- `course` : ordre, arbitre, seuils de visite, alignement, stratégie, recherche ;
 - `start_word` : audio, modèle Vosk, mot attendu.
 
 Le profil `config/profils/simulation.yaml` surcharge les topics et repères pour
 Gazebo. Aucun nœud ne code une valeur métier en dur.
 
-## 7. Déploiement
+## 8. Déploiement
 
 `deployer_robot.sh` construit uniquement les paquets de la course
 (`--packages-up-to caytu_course`) et installe Vosk dans `.fosa_python`, sans

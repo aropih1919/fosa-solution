@@ -1,0 +1,33 @@
+PARC 2026 – Tester l'arbitre pendant les essais 🤖
+
+L'arbitre tourne maintenant sur le robot, et parc_msgs est installé dans l'espace de travail de base du robot. Vous pouvez tester votre interface pendant votre créneau d'essai.
+
+1. Préparez votre terminal
+source ~/ros2_ws/install/setup.bash```
+(puis sourcez votre propre espace de travail par-dessus)
+
+*2. Demandez à un organisateur d'armer une course d'essai* au début de votre créneau. L'ordre des tags est alors publié.
+
+*3. Vérifiez l'ordre*
+```ros2 topic echo /parc/tag_order --qos-durability transient_local
+
+4. Suivez l'état de la course (gardez-le ouvert dans un second terminal)
+ros2 topic echo /parc/run_status```
+
+*5. Envoyez un signal de départ*
+```ros2 topic pub --once -w 1 /parc/start parc_msgs/msg/StartSignal "{method: 0}"
+(départ vocal : "{method: 1, heard: 'allez'}")
+
+6. Signalez une visite de tag
+ros2 topic pub --once -w 1 /parc/tag_visit parc_msgs/msg/TagVisit "{tag_id: 7}"```
+Cela n'envoie pas d'image, donc la visite s'affiche « No image ». Votre vrai code doit joindre un JPEG de la caméra.
+
+*7. Terminez plus tôt si besoin*
+```ros2 topic pub --once -w 1 /parc/finish parc_msgs/msg/Finish "{reason: 0}"
+
+8. Voyez ce que l'arbitre a reçu : ouvrez http://ROBOT_IP:8080/ dans un navigateur.
+
+⚠️ Les courses d'essai ne sont pas notées. Ne publiez sur les topics /parc/ que pendant votre créneau, et ne publiez jamais sur le topic d'odométrie du robot.
+
+Topics et formats des messages : voir le document « Topics de l'arbitre » partagé plus tôt.
+

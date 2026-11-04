@@ -285,6 +285,47 @@ class AlignmentConfig:
         return alignement
 
 
+@dataclass(frozen=True)
+class StrategyConfig:
+    """Modèle de temps et de réussite de la stratégie de visite."""
+
+    points_per_tag: float
+    travel_speed_mps: float
+    detour_factor: float
+    visit_time_sec: float
+    search_time_sec: float
+    unknown_leg_m: float
+    time_margin: float
+    success_known: float
+    success_unknown: float
+    failure_decay: float
+    min_skip_gain_points: float
+    replan_period_sec: float
+
+    _BORNES = {
+        "points_per_tag": {"positive": True},
+        "travel_speed_mps": {"positive": True, "maximum": 1.0},
+        "detour_factor": {"minimum": 1.0},
+        "visit_time_sec": {"positive": True},
+        "search_time_sec": {"positive": True},
+        "unknown_leg_m": {"positive": True},
+        "time_margin": {"minimum": 0.0, "maximum": 2.0},
+        "success_known": {"positive": True, "maximum": 1.0},
+        "success_unknown": {"positive": True, "maximum": 1.0},
+        "failure_decay": {"positive": True, "maximum": 1.0},
+        "min_skip_gain_points": {"minimum": 0.0},
+        "replan_period_sec": {"positive": True},
+    }
+
+    @classmethod
+    def from_mapping(cls, data, path="course.strategy"):
+        data = _section(data, path)
+        _check_keys(data, tuple(cls._BORNES), path)
+        return cls(**{
+            cle: _as_number(_get(data, cle, path), f"{path}.{cle}", **bornes)
+            for cle, bornes in cls._BORNES.items()})
+
+
 # (clé, bornes) des réglages numériques de la course.
 _NOMBRES_COURSE = (
     ("time_limit_sec", {"positive": True}),
@@ -297,7 +338,6 @@ _NOMBRES_COURSE = (
     ("heading_tolerance_deg", {
         "positive": True, "maximum": REGLEMENT_TOLERANCE_CAP_DEG - 1.0}),
     ("hold_sec", {"minimum": 0.0}),
-    ("min_tag_budget_sec", {"positive": True}),
     ("detection_max_age_sec", {"positive": True}),
     ("search_spin_time_sec", {"positive": True}),
     ("search_grid_step_m", {"positive": True}),
@@ -336,7 +376,6 @@ class CourseConfig:
     heading_tolerance_deg: float
     stable_cycles: int
     hold_sec: float
-    min_tag_budget_sec: float
     detection_max_age_sec: float
     search_spin_time_sec: float
     search_grid_step_m: float
@@ -350,6 +389,7 @@ class CourseConfig:
     search_spin_speed_rps: float
     search_max_radius_m: float
     alignment: AlignmentConfig
+    strategy: StrategyConfig
     slam_map_file: str
     memorized_tags_file: str
     tags_output_file: str
@@ -358,7 +398,8 @@ class CourseConfig:
     def from_mapping(cls, data, path="course"):
         data = _section(data, path)
         _check_keys(data, (
-            "tag_ids", "order_type", "referee", "stable_cycles", "alignment")
+            "tag_ids", "order_type", "referee", "stable_cycles", "alignment",
+            "strategy")
             + _TEXTES_COURSE + _CHEMINS_COURSE
             + tuple(cle for cle, _ in _NOMBRES_COURSE), path)
         valeurs = {
@@ -382,6 +423,8 @@ class CourseConfig:
                 _get(data, "stable_cycles", path), f"{path}.stable_cycles", 1),
             alignment=AlignmentConfig.from_mapping(
                 _get(data, "alignment", path), f"{path}.alignment"),
+            strategy=StrategyConfig.from_mapping(
+                _get(data, "strategy", path), f"{path}.strategy"),
             **valeurs,
         )
         if course.stop_margin_sec >= course.time_limit_sec:
