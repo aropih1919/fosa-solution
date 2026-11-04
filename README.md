@@ -7,8 +7,9 @@ Ce fichier est le seul à lire. Il a deux parties :
 - **Partie 1 — Comment marche notre solution** : toute la solution expliquée
   en phrases, sans lire le code. C'est aussi ce qu'il faut savoir pour
   répondre au jury.
-- **Partie 2 — Ce que je dois faire** : tester en simulation sur le PC, puis
-  déployer et tester sur le robot réel, étape par étape.
+- **Partie 2 — Ce que je dois faire** : six sections séparées, à lire selon
+  la situation (préparer le PC, préparer le robot, simulation, essai réel,
+  ranking match, problèmes).
 
 Les documents officiels des organisateurs sont dans
 [`docs/parc-phase-finale-docs/`](docs/parc-phase-finale-docs/) (règlement,
@@ -393,7 +394,7 @@ l'angle mesurés, et à la fin, pour chaque tag non visité, **pourquoi**.
   - dans le rendu Gazebo, le tag paraît 3,8 % plus grand qu'en réalité, et le
     robot s'arrêtait à 0,55 m au lieu de 0,50. Nous l'avons mesuré avec un
     tag posé à distance connue, puis corrigé. Sur le vrai robot, la même
-    vérification se fait au mètre ruban (voir 2.3, étape 4).
+    vérification se fait au mètre ruban (partie 2, section B.5).
 
 ## 1.16 Questions probables du jury
 
@@ -429,107 +430,207 @@ maîtrisons chaque réglage.
 
 # Partie 2 — Ce que je dois faire
 
-## 2.1 Où sont les choses
+Six situations, chacune dans sa section. Je lis seulement celle dont j'ai
+besoin.
+
+| Je veux… | Où | Section |
+|---|---|---|
+| installer ce qu'il faut sur mon PC (une fois) | PC | **A. Préparer mon PC** |
+| installer la solution sur le robot | PC + robot | **B. Préparer le robot** |
+| essayer la solution sans robot | PC | **C. Simulation sur mon PC** |
+| m'entraîner sur le robot pendant un créneau d'essai | robot | **D. Essai réel sur le robot** |
+| faire le match noté devant le jury | robot | **E. Le ranking match** |
+| comprendre un problème | — | **F. Si quelque chose ne va pas** |
+
+Où sont les fichiers :
 
 ```text
 fosa-solution/
 ├── README.md              ← ce fichier
-├── run.sh                 ← lancer la course et les outils (sur le robot ou en simulation)
-├── deployer_robot.sh      ← préparer, envoyer et installer la solution sur le robot
+├── run.sh                 ← toutes les commandes de la course (robot et simulation)
+├── deployer_robot.sh      ← envoyer et installer la solution sur le robot
 ├── caytu_*/               ← les six paquets ROS 2
 ├── caytu_config/config/fosa.yaml   ← TOUS les réglages
 ├── outils/                ← diagnostic du robot, mesure de rotation
-├── simulation/            ← Gazebo sur le PC uniquement (jamais envoyé au robot)
+├── simulation/            ← Gazebo, sur le PC uniquement (jamais envoyé au robot)
 └── docs/parc-phase-finale-docs/    ← documents officiels des organisateurs
 ```
 
-Le dépôt doit se trouver dans `<espace de travail>/src/fosa-solution`, par
-exemple `~/ros2_ws/src/fosa-solution` sur le PC.
+---
 
-## 2.2 Tester en simulation sur mon PC
+## A. Préparer mon PC (une seule fois)
 
-### Une seule fois : installer
+But : pouvoir construire la solution, lancer les tests et la simulation.
 
-Il faut, sur le PC :
+1. **Installer ROS 2 Jazzy, Nav2, slam_toolbox et Gazebo** :
 
-- ROS 2 Jazzy, Nav2, slam_toolbox, `laser_filters` et Gazebo (`ros_gz`) :
+   ```bash
+   sudo apt install ros-jazzy-navigation2 ros-jazzy-slam-toolbox \
+       ros-jazzy-laser-filters ros-jazzy-ros-gz python3-opencv
+   ```
 
-  ```bash
-  sudo apt install ros-jazzy-navigation2 ros-jazzy-slam-toolbox \
-      ros-jazzy-laser-filters ros-jazzy-ros-gz python3-opencv
-  ```
+2. **Placer les dépôts** dans `~/ros2_ws/src` : notre dépôt
+   (`fosa-solution`) et le dépôt de simulation PARC
+   (`parc_robot_bringup`, `parc_robot_description`), comme pour la phase 1.
 
-- le dépôt de simulation PARC (`parc_robot_bringup`,
-  `parc_robot_description`) dans `~/ros2_ws/src`, comme pour la phase 1.
+3. **Construire** :
 
-Ensuite :
+   ```bash
+   cd ~/ros2_ws
+   source /opt/ros/jazzy/setup.bash
+   colcon build
+   ```
+
+4. **Préparer la simulation** (copie de `parc_msgs`, modèles des tags) :
+
+   ```bash
+   cd ~/ros2_ws/src/fosa-solution
+   simulation/simulation.sh preparer
+   ```
+
+5. **Vérifier avec les tests** (1 minute, sans simulateur) :
+
+   ```bash
+   cd ~/ros2_ws
+   colcon test --packages-select caytu_config caytu_perception caytu_course caytu_nav_solution
+   colcon test-result --verbose          # attendu : 185 tests, 0 errors, 0 failures
+   ```
+
+**Après chaque modification du code** : `cd ~/ros2_ws && colcon build
+--packages-up-to caytu_course`, puis relancer les tests.
+
+À ne pas faire sur le PC :
+
+- **ne jamais lancer `./deployer_robot.sh` sans option** : il est fait pour le
+  robot. Il refuse de toute façon de s'exécuter sur le PC ;
+- **ne jamais lancer `./run.sh ...` sans `FOSA_PROFIL=simulation`** : sans lui,
+  c'est le profil du robot réel (domaine ROS 0), qui peut perturber le robot
+  si le PC est sur son Wi-Fi.
+
+---
+
+## B. Préparer le robot (installation de la solution)
+
+But : copier la solution sur le robot et l'installer. Aucune adresse IP n'est
+à écrire dans les fichiers : notre code tourne sur le robot lui-même. L'IP
+sert seulement à s'y connecter, et on la tape dans la commande.
+
+### B.1 Ce que je demande aux organisateurs
+
+- l'**adresse IP du robot** ;
+- le **nom d'utilisateur SSH** et son mot de passe ;
+- le **dossier réservé à l'équipe** sur le robot.
+
+Dans la suite : `UTILISATEUR`, `IP_DU_ROBOT`, `DOSSIER_EQUIPE`. Exemple :
+`parc`, `192.168.1.50`, `/home/parc/fosa`.
+
+Interdit sur le robot : `sudo`, installer des paquets système, publier sur
+`/parc/*` en dehors de notre créneau, publier sur l'odométrie du robot.
+
+### B.2 Sur le PC : télécharger la voix (une fois, avec Internet)
 
 ```bash
-cd ~/ros2_ws
-source /opt/ros/jazzy/setup.bash
-colcon build                                   # nos paquets + ceux de PARC
-cd src/fosa-solution
-simulation/simulation.sh preparer              # copie de parc_msgs + modèles des tags
+cd ~/ros2_ws/src/fosa-solution
+./deployer_robot.sh --preparer
 ```
 
-`preparer` crée `~/.fosa_simulation/` : une copie de simulation du paquet de
-l'arbitre (`parc_msgs` n'existe que sur le robot) et les modèles 3D des
-quatre tags.
+Télécharge dans `livraison/` Vosk pour le processeur du robot et le modèle
+vocal français : le robot n'a pas forcément Internet.
 
-### Après chaque modification du code
+### B.3 Sur le PC : envoyer la solution (après chaque modification)
+
+Le PC doit être sur le même Wi-Fi que le robot.
 
 ```bash
-cd ~/ros2_ws && colcon build --packages-up-to caytu_course
-cd src/fosa-solution
+./deployer_robot.sh --envoyer UTILISATEUR@IP_DU_ROBOT DOSSIER_EQUIPE
 ```
 
-Tests automatiques (une minute, sans simulateur) :
+Seul ce qui sert au robot est copié, dans
+`DOSSIER_EQUIPE/ws/src/fosa-solution` : les paquets, `run.sh`,
+`deployer_robot.sh`, `outils/`, `livraison/` et ce README.
+
+### B.4 Sur le robot : installer (après chaque envoi)
 
 ```bash
-cd ~/ros2_ws
-colcon test --packages-select caytu_config caytu_perception caytu_course caytu_nav_solution
-colcon test-result --verbose          # attendu : 0 errors, 0 failures
+ssh UTILISATEUR@IP_DU_ROBOT
+cd DOSSIER_EQUIPE/ws/src/fosa-solution
+./deployer_robot.sh
 ```
 
-**Important** : construire toujours avec `colcon build` simple sur le PC.
-Ne pas lancer `./deployer_robot.sh` sur le PC : il construit autrement
-(`--symlink-install`) et le mélange des deux casse le build. En cas d'erreur
-« failed to create symbolic link », supprimer `~/ros2_ws/build/caytu_*` et
-`~/ros2_ws/install/caytu_*`, puis reconstruire.
+Le script vérifie que Nav2, slam_toolbox et OpenCV sont présents, construit
+nos six paquets, et installe la voix dans notre dossier, sans `sudo`.
 
-### Répéter le jour J : préparation puis match
+- « Paquets ROS absents » : le signaler aux organisateurs (nous n'avons pas le
+  droit de les installer).
+- Échec de la voix : pas grave, le départ par commande reste possible.
+
+### B.5 Sur le robot, au premier créneau : vérifier le robot
+
+**Le diagnostic** (1 minute) :
 
 ```bash
+./run.sh diagnostic-robot
+```
+
+Il vérifie les topics, les caméras, le lidar, les repères, l'audio, et note la
+définition exacte des messages de l'arbitre. Je rapatrie le rapport sur le
+PC :
+
+```bash
+# sur le PC
+scp UTILISATEUR@IP_DU_ROBOT:'~/.ros/fosa/diagnostic_*.txt' .
+```
+
+Si un nom de topic ou de caméra diffère, je le corrige dans
+`caytu_config/config/fosa.yaml` sur le PC, puis je refais B.3 et B.4.
+
+**La mesure de distance** (5 minutes, très important). La visite se joue à
+quelques centimètres : un tag imprimé un peu plus grand ou plus petit que
+16,5 cm décale le point d'arrêt.
+
+1. `./run.sh cartographie` (caméras et carte, sans mission).
+2. Poser un tag face à une caméra, à exactement 1,00 m de l'objectif, au
+   mètre ruban.
+3. Dans un autre terminal :
+   `source ~/ros2_ws/install/setup.bash && ros2 topic echo /perception/tags --field detections`.
+4. Lire `distance_m`. Si l'écart dépasse 2 cm, corriger dans `fosa.yaml` :
+   `size_m = 0,165 × 1,00 ÷ distance lue` (exemple : 0,97 lu → `size_m: 0.170`).
+5. `./run.sh arreter`.
+
+**La rotation** (1 minute, robot dégagé, rien d'autre lancé) :
+`./run.sh mesure-rotation`.
+
+---
+
+## C. Simulation sur mon PC
+
+But : voir toute la solution tourner dans Gazebo, sans robot. Le PC doit avoir
+été préparé (section A).
+
+### C.1 La répétition complète, automatique
+
+```bash
+cd ~/ros2_ws/src/fosa-solution
 FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh essai 7,1,9,4
 ```
 
-- **La fenêtre Gazebo s'ouvre** : on voit le robot rouler, tourner sur
+- **Une fenêtre Gazebo s'ouvre** : on voit le robot rouler, tourner sur
   lui-même et s'arrêter devant les tags.
-- **Le terminal affiche le récit**, en phrases (voir 1.14), plus ce que reçoit
-  l'arbitre et le verdict des « juges simulés » : la vraie distance et le
-  vrai angle mesurés dans Gazebo.
+- **Le terminal raconte tout**, en phrases (voir 1.14), plus ce que reçoit
+  l'arbitre et le verdict de « juges simulés », qui mesurent la vraie distance
+  et le vrai angle dans Gazebo.
 
-Le script enchaîne deux phases, chacune dans un monde neuf, robot à la
-position de départ :
+Le script enchaîne deux phases, comme le jour J :
 
-1. **la préparation** : exploration, carte, tags mesurés et enregistrés ;
-2. **le match** : publie l'ordre 7, 1, 9, 4, donne le départ, et le robot
-   court sur la carte de la préparation.
+1. **la préparation** : le robot explore, construit la carte, mesure les tags
+   et enregistre tout ;
+2. **le match** : dans un monde neuf, robot à la position de départ, l'ordre
+   7, 1, 9, 4 est publié, le départ est donné, et le robot court sur la carte
+   enregistrée.
 
-Il s'arrête de lui-même à la fin de chaque phase. Gazebo tourne environ
-3 fois moins vite que le temps réel : comptez environ une heure pour les
-deux. `FOSA_SIM_GUI=0` devant la commande masque Gazebo et va plus vite.
-
-Une phase seule :
-
-```bash
-FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh preparation     # carte + tags
-FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh course 9,4,1,7  # match (avec la préparation si elle existe)
-```
-
-Pour tester le match sans préparation (carte en direct), supprimer d'abord
-`~/.fosa_simulation/preparation`. (En simulation, la préparation est rangée
-là, et pas dans `~/.ros/fosa`.)
+Comptez environ une heure (Gazebo tourne environ 3 fois moins vite que le
+temps réel). Ajouter `FOSA_SIM_GUI=0` devant la commande masque Gazebo et va
+plus vite.
 
 Ce que je regarde dans le terminal :
 
@@ -539,27 +640,33 @@ Ce que je regarde dans le terminal :
   de cap ±x° -> VALIDE` ;
 - `[juge simulé] arbitre : visite du tag N reçue, photo jpeg (... octets)`.
 
-Journaux : `~/.fosa_simulation/journaux/` (`course_*.log` : tout le détail
-technique ; `moniteur_*.log` : le récit).
+### C.2 Une seule phase
 
-### Tout arrêter
+```bash
+FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh preparation     # carte + tags
+FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh course 9,4,1,7  # match seul
+```
 
-Si un essai est interrompu (Ctrl-C, terminal fermé) ou si le script répond
-« Une course ou Gazebo tourne déjà » :
+Le match seul utilise la dernière préparation de simulation, rangée dans
+`~/.fosa_simulation/preparation` (jamais mélangée avec celle du robot). Pour
+tester un match sans préparation (carte en direct), supprimer ce dossier.
+
+### C.3 Tout arrêter
+
+Après un Ctrl-C, un terminal fermé, ou le message « Une course ou Gazebo
+tourne déjà » :
 
 ```bash
 simulation/simulation.sh arreter
 ```
 
-Ne jamais lancer deux essais à la fois : deux courses piloteraient le même
+Ne jamais lancer deux simulations à la fois : elles piloteraient le même
 robot simulé et les journaux se mélangeraient.
 
-### Lancer à la main, pas à pas
-
-Dans quatre terminaux, depuis `~/ros2_ws/src/fosa-solution` :
+### C.4 À la main, terminal par terminal (pour déboguer)
 
 ```bash
-# Terminal 1 : le monde, le robot et les tags (fenêtre Gazebo)
+# Terminal 1 : le monde, le robot et les tags
 FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh monde
 # Terminal 2 : la préparation OU le match
 export FOSA_PROFIL=simulation FOSA_BASE_WS=~/.fosa_simulation/parc_ws
@@ -572,154 +679,58 @@ export FOSA_PROFIL=simulation FOSA_BASE_WS=~/.fosa_simulation/parc_ws
 ./run.sh depart
 ```
 
-Le profil `caytu_config/config/profils/simulation.yaml` remplace
-automatiquement les topics du robot réel par ceux de Gazebo, sur le domaine
-ROS 42. Le mot de départ vocal y est désactivé (pas de micro).
-**Sans `FOSA_PROFIL=simulation`, `run.sh` utilise le profil du robot réel
-(domaine ROS 0)** : sur le Wi-Fi du robot, cela peut le perturber.
+Journaux : `~/.fosa_simulation/journaux/` (`course_*.log` : détail
+technique ; `moniteur_*.log` : le récit).
 
-## 2.3 Tester sur le robot réel
+---
 
-### Ce qu'il faut savoir avant
+## D. Essai réel sur le robot (créneaux d'essai, avant le ranking match)
 
-- **Aucune adresse IP à modifier dans les fichiers.** Notre code tourne sur le
-  robot lui-même et parle aux capteurs en local (domaine ROS 0). L'adresse
-  IP ne sert qu'à se connecter en SSH et à copier le code ; on la donne en
-  argument de commande.
-- **Il me faut des organisateurs** : l'adresse IP du robot, le nom
-  d'utilisateur SSH (et son mot de passe), et le dossier réservé à l'équipe
-  sur le robot. Dans la suite : `UTILISATEUR`, `IP_DU_ROBOT`, `DOSSIER_EQUIPE`.
-- **Interdit sur le robot** : `sudo`, installer des paquets système, publier
-  sur `/parc/*` hors de notre créneau, publier sur l'odométrie du robot.
-- **Le robot redémarre entre deux créneaux** : la solution reste installée
-  dans notre dossier, mais il faut relancer la course à chaque créneau.
+But : répéter exactement le ranking match, sans points en jeu. Un créneau se
+fait en deux temps : **D.1 enregistrer la carte et les tags**, puis **D.2 la
+mission sur cette carte**. Le robot doit avoir été préparé (section B).
 
-### Étape 1 — Sur le PC, avant d'aller au robot (une fois, avec Internet)
-
-```bash
-cd ~/ros2_ws/src/fosa-solution
-./deployer_robot.sh --preparer
-```
-
-Cette commande télécharge dans `livraison/` ce que le robot ne peut pas
-télécharger seul : Vosk pour le processeur du robot (aarch64) et le modèle
-vocal français. Elle est à refaire seulement si `livraison/` a été supprimé.
-
-### Étape 2 — Envoyer la solution au robot (après chaque modification)
-
-Le PC doit être sur le même réseau Wi-Fi que le robot.
-
-```bash
-./deployer_robot.sh --envoyer UTILISATEUR@IP_DU_ROBOT DOSSIER_EQUIPE
-# exemple : ./deployer_robot.sh --envoyer parc@192.168.1.50 /home/parc/fosa
-```
-
-Le code est copié par SSH dans `DOSSIER_EQUIPE/ws/src/fosa-solution`, avec
-seulement ce qui sert au robot : les paquets, `run.sh`,
-`deployer_robot.sh`, `outils/`, `livraison/` et ce README. La simulation,
-`docs/` et l'historique git restent sur le PC.
-
-### Étape 3 — Installer sur le robot (après chaque envoi)
+Avant de commencer : ouvrir **deux terminaux SSH** sur le robot, et dans
+chacun :
 
 ```bash
 ssh UTILISATEUR@IP_DU_ROBOT
 cd DOSSIER_EQUIPE/ws/src/fosa-solution
-./deployer_robot.sh
 ```
 
-Le script :
-
-1. vérifie que Nav2, slam_toolbox et OpenCV sont installés ;
-2. construit nos six paquets dans `DOSSIER_EQUIPE/ws` ;
-3. installe Vosk et le modèle vocal dans notre dossier, sans `sudo`.
-
-S'il annonce « Paquets ROS absents », je le signale aux organisateurs : nous
-n'avons pas le droit de les installer nous-mêmes. Si la voix échoue, la
-course reste possible avec le départ par commande.
-
-### Étape 4 — Premier créneau : le diagnostic
-
-```bash
-./run.sh diagnostic-robot
-```
-
-Il vérifie environ une minute : les topics attendus, les caméras, le lidar,
-les repères (TF), l'audio, et les définitions exactes des messages de
-l'arbitre. Le rapport est enregistré dans `~/.ros/fosa/diagnostic_*.txt`.
-Je le rapatrie sur le PC pour l'étudier au calme :
-
-```bash
-# sur le PC
-scp UTILISATEUR@IP_DU_ROBOT:~/.ros/fosa/diagnostic_*.txt .
-```
-
-Si un nom de topic ou de caméra diffère, je le corrige dans
-`caytu_config/config/fosa.yaml` sur le PC, puis je refais les étapes 2 et 3.
-
-Avec `./run.sh diagnostic-robot --enregistrer 120`, il enregistre aussi
-2 minutes de données capteurs (rosbag) pour régler la solution hors du robot.
-
-**Vérifier la mesure de distance (5 minutes, très important).** La visite
-se joue à quelques centimètres près. Une erreur d'échelle de la caméra ou un
-tag imprimé un peu plus grand ou plus petit que 16,5 cm décale le point
-d'arrêt. En simulation, nous avons mesuré une telle erreur de 3 cm, que nous
-avons corrigée.
-
-1. Lancer `./run.sh cartographie`.
-2. Poser un tag face à une caméra, à exactement 1,00 m de l'objectif, au
-   mètre ruban.
-3. Dans un autre terminal :
-   `source ~/ros2_ws/install/setup.bash && ros2 topic echo /perception/tags --field detections`.
-4. Lire `distance_m`. Si l'écart dépasse 2 cm, corriger dans `fosa.yaml` :
-   `size_m = 0,165 × 1,00 ÷ distance lue` (exemple : 0,97 lu → `size_m: 0.170`).
-
-### Étape 5 — Un créneau d'essai : préparation puis match
-
-C'est la répétition exacte du jour J.
-
-**A. La préparation (le robot explore seul)**
+### D.1 Enregistrer la carte et les tags (préparation)
 
 1. Poser le robot à la **position de départ** du match, arène dégagée.
-2. **Terminal 1** (SSH) :
+2. **Terminal 1** : `./run.sh preparation`.
+   Le robot explore seul. `Ctrl-b` puis `d` quitte l'affichage sans
+   l'arrêter (il tourne dans `tmux`).
+3. **Terminal 2** : `./run.sh suivi`. Il raconte : tags repérés, tags mesurés
+   de près, carte enregistrée.
+4. Attendre `=== FIN ===` (12 minutes au plus). Le suivi indique où sont
+   la carte et les tags, et quels tags manquent éventuellement.
+5. **Terminal 1** : `./run.sh arreter`.
 
-   ```bash
-   cd DOSSIER_EQUIPE/ws/src/fosa-solution
-   ./run.sh preparation
-   ```
+### D.2 La mission sur la carte enregistrée
 
-   La préparation démarre dans `tmux`, détachée de la session SSH :
-   `Ctrl-b` puis `d` quitte l'affichage sans l'arrêter.
-3. **Terminal 2** (SSH) : `./run.sh suivi` raconte tout en direct : tags
-   repérés, tags mesurés de près, carte enregistrée.
-4. Attendre `=== FIN ===` dans le suivi (12 minutes au plus). Il indique où
-   sont enregistrées la carte et les tags, et quels tags manquent
-   éventuellement.
-5. `./run.sh arreter`, puis **reposer le robot à la position de départ**. Le
-   match se repère sur la carte à partir de cette position.
+1. **Reposer le robot à la position de départ** : la carte a été faite à
+   partir de là.
+2. **Terminal 1** : `./run.sh course`.
+   Je vérifie qu'il annonce « Préparation utilisée : ... ». S'il affiche
+   « ATTENTION : parc_msgs introuvable », les visites ne seront pas comptées :
+   prévenir un organisateur.
+3. **Demander à un organisateur d'armer une course d'essai** : l'ordre des
+   tags est publié.
+4. **Terminal 2** : `./run.sh suivi`.
+5. **Donner le départ** : dire « allez » près du robot, ou `./run.sh depart`
+   dans un troisième terminal.
+6. **Regarder** le récit, et la page `http://IP_DU_ROBOT:8080/` dans un
+   navigateur du PC : ce que l'arbitre a reçu (départ, visites avec photo,
+   fin).
+7. **Arrêter** : `./run.sh arreter`.
 
-**B. Le match**
+### D.3 Après le créneau, sur le PC
 
-1. **Terminal 1** : `./run.sh course`. Il annonce « Préparation utilisée :
-   ... ». Si `run.sh` affiche « ATTENTION : parc_msgs introuvable », les
-   visites ne seront pas comptées : prévenir un organisateur.
-2. **Demander à un organisateur d'armer une course d'essai.** L'ordre des
-   tags est alors publié.
-3. **Terminal 2** : `./run.sh suivi` (le récit, voir 1.14). Éventuellement,
-   un terminal 3 pour l'arbitre :
-
-   ```bash
-   source ~/ros2_ws/install/setup.bash
-   ros2 topic echo /parc/run_status
-   ```
-
-4. **Donner le départ** : dire « allez » près du robot, ou taper
-   `./run.sh depart` dans un autre terminal.
-5. **Suivre** dans le récit. La page `http://IP_DU_ROBOT:8080/`, ouverte dans
-   un navigateur du PC, montre ce que l'arbitre a reçu : départ, visites avec
-   photo, fin.
-6. **Arrêter** (essai seulement) : `./run.sh arreter`.
-
-**C. Rapatrier les journaux** sur le PC pour les étudier :
+Rapatrier les journaux et la carte pour les étudier :
 
 ```bash
 scp UTILISATEUR@IP_DU_ROBOT:'~/.ros/fosa/*.log' .
@@ -727,57 +738,74 @@ scp -r UTILISATEUR@IP_DU_ROBOT:'~/.ros/fosa/preparation' .   # carte.pgm à rega
 ```
 
 Si les durées annoncées par les plans sont loin de la réalité, je recale
-`course.strategy` dans `fosa.yaml` (vitesse réelle, temps de visite, temps de
-recherche).
+`course.strategy` dans `fosa.yaml`, puis je refais B.3 et B.4 au créneau
+suivant.
 
-Autres outils utiles pendant les essais :
+Outils utiles pendant un créneau :
 
 | Commande | Usage |
 |---|---|
-| `./run.sh cartographie` | SLAM, Nav2 et caméras sans mission : pour voir et régler. |
+| `./run.sh cartographie` | Caméras et carte sans mission : pour voir et régler. |
 | `./run.sh sauver-carte` | Enregistrer tout de suite la carte dans la préparation. |
-| `./run.sh mesure-rotation` | Robot dégagé, rien d'autre lancé : vérifier l'odométrie en rotation. |
-| `./run.sh ordre-test "7,1,9,4"` | Publier un faux ordre. **Essais seulement**, jamais pendant une course notée. |
+| `./run.sh etat` | État brut de la course. |
+| `./run.sh ordre-test "7,1,9,4"` | Publier un faux ordre si aucun organisateur ne peut armer. **Essais seulement.** |
 
-### Étape 6 — Le jour de la course notée
+---
 
-1. Avant le gel du code : soumettre la version finale, celle qui est installée
-   sur le robot.
-2. **Les 15 minutes de préparation** : robot à la position de départ,
-   `./run.sh preparation`, `./run.sh suivi`, attendre `=== FIN ===`, puis
-   `./run.sh arreter`. Si la préparation a raté (carte non enregistrée), la
-   relancer tant qu'il reste du temps.
-3. Reposer le robot à la position de départ, puis `./run.sh course` et
-   attendre que les organisateurs publient l'ordre.
-4. Au signal : dire « allez » (bonus de 5 points), ou `./run.sh depart`.
-5. **Ne plus rien toucher** : ni le robot, ni le clavier, ni la session SSH.
-   Le robot s'arrête seul à la fin. `./run.sh suivi` peut rester ouvert pour
-   regarder.
+## E. Le ranking match (le match noté devant le jury)
 
-### Si quelque chose ne va pas
+Même déroulement que D, mais pour de vrai : les points comptent et personne
+ne touche le robot après le départ.
+
+**Avant le jour J**
+
+- Au gel du code : la version installée sur le robot est la version soumise.
+  Ne plus rien modifier ensuite.
+
+**Les 15 minutes de préparation**
+
+1. Robot à la **position de départ**, arène telle qu'elle sera pour le match.
+2. **Terminal 1** : `./run.sh preparation`. **Terminal 2** : `./run.sh suivi`.
+3. Attendre `=== FIN ===`, vérifier « Carte enregistrée » et la liste des
+   tags trouvés.
+4. Si la carte n'est pas enregistrée, ou s'il manque des tags et qu'il reste
+   du temps : relancer `./run.sh preparation`.
+5. `./run.sh arreter`.
+
+**Le match (10 minutes)**
+
+1. Reposer le robot à la **position de départ**.
+2. **Terminal 1** : `./run.sh course`, vérifier « Préparation utilisée ».
+3. **Terminal 2** : `./run.sh suivi` (peut rester ouvert pour regarder).
+4. Attendre que les organisateurs publient l'ordre.
+5. Au signal : dire **« allez »** (bonus de 5 points), ou `./run.sh depart`
+   si la voix échoue.
+6. **Ne plus rien toucher** : ni le robot, ni le clavier, ni la session SSH.
+   Le robot s'arrête seul et signale la fin à l'arbitre.
+
+**Ce qu'on ne fait jamais en match** : `./run.sh ordre-test`, `./run.sh
+arreter`, toucher le robot, modifier un fichier.
+
+---
+
+## F. Si quelque chose ne va pas
 
 | Symptôme | Que faire |
 |---|---|
+| « failed to create symbolic link » au build sur le PC | Supprimer `~/ros2_ws/build/caytu_*` et `~/ros2_ws/install/caytu_*`, puis `colcon build`. |
+| « Une course ou Gazebo tourne déjà » (simulation) | `simulation/simulation.sh arreter`. |
 | « Paquets ROS absents » au déploiement | Demander aux organisateurs d'installer Nav2 et slam_toolbox. |
-| « parc_msgs introuvable » au lancement | L'espace de base `~/ros2_ws` du robot n'existe pas ou a changé : `FOSA_BASE_WS=<dossier> ./run.sh course`. |
+| « parc_msgs introuvable » au lancement | L'espace de base `~/ros2_ws` du robot a changé : `FOSA_BASE_WS=<dossier> ./run.sh course`. |
 | Rien sur la page de l'arbitre | Même cause que ci-dessus. |
 | « No image » sur la page de l'arbitre | Le champ photo de `TagVisit` a un autre format : lire le rapport du diagnostic et adapter `caytu_course/caytu_course/arbitre.py`. |
-| Aucun tag détecté | Topics des caméras dans `fosa.yaml`, éclairage, distance. |
-| Le robot ne bouge pas après le départ | Lire le journal : Nav2 pas prêt, carte absente, topic `/cmd_vel` différent. |
-| Le départ vocal ne marche pas | Vosk absent (relancer `./deployer_robot.sh`), format audio, seuil `min_confidence`. Départ par commande en attendant. |
-| Le robot dérive en tournant | `./run.sh mesure-rotation`. |
-| Tags sautés trop tôt ou trop tard | Recaler `course.strategy` dans `fosa.yaml` à partir des plans du récit. |
 | « Aucune préparation » au lancement du match | La préparation n'a pas enregistré la carte : relancer `./run.sh preparation`. |
 | Le robot se croit ailleurs au début du match | Il n'est pas reparti de la position de départ de la préparation : le reposer et relancer `./run.sh course`. |
+| Aucun tag détecté | Topics des caméras dans `fosa.yaml`, éclairage, distance. |
+| Le robot ne bouge pas après le départ | Lire le journal : Nav2 pas prêt, carte absente, topic `/cmd_vel` différent. |
+| Le départ vocal ne marche pas | Vosk absent (refaire B.4), format audio, seuil `min_confidence`. Départ par commande en attendant. |
+| Le robot dérive en tournant | `./run.sh mesure-rotation`. |
+| Tags sautés trop tôt ou trop tard | Recaler `course.strategy` dans `fosa.yaml` à partir des plans du récit. |
 
-### Points encore à confirmer sur place
-
-Le diagnostic du premier créneau répond à ces questions :
-
-- la valeur de `reason` attendue pour la fin de course ;
-- le champ photo exact de `TagVisit` ;
-- le format du son de `/speech_audio` ;
-- quelle caméra est la caméra haute.
-
-Confirmé par les organisateurs : 15 minutes de préparation (carte et tags)
-avant chaque match, avec les données utilisables pendant le match.
+**Encore à confirmer sur le robot** (le diagnostic B.5 y répond) : la valeur de
+`reason` pour la fin de course, le champ photo exact de `TagVisit`, le format
+du son de `/speech_audio`, et quelle caméra est la caméra haute.
