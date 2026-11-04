@@ -94,6 +94,7 @@ def creer_noeud_suivi(nom='suivi_course', technique=True, quitter_a_la_fin=False
             self.fini = False
             self.quitter_a_la_fin = quitter_a_la_fin
             self.surveillance = Surveillance()
+            self._statuts = {}             # but Nav2 -> dernier statut affiché
             self.create_subscription(String, configuration.course.events_topic,
                                      self._recit, qos_evenements())
             if not technique:
@@ -127,9 +128,15 @@ def creer_noeud_suivi(nom='suivi_course', technique=True, quitter_a_la_fin=False
                 self.fini = True
 
         def _statut_nav2(self, message):
-            if message.status_list:
+            """La liste contient tous les buts récents, pas forcément dans
+            l'ordre : on suit chaque but par son identifiant."""
+            for statut in message.status_list:
+                but = bytes(statut.goal_info.goal_id.uuid)
+                if self._statuts.get(but) == statut.status:
+                    continue
+                self._statuts[but] = statut.status
                 self.afficher(self.surveillance.statut_nav2(
-                    message.status_list[-1].status, self.maintenant()))
+                    statut.status, self.maintenant()))
 
         def _chemin(self, message):
             self.afficher(self.surveillance.chemin(

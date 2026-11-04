@@ -9,17 +9,26 @@ def test_les_statuts_nav2_sont_signales_une_fois():
     surveillance = Surveillance()
     assert surveillance.statut_nav2(1, 0.0) == ['[NAV2] trajet en cours']
     assert surveillance.statut_nav2(1, 1.0) == []
+    assert surveillance.statut_nav2(2, 1.5) == []
+    assert surveillance.nav2_actif
     assert surveillance.statut_nav2(6, 2.0) == ["[NAV2] ÉCHEC : Nav2 a abandonné le trajet"]
     assert not surveillance.nav2_actif
 
 
-def test_les_chemins_identiques_rapproches_ne_sont_pas_repetes():
+def test_seuls_le_premier_chemin_et_les_detours_sont_affiches():
+    """Régression : 244 lignes [CHEMIN] en 2 minutes (replanification à 2 Hz)."""
     surveillance = Surveillance()
-    assert surveillance.chemin(40, 2.31, 0.0) == ['[CHEMIN] 40 points, 2,31 m']
-    assert surveillance.chemin(40, 2.32, 0.5) == []
-    assert surveillance.chemin(38, 2.10, 0.8) == ['[CHEMIN] 38 points, 2,10 m']
-    assert surveillance.chemin(0, 0.0, 1.0) == ['[CHEMIN] aucun chemin trouvé vers le but']
-    assert surveillance.replanifications == 2
+    surveillance.statut_nav2(1, 0.0)
+    assert surveillance.chemin(40, 2.31, 0.0) == ['[CHEMIN] trajet planifié : 2,31 m']
+    assert surveillance.chemin(38, 2.10, 0.5) == []
+    assert surveillance.chemin(36, 1.90, 1.0) == []
+    assert surveillance.chemin(50, 2.70, 1.5)[0].startswith(
+        '[CHEMIN] détour : chemin rallongé de 0,80 m (2,70 m)')
+    assert surveillance.chemin(0, 0.0, 2.0) == ['[CHEMIN] aucun chemin trouvé vers le but']
+    assert surveillance.replanifications == 4
+    surveillance.statut_nav2(4, 3.0)
+    surveillance.statut_nav2(1, 4.0)
+    assert surveillance.chemin(20, 1.0, 4.0) == ['[CHEMIN] trajet planifié : 1,00 m']
 
 
 def test_une_rotation_sur_place_est_resumee_a_sa_fin():

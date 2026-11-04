@@ -383,8 +383,9 @@ Sous le récit, en plus discret, la **surveillance technique** montre la
 mécanique (dans l'esprit du moniteur de la branche benchmark) :
 
 ```text
-        [CHEMIN] 42 points, 2,31 m
         [NAV2] trajet en cours
+        [CHEMIN] trajet planifié : 2,31 m
+        [CHEMIN] détour : chemin rallongé de 0,80 m (3,11 m), obstacle sur l'ancien chemin ?
         [ROTATION] rotation sur place de 9 s
         [ARRÊT] immobile depuis 6 s pendant un trajet Nav2
         [BLOQUÉ] commandes envoyées (v=-0.08, w=+0.00) mais le robot ne bouge pas depuis 5 s

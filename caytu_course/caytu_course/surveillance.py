@@ -24,8 +24,7 @@ BLOCAGE_FENETRE = 5.0            # s de commandes sans mouvement
 BLOCAGE_DEPLACEMENT_MIN = 0.03   # m
 BLOCAGE_ROTATION_MIN = math.radians(4.0)
 BLOCAGE_RAPPEL = 5.0
-CHEMIN_ECART_MIN = 1.0           # s entre deux chemins identiques signalés
-CHEMIN_LONGUEUR_EPS = 0.05
+DETOUR_MIN = 0.5                 # m : un chemin qui s'allonge d'autant = détour
 
 
 def _m(valeur):
@@ -39,7 +38,8 @@ class Surveillance:
         self.replanifications = 0
         self.contacts = 0
         self._statut = None
-        self._chemin = (None, 0.0, -math.inf)
+        self._longueur_chemin = None    # longueur du dernier chemin reçu
+        self._chemin_annonce = False    # premier chemin du trajet déjà affiché
         self._rotation_debut = None
         self._arret_debut = None
         self._arret_rappel = -math.inf
@@ -50,23 +50,32 @@ class Surveillance:
 
     # ---------------------------------------------------------------- Nav2
     def statut_nav2(self, code, t):
+        """Statut action_msgs : 1 accepté et 2 en exécution = trajet en cours."""
+        if code == 2:
+            code = 1
         if code == self._statut:
             return []
         self._statut = code
         self.nav2_actif = code == 1
+        if self.nav2_actif:
+            self._chemin_annonce = False
         texte = STATUTS_NAV2.get(code)
         return [texte] if texte else []
 
     def chemin(self, points, longueur, t):
+        """Nav2 replanifie deux fois par seconde : on n'affiche que le premier
+        chemin d'un trajet et les vrais détours (chemin nettement rallongé)."""
         if points == 0:
             return ['[CHEMIN] aucun chemin trouvé vers le but']
-        precedent, longueur_precedente, instant = self._chemin
-        if (precedent == points and abs(longueur - longueur_precedente) < CHEMIN_LONGUEUR_EPS
-                and t - instant < CHEMIN_ECART_MIN):
-            return []
-        self._chemin = (points, longueur, t)
         self.replanifications += 1
-        return [f'[CHEMIN] {points} points, {_m(longueur)} m']
+        precedente, self._longueur_chemin = self._longueur_chemin, longueur
+        if not self._chemin_annonce:
+            self._chemin_annonce = True
+            return [f'[CHEMIN] trajet planifié : {_m(longueur)} m']
+        if precedente is not None and longueur - precedente >= DETOUR_MIN:
+            return [f'[CHEMIN] détour : chemin rallongé de {_m(longueur - precedente)} m '
+                    f'({_m(longueur)} m), obstacle sur l\'ancien chemin ?']
+        return []
 
     # ----------------------------------------------------------- commandes
     def commande(self, lineaire, angulaire, t):
