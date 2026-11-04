@@ -21,6 +21,7 @@ setup(
         'console_scripts': [
             'tag_detector = caytu_perception.detecteur_tags:main',
             'tag_calibrator = caytu_perception.calibrateur_tags:main',
+            'depth_scan = caytu_perception.noeud_scan_profondeur:main',
             'obstacle_classifier = caytu_perception.classificateur_obstacles:main',
             'person_tracker = caytu_perception.suivi_personnes:main',
         ],

@@ -150,4 +150,12 @@ def load_config(dossier=None):
         raise ConfigurationError(
             f"course.tag_ids : tags {sorted(manquants)} absents de "
             "perception.apriltag.ids (jamais détectés).")
+    portees = {scan.output_topic: scan.range_max
+               for scan in configuration.perception.depth_scans}
+    for source in configuration.navigation.obstacle_sources:
+        if source.topic in portees and source.obstacle_max_range >= portees[source.topic]:
+            raise ConfigurationError(
+                f"navigation.obstacle_sources[{source.name}] : obstacle_max_range doit "
+                f"être inférieur à range_max du scan {source.topic} "
+                "(sinon un secteur vide serait marqué).")
     return configuration

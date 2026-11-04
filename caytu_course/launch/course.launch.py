@@ -81,6 +81,13 @@ def _perception_et_course(configuration, temps, mission):
                  'camera_info_topic': camera.info_topic,
              }])
         for camera in configuration.perception.apriltag.cameras]
+    # Profondeur -> obstacles hauts (plateaux de table) pour les costmaps.
+    noeuds += [
+        Node(package='caytu_perception', executable='depth_scan',
+             name=f'scan_profondeur_{scan.name}', output='screen',
+             respawn=True, respawn_delay=2.0,
+             parameters=[temps, {'source_name': scan.name}])
+        for scan in configuration.perception.depth_scans]
     if configuration.start_word.enabled:
         noeuds.append(Node(
             package='caytu_course', executable='mot_depart', output='screen',

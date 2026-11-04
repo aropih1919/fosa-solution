@@ -21,6 +21,7 @@ from caytu_config.validation import (
 )
 
 ORDER_TYPES = ("string", "int32_multi_array")
+DEPTH_INPUTS = ("depth_image", "pointcloud")
 AUDIO_MODES = ("utterance", "stream")
 # Règlement : visite valide si le robot est aligné à ±12° près.
 REGLEMENT_TOLERANCE_CAP_DEG = 12.0
@@ -92,6 +93,63 @@ class ObstacleSourceConfig:
             raise ConfigurationError(
                 f"{path}: obstacle_min_range doit être inférieur à obstacle_max_range.")
         return source
+
+
+@dataclass(frozen=True)
+class DepthScanConfig:
+    """Profondeur d'une caméra -> LaserScan d'obstacles entre deux hauteurs."""
+
+    name: str
+    input_type: str
+    input_topic: str
+    info_topic: str
+    output_topic: str
+    min_height: float
+    max_height: float
+    range_min: float
+    range_max: float
+    angle_min: float
+    angle_max: float
+    angle_increment: float
+    pixel_step: int
+    min_points: int
+    rate_hz: float
+
+    @classmethod
+    def from_mapping(cls, data, path="perception.depth_scans[]"):
+        data = _section(data, path)
+        nombres = ("min_height", "max_height", "range_min", "range_max",
+                   "angle_min", "angle_max", "angle_increment", "rate_hz")
+        _check_keys(data, ("name", "input_type", "input_topic", "info_topic",
+                           "output_topic", "pixel_step", "min_points") + nombres, path)
+        scan = cls(
+            name=_as_str(_get(data, "name", path), f"{path}.name"),
+            input_type=_choice(
+                _get(data, "input_type", path), DEPTH_INPUTS, f"{path}.input_type"),
+            input_topic=_as_str(
+                _get(data, "input_topic", path), f"{path}.input_topic"),
+            info_topic=_as_str(
+                _get(data, "info_topic", path), f"{path}.info_topic",
+                allow_empty=True),
+            output_topic=_as_str(
+                _get(data, "output_topic", path), f"{path}.output_topic"),
+            pixel_step=_as_int(
+                _get(data, "pixel_step", path), f"{path}.pixel_step", 1),
+            min_points=_as_int(
+                _get(data, "min_points", path), f"{path}.min_points", 1),
+            **{cle: _as_number(_get(data, cle, path), f"{path}.{cle}")
+               for cle in nombres},
+        )
+        if scan.input_type == "depth_image" and not scan.info_topic:
+            raise ConfigurationError(f"{path}.info_topic est obligatoire pour une image.")
+        for bas, haut in (("min_height", "max_height"), ("range_min", "range_max"),
+                          ("angle_min", "angle_max")):
+            if getattr(scan, bas) >= getattr(scan, haut):
+                raise ConfigurationError(f"{path}: {bas} doit être inférieur à {haut}.")
+        if scan.angle_increment <= 0.0 or scan.rate_hz <= 0.0:
+            raise ConfigurationError(
+                f"{path}: angle_increment et rate_hz doivent être positifs.")
+        return scan
 
 
 @dataclass(frozen=True)

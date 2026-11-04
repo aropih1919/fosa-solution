@@ -11,6 +11,7 @@ from caytu_config.errors import ConfigurationError
 from caytu_config.modeles_course import (
     _as_int_list,
     CourseConfig,
+    DepthScanConfig,
     ObstacleSourceConfig,
     StartWordConfig,
     TagCameraConfig,
@@ -558,6 +559,7 @@ class PerceptionConfig:
     person: PersonConfig
     top_scan: ScanConversionConfig
     bottom_scan: ScanConversionConfig
+    depth_scans: tuple
 
     @classmethod
     def from_mapping(cls, data, path="perception"):
@@ -566,8 +568,15 @@ class PerceptionConfig:
             "top_color_topic", "top_depth_topic", "top_info_topic",
             "bottom_color_topic", "bottom_depth_topic", "entities_topic",
             "tags_topic", "person_events_topic", "apriltag", "yolo",
-            "person", "top_scan", "bottom_scan"), path)
+            "person", "top_scan", "bottom_scan", "depth_scans"), path)
+        depth_scans = tuple(
+            DepthScanConfig.from_mapping(scan, f"{path}.depth_scans[{index}]")
+            for index, scan in enumerate(
+                _as_list(_get(data, "depth_scans", path), f"{path}.depth_scans")))
+        if len({scan.name for scan in depth_scans}) != len(depth_scans):
+            raise ConfigurationError(f"{path}.depth_scans: noms en double.")
         return cls(
+            depth_scans=depth_scans,
             top_color_topic=_as_str(
                 _get(data, "top_color_topic", path),
                 f"{path}.top_color_topic"),

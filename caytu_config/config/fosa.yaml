@@ -53,8 +53,8 @@ navigation:
   max_linear_speed: 0.30          # m/s, arène de 5 m avec des personnes
   max_angular_speed: 0.80         # rad/s
   laser_self_filter: false        # true seulement en simulation (lidar sous le châssis)
-  # Scans utilisés par les costmaps. Les scans caméra des organisateurs sont
-  # désactivés tant que leur contenu n'a pas été vérifié sur le robot.
+  # Scans utilisés par les costmaps. Si les caméras voient le sol comme un
+  # obstacle sur le robot (TF à vérifier), passer leurs sources à false.
   obstacle_sources:
     - name: lidar
       topic: /scan_filtered
@@ -64,20 +64,22 @@ navigation:
       raytrace_max_range: 4.0
       inf_is_valid: false        # pas de retour ≠ espace libre
       global_costmap: true
+    # Profondeur des caméras (perception.depth_scans) : plateaux de table,
+    # assises, personnes au-dessus du plan du lidar.
     - name: camera1
-      topic: /camera1/scan
-      enabled: false
-      obstacle_min_range: 0.2
-      obstacle_max_range: 2.5
-      raytrace_max_range: 3.0
+      topic: /fosa/scan_camera1
+      enabled: true
+      obstacle_min_range: 0.25
+      obstacle_max_range: 2.0         # < range_max du scan (2,5 m) : un secteur vide n'est jamais marqué
+      raytrace_max_range: 2.5
       inf_is_valid: true
       global_costmap: true
     - name: camera2
-      topic: /camera2/scan
-      enabled: false
-      obstacle_min_range: 0.2
-      obstacle_max_range: 2.5
-      raytrace_max_range: 3.0
+      topic: /fosa/scan_camera2
+      enabled: true
+      obstacle_min_range: 0.25
+      obstacle_max_range: 2.0         # < range_max du scan (2,5 m) : un secteur vide n'est jamais marqué
+      raytrace_max_range: 2.5
       inf_is_valid: true
       global_costmap: true
   global_costmap_clear_service: /global_costmap/clear_entirely_global_costmap
@@ -159,7 +161,44 @@ perception:
     front_fov_rad: 1.57
     robot_stop_threshold_mps: 0.03
 
-  # Conversion des nuages de points caméra en LaserScan pour Nav2.
+  # Profondeur -> obstacles entre deux hauteurs du repère du robot -> LaserScan
+  # (le lidar bas ne voit pas les plateaux de table). Une entrée par caméra.
+  depth_scans:
+    - name: camera1
+      input_type: depth_image       # depth_image (robot) | pointcloud (Gazebo)
+      input_topic: /camera1/camera1/depth/image_rect_raw
+      info_topic: /camera1/camera1/depth/camera_info
+      output_topic: /fosa/scan_camera1
+      # Plateaux (~0,75 m), assises, personnes ; le lidar couvre le bas.
+      # Sol vu comme obstacle sur le robot (TF ou inclinaison) : monter
+      # min_height, ou désactiver les sources caméra de navigation.
+      min_height: 0.25
+      max_height: 1.30              # hauteur du robot
+      range_min: 0.25
+      range_max: 2.5
+      angle_min: -0.8
+      angle_max: 0.8
+      angle_increment: 0.0175       # >= pixel_step / fx, sinon secteurs vides (lus libres)
+      pixel_step: 4
+      min_points: 3                 # points par secteur pour un obstacle
+      rate_hz: 10.0
+    - name: camera2
+      input_type: depth_image
+      input_topic: /camera2/camera2/depth/image_rect_raw
+      info_topic: /camera2/camera2/depth/camera_info
+      output_topic: /fosa/scan_camera2
+      min_height: 0.25
+      max_height: 1.30
+      range_min: 0.25
+      range_max: 2.5
+      angle_min: -0.8
+      angle_max: 0.8
+      angle_increment: 0.0175       # >= pixel_step / fx, sinon secteurs vides (lus libres)
+      pixel_step: 4
+      min_points: 3                 # points par secteur pour un obstacle
+      rate_hz: 10.0
+
+  # Conversion des nuages de points caméra en LaserScan pour Nav2 (héritage phase 1).
   top_scan:
     cloud_topic: /top_camera_depth/points
     scan_topic: /top_camera_scan

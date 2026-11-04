@@ -146,3 +146,23 @@ def test_les_tags_de_la_course_doivent_etre_detectes(tmp_path, monkeypatch):
     monkeypatch.setenv("FOSA_CONFIG_OVERRIDE", str(surcharge))
     with pytest.raises(ConfigurationError, match="tag_ids"):
         load_config(CONFIG)
+
+
+def test_une_source_camera_ne_marque_pas_au_bout_du_scan(tmp_path, monkeypatch):
+    surcharge = tmp_path / "surcharge.yaml"
+    surcharge.write_text(
+        "navigation:\n  obstacle_sources:\n    - name: camera1\n"
+        "      topic: /fosa/scan_camera1\n      enabled: true\n"
+        "      obstacle_min_range: 0.25\n      obstacle_max_range: 2.5\n"
+        "      raytrace_max_range: 3.0\n      inf_is_valid: true\n"
+        "      global_costmap: true\n", encoding="utf-8")
+    monkeypatch.setenv("FOSA_CONFIG_OVERRIDE", str(surcharge))
+    with pytest.raises(ConfigurationError, match="obstacle_max_range"):
+        load_config(CONFIG)
+
+
+def test_les_cameras_detectent_les_obstacles_hauts(robot):
+    noms = [scan.name for scan in robot.perception.depth_scans]
+    assert noms == ["camera1", "camera2"]
+    actives = {s.topic for s in robot.navigation.obstacle_sources if s.enabled}
+    assert {s.output_topic for s in robot.perception.depth_scans} <= actives

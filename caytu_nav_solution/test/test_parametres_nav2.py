@@ -62,13 +62,16 @@ def test_les_couches_suivent_les_sources_actives(robot):
     parametres = _parametres(robot)
     globale = _costmap(parametres, 'global_costmap')
     locale = _costmap(parametres, 'local_costmap')
-    assert globale['plugins'] == ['static_layer', 'lidar_layer', 'inflation_layer']
-    assert locale['plugins'] == ['lidar_layer', 'inflation_layer']
+    couches = ['lidar_layer', 'camera1_layer', 'camera2_layer', 'inflation_layer']
+    assert globale['plugins'] == ['static_layer'] + couches
+    assert locale['plugins'] == couches
     source = locale['lidar_layer']['lidar']
     assert source['topic'] == '/scan_filtered'
     assert source['obstacle_min_range'] == pytest.approx(0.12)
     assert source['raytrace_max_range'] > source['obstacle_max_range']
-    assert 'camera1_layer' not in locale
+    camera = locale['camera1_layer']['camera1']
+    assert camera['topic'] == '/fosa/scan_camera1'
+    assert camera['inf_is_valid'] is True
 
 
 def test_l_empreinte_et_les_vitesses_sont_bornees(robot):
