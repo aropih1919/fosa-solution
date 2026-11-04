@@ -10,7 +10,7 @@ doit respecter ces règles, quel que soit l’agent qui la produit.
 - Employer des verbes précis : `get_nom()`, `naviguer_robot()`,
   `charger_carte()`, `recevoir_scan()`.
 - Garder en anglais les termes consacrés par ROS 2, Nav2, Python, les
-  bibliothèques et les protocoles : `Node`, `Pose2D`, `Nav2Navigator`,
+  bibliothèques et les protocoles : `Node`, `Pose2D`, `NavigateToPose`,
   `ActionClient`, `topic`, `frame_id`, `header`, `callback`, `JSON`, `LLM`.
 - Les noms imposés par une API externe ou une interface ROS ne sont jamais
   traduits : types de messages, champs, services, topics, paramètres, noms de

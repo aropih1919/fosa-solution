@@ -13,22 +13,11 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Liantsoa',
-    maintainer_email='liantsoaandreane@gmail.com',
-    description='Point d\'entrée officiel PARC 2026 (task_solution.py), '
-                'localisation roues + IMU et filtrage du lidar — équipe Fosa',
+    maintainer='Équipe Fosa',
+    maintainer_email='johny@fosa.mg',
+    description='Chronomètre de course, client Nav2 et génération du YAML Nav2 '
+                'depuis caytu_config — équipe Fosa',
     license='MIT',
     extras_require={'test': ['pytest']},
-    entry_points={
-        'console_scripts': [
-            # Nom imposé par le règlement :
-            #   ros2 run caytu_nav_solution task_solution.py
-            'task_solution.py = caytu_nav_solution.task_solution:main',
-            'fosa_benchmark = caytu_nav_solution.benchmark_cli:main',
-            'fosa_compare = caytu_nav_solution.compare_cli:main',
-            # Nœuds lancés par caytu_nav_bringup/launch/solution_bringup.launch.py
-            'localisateur_odom_imu = caytu_nav_solution.localisateur_odom_imu:main',
-            'filtre_sol_lidar = caytu_nav_solution.filtre_sol_lidar:main',
-        ],
-    },
+    entry_points={'console_scripts': []},
 )

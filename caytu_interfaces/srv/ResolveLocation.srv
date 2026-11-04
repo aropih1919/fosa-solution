@@ -1,5 +1,0 @@
-string query
----
-bool success
-caytu_interfaces/SemanticLocation location
-string error

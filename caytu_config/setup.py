@@ -20,7 +20,7 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    maintainer="Johny — Trinôme 2",
+    maintainer="Équipe Fosa",
     maintainer_email="johny@fosa.mg",
     description="Configuration unique de la solution Fosa (PARC 2026).",
     license="MIT",

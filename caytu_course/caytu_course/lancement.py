@@ -7,7 +7,7 @@ EXTENSIONS_POSEGRAPH = ('.posegraph', '.data')
 
 def executable_slam(configuration):
     """Le nœud asynchrone ignore `mode` : la localisation sur une carte des
-    essais demande le nœud dédié de slam_toolbox (comme localization_launch)."""
+    essais demande le nœud dédié de slam_toolbox."""
     if configuration.course.slam_map_file:
         return 'localization_slam_toolbox_node'
     return 'async_slam_toolbox_node'

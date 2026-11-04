@@ -1,18 +1,14 @@
-"""Tests des briques extraites : chronomètre, bringup, but Nav2."""
+"""Tests du chronomètre de course et du client Nav2."""
 
 import math
-from pathlib import Path
-import signal
-import subprocess
 from types import SimpleNamespace
 
 from caytu_nav_solution.nav_math import Pose2D
 from caytu_nav_solution.navigation_runtime import (
-    BringupManager,
+    ChronometreCourse,
     construire_but,
     est_arrive,
-    Nav2Navigator,
-    TaskTimer,
+    NavigateurNav2,
 )
 import pytest
 
@@ -50,161 +46,23 @@ class _FakeLogger:
         self.messages.append(message)
 
 
-class _FakeProcess:
-    def __init__(self, pid=4242):
-        self.pid = pid
-        self.returncode = None
-
-    def poll(self):
-        return self.returncode
-
-    def wait(self, timeout=None):
-        self.returncode = 0
-        return 0
-
-
-class _ResistantProcess(_FakeProcess):
-    def __init__(self):
-        super().__init__()
-        self.waits = 0
-
-    def wait(self, timeout=None):
-        self.waits += 1
-        if self.waits < 3:
-            raise subprocess.TimeoutExpired('ros2 launch', timeout)
-        self.returncode = 0
-        return 0
-
-
-class _FakePopen:
-    def __init__(self, process):
-        self.process = process
-        self.command = None
-        self.kwargs = None
-
-    def __call__(self, command, **kwargs):
-        self.command = command
-        self.kwargs = kwargs
-        return self.process
-
-
-def _navigation():
-    return SimpleNamespace(
-        bringup_package='caytu_nav_bringup',
-        bringup_launch='solution_bringup.launch.py',
-        bringup_stop_timeouts=(10.0, 5.0, 2.0),
-    )
-
-
 def test_le_chronometre_deduit_la_marge_et_signale_l_echeance():
     clock = _FakeClock()
-    timer = TaskTimer(clock.now, 600.0, 1.0)
+    chrono = ChronometreCourse(clock.now, 600.0, 1.0)
 
-    assert timer.elapsed() == 0.0
-    assert timer.remaining() == 599.0
-    assert timer.start() is False          # horloge encore à zéro
+    assert chrono.ecoule() == 0.0
+    assert chrono.restant() == 599.0
+    assert chrono.demarrer() is False      # horloge encore à zéro
 
     clock.advance(1.0)
-    assert timer.start() is True
+    assert chrono.demarrer() is True
     clock.advance(10.0)
-    assert timer.elapsed() == pytest.approx(10.0)
-    assert timer.remaining() == pytest.approx(589.0)
-    assert timer.expired() is False
+    assert chrono.ecoule() == pytest.approx(10.0)
+    assert chrono.restant() == pytest.approx(589.0)
+    assert chrono.expire() is False
 
     clock.advance(589.0)
-    assert timer.expired() is True
-
-
-def test_le_bringup_construit_une_commande_sans_shell_et_nettoie(tmp_path):
-    process = _FakeProcess()
-    popen = _FakePopen(process)
-    manager = BringupManager(
-        _navigation(), _FakeLogger(), popen=popen,
-        killpg=lambda pgid, sig: None, getpgid=lambda pid: 99)
-    carte = tmp_path / 'carte.yaml'
-
-    manager.start(
-        map_yaml=str(carte),
-        use_sim_time=True,
-        params_file='',
-        controller='rpp',
-        localization='odom_imu',
-        profile='balanced',
-        task_params_path='/tmp/task_params.yaml',
-        spawn=Pose2D(1.5, -2.0, 0.5),
-    )
-
-    assert popen.kwargs == {'start_new_session': True}
-    assert popen.command[:4] == [
-        'ros2', 'launch', 'caytu_nav_bringup', 'solution_bringup.launch.py']
-    assert 'use_sim_time:=true' in popen.command
-    assert f'map:={carte}' in popen.command
-    assert 'controller:=rpp' in popen.command
-    assert 'localization:=odom_imu' in popen.command
-    assert 'profile:=balanced' in popen.command
-    assert 'task_params_file:=/tmp/task_params.yaml' in popen.command
-    assert 'initial_pose_x:=1.5' in popen.command
-    assert 'initial_pose_y:=-2.0' in popen.command
-    assert manager.alive() is True
-
-    params_file = next(
-        argument.split(':=', 1)[1] for argument in popen.command
-        if argument.startswith('params_file:='))
-    dossier = Path(params_file).parent
-    assert dossier.is_dir()
-
-    manager.stop()
-    assert dossier.is_dir() is False
-    assert manager.alive() is False
-
-
-def test_le_bringup_respecte_les_overrides_du_paquet_et_du_launch():
-    popen = _FakePopen(_FakeProcess())
-    manager = BringupManager(_navigation(), _FakeLogger(), popen=popen)
-
-    manager.start(
-        map_yaml='/tmp/carte.yaml', use_sim_time=False, params_file='',
-        controller='rpp', localization='odom_imu', profile='balanced',
-        task_params_path='/tmp/task_params.yaml', spawn=Pose2D(0.0, 0.0, 0.0),
-        bringup_package='custom_bringup', bringup_launch='custom.launch.py')
-
-    assert popen.command[2:4] == ['custom_bringup', 'custom.launch.py']
-    manager.cleanup()
-
-
-def test_l_arret_escalade_les_signaux_jusqu_a_sigkill():
-    process = _ResistantProcess()
-    popen = _FakePopen(process)
-    signaux = []
-    manager = BringupManager(
-        _navigation(), _FakeLogger(), popen=popen,
-        killpg=lambda pgid, sig: signaux.append(sig),
-        getpgid=lambda pid: 99)
-
-    manager.start(
-        map_yaml='/tmp/carte.yaml', use_sim_time=False, params_file='',
-        controller='rpp', localization='odom_imu', profile='balanced',
-        task_params_path='/tmp/task_params.yaml', spawn=Pose2D(0.0, 0.0, 0.0))
-    manager.stop()
-
-    assert signaux == [signal.SIGINT, signal.SIGTERM, signal.SIGKILL]
-
-
-def test_le_bringup_non_lance_reste_vivant_et_un_processus_mort_ne_l_est_plus():
-    manager = BringupManager(_navigation(), _FakeLogger())
-    assert manager.alive() is True
-
-    process = _FakeProcess()
-    manager = BringupManager(
-        _navigation(), _FakeLogger(), popen=_FakePopen(process))
-    manager.start(
-        map_yaml='/tmp/carte.yaml', use_sim_time=False, params_file='',
-        controller='rpp', localization='odom_imu', profile='balanced',
-        task_params_path='/tmp/task_params.yaml', spawn=Pose2D(0.0, 0.0, 0.0))
-    assert manager.alive() is True
-
-    process.returncode = 1
-    assert manager.alive() is False
+    assert chrono.expire() is True
 
 
 def test_le_but_est_oriente_du_robot_vers_la_cible():
@@ -275,34 +133,32 @@ class _FakeRuntimeNode:
         return self.logger
 
 
-def _navigateur_sans_ros(timer, bringup):
-    navigateur = object.__new__(Nav2Navigator)
-    navigateur._timer = timer
-    navigateur._bringup = bringup
+def _navigateur_sans_ros(chronometre):
+    navigateur = object.__new__(NavigateurNav2)
+    navigateur._chronometre = chronometre
     navigateur._spin = lambda timeout: None
     navigateur._is_ok = lambda: True
     return navigateur
 
 
-def test_attendre_future_distingue_echeance_et_arret_du_bringup():
-    timer = SimpleNamespace(remaining=lambda: 10.0)
-    bringup = SimpleNamespace(alive=lambda: True)
-    navigateur = _navigateur_sans_ros(timer, bringup)
+def test_attendre_future_distingue_echeance_et_interruption():
+    chrono = SimpleNamespace(restant=lambda: 10.0)
+    navigateur = _navigateur_sans_ros(chrono)
 
     assert navigateur._attendre_future(_FakeFuture(True)) == 'ok'
 
-    timer.remaining = lambda: -1.0
+    chrono.restant = lambda: -1.0
     assert navigateur._attendre_future(_FakeFuture(False)) == 'temps_ecoule'
 
-    timer.remaining = lambda: 10.0
-    bringup.alive = lambda: False
-    assert navigateur._attendre_future(_FakeFuture(False)) == 'arret'
+    chrono.restant = lambda: 10.0
+    assert navigateur._attendre_future(
+        _FakeFuture(False), interrompre=lambda: True) == 'interrompu'
 
 
 def test_le_navigateur_respecte_les_rayons_fournis_par_les_overrides_ros():
     navigation = SimpleNamespace(
         success_radius=0.2, arrival_recheck_radius=0.35)
-    navigateur = object.__new__(Nav2Navigator)
+    navigateur = object.__new__(NavigateurNav2)
     navigateur._navigation = navigation
     navigateur._success_radius = 0.3
     navigateur._arrival_recheck_radius = 0.4
@@ -315,7 +171,7 @@ def test_le_navigateur_respecte_les_rayons_fournis_par_les_overrides_ros():
 def test_le_navigateur_utilise_les_rayons_de_configuration_sans_override():
     navigation = SimpleNamespace(
         success_radius=0.2, arrival_recheck_radius=0.35)
-    navigateur = object.__new__(Nav2Navigator)
+    navigateur = object.__new__(NavigateurNav2)
     navigateur._navigation = navigation
     navigateur._success_radius = navigation.success_radius
     navigateur._arrival_recheck_radius = navigation.arrival_recheck_radius
@@ -326,7 +182,7 @@ def test_le_navigateur_utilise_les_rayons_de_configuration_sans_override():
 
 
 def _navigateur_pour_resultat(handle, pose):
-    navigateur = object.__new__(Nav2Navigator)
+    navigateur = object.__new__(NavigateurNav2)
     navigateur._client = _FakeNavClient(handle)
     navigateur._node = _FakeRuntimeNode()
     navigateur._navigation = SimpleNamespace(
@@ -334,8 +190,8 @@ def _navigateur_pour_resultat(handle, pose):
         feedback_log_period_sec=5.0, cancel_timeout_sec=2.0)
     navigateur._success_radius = 0.2
     navigateur._arrival_recheck_radius = 0.35
-    navigateur._timer = SimpleNamespace(elapsed=lambda: 1.0, remaining=lambda: 10.0)
-    navigateur._bringup = SimpleNamespace(alive=lambda: True)
+    navigateur._chronometre = SimpleNamespace(
+        ecoule=lambda: 1.0, restant=lambda: 10.0)
     navigateur._pose_robot = lambda: pose
     navigateur._spin = lambda timeout: None
     navigateur._is_ok = lambda: True

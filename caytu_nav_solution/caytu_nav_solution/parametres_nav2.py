@@ -1,37 +1,61 @@
 """YAML Nav2 de la course, généré depuis `caytu_config`.
 
-Base : `nav2_params.yaml` + contrôleur + profil du laboratoire. Tout ce qui
-dépend du robot (repères, topics, empreinte, vitesses, scans d'obstacles) est
-ensuite imposé par la configuration : le même code sert au robot réel et à
+Base : `nav2_params.yaml`, `controller_rpp.yaml` et profil `balanced`. Tout ce
+qui dépend du robot (repères, topics, empreinte, vitesses, scans d'obstacles)
+est ensuite imposé par la configuration : le même code sert au robot réel et à
 Gazebo, seul le profil change. La carte vient de slam_toolbox (`/map`).
 """
 
+from copy import deepcopy
 import math
 from pathlib import Path
 
 import yaml
 
-from caytu_nav_solution.benchmark_config import (
-    _read_yaml,
-    _set_sim_time,
-    _validate_final_config,
-    deep_merge,
-)
+from caytu_config import ConfigurationError
 
 PLUGIN_OBSTACLES = 'nav2_costmap_2d::ObstacleLayer'
+PLUGIN_RPP = (
+    'nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController')
+
+
+def _lire_yaml(chemin):
+    with Path(chemin).open(encoding='utf-8') as flux:
+        valeur = yaml.safe_load(flux)
+    if not isinstance(valeur, dict):
+        raise ConfigurationError(
+            f'Le YAML doit contenir un mapping : {chemin}')
+    return valeur
+
+
+def _fusionner(base, surcharge):
+    """Fusionne les mappings récursivement ; listes et valeurs remplacées."""
+    resultat = deepcopy(base)
+    for cle, valeur in surcharge.items():
+        if isinstance(valeur, dict) and isinstance(resultat.get(cle), dict):
+            resultat[cle] = _fusionner(resultat[cle], valeur)
+        else:
+            resultat[cle] = deepcopy(valeur)
+    return resultat
+
+
+def _imposer_sim_time(parametres, use_sim_time):
+    """Applique l'horloge à chaque bloc de paramètres ROS de la configuration."""
+    for valeur in parametres.values():
+        if not isinstance(valeur, dict):
+            continue
+        if isinstance(valeur.get('ros__parameters'), dict):
+            valeur['ros__parameters']['use_sim_time'] = bool(use_sim_time)
+        _imposer_sim_time(valeur, use_sim_time)
 
 
 def _charger_base(configuration, racine):
     navigation = configuration.navigation
-    controleur = navigation.controller
-    parametres = _read_yaml(racine / 'nav2_params.yaml')
-    if controleur == 'mppi':
-        fichier_controleur = racine / 'controllers' / 'mppi.yaml'
-    else:
-        fichier_controleur = racine / f'controller_{controleur}.yaml'
-    parametres = deep_merge(parametres, _read_yaml(fichier_controleur))
-    return deep_merge(parametres, _read_yaml(
-        racine / 'profiles' / navigation.profile / f'{controleur}.yaml'))
+    parametres = _lire_yaml(racine / 'nav2_params.yaml')
+    parametres = _fusionner(
+        parametres, _lire_yaml(racine / 'controller_rpp.yaml'))
+    return _fusionner(parametres, _lire_yaml(
+        racine / 'profiles' / navigation.profile / 'rpp.yaml'))
 
 
 def _couche_obstacles(source):
@@ -96,19 +120,51 @@ def _costmap(base, configuration, repere_global, globale):
     return costmap
 
 
-def _limiter_vitesses(suivi, controleur, navigation):
-    lineaire, angulaire = navigation.max_linear_speed, navigation.max_angular_speed
-    cles = {
-        'rpp': (('desired_linear_vel',), ('rotate_to_heading_angular_vel',)),
-        'dwb': (('max_vel_x', 'max_speed_xy'), ('max_vel_theta',)),
-        'mppi': (('vx_max',), ('wz_max',)),
-    }[controleur]
-    for cle in cles[0]:
-        if cle in suivi:
-            suivi[cle] = min(float(suivi[cle]), lineaire)
-    for cle in cles[1]:
-        if cle in suivi:
-            suivi[cle] = min(float(suivi[cle]), angulaire)
+def _limiter_vitesses(suivi, navigation):
+    if 'desired_linear_vel' in suivi:
+        suivi['desired_linear_vel'] = min(
+            float(suivi['desired_linear_vel']), navigation.max_linear_speed)
+    if 'rotate_to_heading_angular_vel' in suivi:
+        suivi['rotate_to_heading_angular_vel'] = min(
+            float(suivi['rotate_to_heading_angular_vel']),
+            navigation.max_angular_speed)
+
+
+def _valider(parametres):
+    """Vérifie la cohérence du RPP et des costmaps avant de lancer Nav2."""
+    controleur = parametres['controller_server']['ros__parameters']
+    if controleur.get('controller_plugins') != ['FollowPath']:
+        raise ConfigurationError(
+            'Le controller_server doit avoir un seul plugin FollowPath.')
+    suivi = controleur['FollowPath']
+    if suivi.get('plugin') != PLUGIN_RPP:
+        raise ConfigurationError(
+            f"Plugin RPP invalide : {suivi.get('plugin')!r}")
+
+    for nom in ('global_costmap', 'local_costmap'):
+        bloc = parametres[nom][nom]['ros__parameters']
+        if 'inflation_layer' not in bloc['plugins']:
+            raise ConfigurationError(
+                f'{nom} : la couche inflation_layer est obligatoire.')
+        capteurs = [
+            cle for cle in bloc['plugins']
+            if cle not in ('static_layer', 'inflation_layer')]
+        if not capteurs:
+            raise ConfigurationError(f'{nom} : aucune couche capteur.')
+        if bloc.get('footprint_padding', 0.0) < 0.02:
+            raise ConfigurationError(f'{nom} : marge de footprint réduite.')
+
+    inflation = parametres['local_costmap']['local_costmap'][
+        'ros__parameters']['inflation_layer']
+    if suivi.get('cost_scaling_dist', 0.0) > inflation['inflation_radius']:
+        raise ConfigurationError(
+            "RPP cost_scaling_dist dépasse le rayon d'inflation local.")
+    if not math.isclose(
+            suivi.get('inflation_cost_scaling_factor', -1.0),
+            inflation['cost_scaling_factor'], rel_tol=1e-6):
+        raise ConfigurationError(
+            "Le facteur d'inflation de RPP doit correspondre à la costmap "
+            'locale.')
 
 
 def construire_parametres_course(configuration, config_root=None):
@@ -121,7 +177,8 @@ def construire_parametres_course(configuration, config_root=None):
     systeme, navigation = configuration.system, configuration.navigation
     course = configuration.course
     base = _charger_base(configuration, racine)
-    carte, robot, odom = systeme.global_frame, systeme.base_frame, navigation.odom_frame
+    carte, robot, odom = (
+        systeme.global_frame, systeme.base_frame, navigation.odom_frame)
 
     # Le cap du but doit être conservé (face au tag) : Smac ne doit pas le
     # remplacer par l'orientation du dernier segment du chemin.
@@ -135,7 +192,7 @@ def construire_parametres_course(configuration, config_root=None):
     controleur['goal_checker'].update(
         xy_goal_tolerance=course.goal_xy_tolerance_m,
         yaw_goal_tolerance=math.radians(course.goal_yaw_tolerance_deg))
-    _limiter_vitesses(controleur['FollowPath'], navigation.controller, navigation)
+    _limiter_vitesses(controleur['FollowPath'], navigation)
     comportements = base['behavior_server']['ros__parameters']
     comportements.update(
         local_frame=odom, global_frame=carte, robot_base_frame=robot,
@@ -149,8 +206,8 @@ def construire_parametres_course(configuration, config_root=None):
         base[nom][nom]['ros__parameters'] = _costmap(
             parametres, configuration, repere, globale)
 
-    _set_sim_time(base, systeme.use_sim_time)
-    _validate_final_config(base, navigation.controller, navigation.profile)
+    _imposer_sim_time(base, systeme.use_sim_time)
+    _valider(base)
     return base
 
 

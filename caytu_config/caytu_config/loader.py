@@ -7,7 +7,6 @@ Ordre de résolution du dossier :
 
 Un fichier d'override (`FOSA_CONFIG_OVERRIDE`) et la variable
 `FOSA_DEPLOYMENT` permettent d'adapter un poste sans modifier le YAML versionné.
-Les secrets ne sont jamais lus dans un YAML : uniquement dans l'environnement.
 """
 
 import os
@@ -18,21 +17,13 @@ import yaml
 from caytu_config.errors import ConfigurationError
 from caytu_config.modeles_course import CourseConfig, StartWordConfig
 from caytu_config.models import (
-    AudioConfig,
-    DialogueConfig,
     FosaConfig,
-    KnowledgeConfig,
-    MissionConfig,
     NavigationConfig,
     PerceptionConfig,
-    PromptsConfig,
-    Secrets,
-    SemanticMapConfig,
     SystemConfig,
 )
 
-CONFIG_FILES = (
-    "fosa.yaml", "locations.yaml", "knowledge.yaml", "prompts.yaml")
+FICHIER_CONFIG = "fosa.yaml"
 
 
 def _read_yaml(chemin):
@@ -66,7 +57,7 @@ def _fusion(base, surcharge):
 
 
 def config_directory():
-    """Dossier contenant les quatre fichiers YAML."""
+    """Dossier contenant `fosa.yaml` et ses profils."""
     dossier = os.environ.get("FOSA_CONFIG_DIR")
     if dossier:
         return Path(dossier).expanduser().resolve()
@@ -79,18 +70,8 @@ def config_directory():
         return Path(__file__).resolve().parents[1] / "config"
 
 
-def _secrets():
-    return Secrets(
-        openai_api_key=os.environ.get("OPENAI_API_KEY") or None,
-        elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY") or None,
-        fosa_llm_api_key=os.environ.get("FOSA_LLM_API_KEY") or None,
-        fosa_stt_api_key=os.environ.get("FOSA_STT_API_KEY") or None,
-        fosa_tts_api_key=os.environ.get("FOSA_TTS_API_KEY") or None,
-    )
-
-
 def _charger_fosa(dossier):
-    fosa = _read_yaml(dossier / "fosa.yaml")
+    fosa = _read_yaml(dossier / FICHIER_CONFIG)
 
     override = os.environ.get("FOSA_CONFIG_OVERRIDE")
     if override:
@@ -117,9 +98,6 @@ def load_config(dossier=None):
         systeme = fosa["system"]
         navigation = fosa["navigation"]
         perception = fosa["perception"]
-        audio = fosa["audio"]
-        dialogue = fosa["dialogue"]
-        mission = fosa["mission"]
         course = fosa["course"]
         start_word = fosa["start_word"]
     except KeyError as erreur:
@@ -131,16 +109,6 @@ def load_config(dossier=None):
         system=SystemConfig.from_mapping(systeme),
         navigation=NavigationConfig.from_mapping(navigation),
         perception=PerceptionConfig.from_mapping(perception),
-        audio=AudioConfig.from_mapping(audio),
-        dialogue=DialogueConfig.from_mapping(dialogue),
-        mission=MissionConfig.from_mapping(mission),
-        semantic_map=SemanticMapConfig.from_mapping(
-            _read_yaml(base / "locations.yaml")),
-        knowledge=KnowledgeConfig.from_mapping(
-            _read_yaml(base / "knowledge.yaml")),
-        prompts=PromptsConfig.from_mapping(
-            _read_yaml(base / "prompts.yaml")),
-        secrets=_secrets(),
         course=CourseConfig.from_mapping(course),
         start_word=StartWordConfig.from_mapping(start_word),
     )

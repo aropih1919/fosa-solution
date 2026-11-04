@@ -44,9 +44,8 @@ from caytu_course.sequence import SequenceTags, budget_pour_tag
 from caytu_course.statut import PublicateurStatut, qos_statut
 from caytu_nav_solution.nav_math import Pose2D, lacet_depuis_quaternion
 from caytu_nav_solution.navigation_runtime import (
-    BringupManager,
-    Nav2Navigator,
-    TaskTimer,
+    ChronometreCourse,
+    NavigateurNav2,
 )
 
 PERIODE_BOUCLE = 0.1
@@ -78,13 +77,11 @@ class NoeudCourse(Node):
         self._publicateur_vitesse = self.create_publisher(
             Twist, self._navigation.cmd_vel_topic, 10)
 
-        self._chrono = TaskTimer(
+        self._chrono = ChronometreCourse(
             self.get_clock().now, self._course.time_limit_sec,
             self._course.stop_margin_sec)
-        self._navigateur = Nav2Navigator(
-            self, self._navigation, self._chrono,
-            BringupManager(self._navigation, self.get_logger()),
-            self.pose_robot)
+        self._navigateur = NavigateurNav2(
+            self, self._navigation, self._chrono, self.pose_robot)
         self._reglages = self._reglages_alignement()
         self._sequence = None
 
@@ -127,7 +124,7 @@ class NoeudCourse(Node):
         self._etat = (etat, cible, detail)
         self._publicateur_etat.publish(String(data=json.dumps({
             'etat': etat, 'cible': cible, 'detail': detail,
-            'temps_ecoule': round(self._chrono.elapsed(), 1),
+            'temps_ecoule': round(self._chrono.ecoule(), 1),
         }, ensure_ascii=False)))
         self.get_logger().info(
             f'[{etat}]' + (f' tag {cible}' if cible is not None else '')
@@ -164,11 +161,11 @@ class NoeudCourse(Node):
             self.traiter_pendant(0.02)
 
     def _temps_ecoule(self):
-        return self._chrono.remaining() <= 0.0
+        return self._chrono.expire()
 
     def _temps(self):
         """Secondes depuis le départ, sur l'horloge ROS (comme le chrono)."""
-        return self._chrono.elapsed()
+        return self._chrono.ecoule()
 
     # ------------------------------------------------------------- course
     def executer(self):
@@ -176,7 +173,7 @@ class NoeudCourse(Node):
         if not rclpy.ok():
             return
         self._en_attente = False
-        self._chrono.start()
+        self._chrono.demarrer()
         self.publier_etat('DEMARRAGE', detail=self._entrees.source_depart)
         self._attendre_ordre_apres_depart()
         if self._entrees.ordre is None:
@@ -223,14 +220,14 @@ class NoeudCourse(Node):
         while rclpy.ok() and not self._temps_ecoule():
             self.publier_etat('DEMARRAGE', detail='attente de Nav2 et de la carte')
             if self._navigateur.attendre_pret(
-                    lambda: True, 'slam', self._course.nav2_ready_timeout_sec):
+                    self._course.nav2_ready_timeout_sec):
                 return
             self.get_logger().error('Nav2 ou la localisation SLAM ne répond pas.')
 
     def _traiter_tag(self, tag_id):
         if tag_id not in self._echeances:
             budget = budget_pour_tag(
-                self._chrono.remaining(), self._sequence.restants(),
+                self._chrono.restant(), self._sequence.restants(),
                 self._course.min_tag_budget_sec)
             self._echeances[tag_id] = self._temps() + budget
             self.get_logger().info(f'Tag {tag_id} : budget {budget:.0f} s.')
@@ -357,7 +354,7 @@ class NoeudCourse(Node):
                 cap=cap, interrompre=lambda: self._temps() > echeance)
             if resultat == 'temps_ecoule':
                 return resultat
-            if resultat in ('interrompu', 'arret'):
+            if resultat == 'interrompu':
                 return 'echec'
             if resultat == 'refuse':
                 self.traiter_pendant(0.5)
@@ -494,7 +491,7 @@ class NoeudCourse(Node):
         self.arreter_robot(5)
         resume = (self._sequence.resume() if self._sequence is not None
                   else {'ordre': [], 'visites': [], 'sautes': []})
-        resume['temps_ecoule_s'] = round(self._chrono.elapsed(), 1)
+        resume['temps_ecoule_s'] = round(self._chrono.ecoule(), 1)
         self._statut.signaler_fin(motif, resume)
         self._exporter_memoire()
         self.publier_etat('TERMINEE', detail=motif)

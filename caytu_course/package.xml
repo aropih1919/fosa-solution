@@ -29,6 +29,7 @@
   <exec_depend>caytu_nav_bringup</exec_depend>
   <!-- Pile de navigation lancée par launch/course.launch.py. -->
   <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>laser_filters</exec_depend>
   <exec_depend>nav2_controller</exec_depend>
   <exec_depend>nav2_planner</exec_depend>
   <exec_depend>nav2_behaviors</exec_depend>

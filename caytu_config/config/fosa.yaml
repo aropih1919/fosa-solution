@@ -1,7 +1,6 @@
 # Configuration unique de la solution Fosa — PARC 2026.
 # Toute valeur modifiable vit ici. Les nœuds Python ne doivent jamais coder
 # une coordonnée, un seuil, un topic, un modèle ou une durée en dur.
-# Les secrets (clés API) ne vont JAMAIS dans ce fichier : variables d'environnement.
 #
 # Valeurs par défaut = ROBOT RÉEL (inventaire ROS du 02/11, ROS_DOMAIN_ID=0).
 # Simulation Gazebo : FOSA_CONFIG_OVERRIDE=config/profils/simulation.yaml
@@ -16,35 +15,15 @@ system:
   clock_topic: /clock
 
 navigation:
-  # Vide = carte par défaut du paquet de bringup (default_map).
-  map_yaml: ""
-  default_map: maps/cafe_map.yaml
-  static_map: auto                # auto | always | never
   profile: balanced               # profil du laboratoire de navigation
-  controller: rpp                 # rpp | dwb | mppi
-  localization: odom_imu          # odom_imu | odom_only | amcl
-  fallback_profile: safe
-  fallback_controller: dwb
-  fallback_localization: odom_imu
-
-  time_limit_sec: 600.0
-  stop_margin_sec: 1.0
   success_radius: 0.20
   arrival_recheck_radius: 0.35
-  retry_pause_sec: 1.0
-  nav2_startup_timeout_sec: 180.0
-  map_check_timeout_sec: 4.0
-  map_check_min_agreement: 0.35
-
-  launch_bringup: true
-  bringup_package: caytu_nav_bringup
-  bringup_launch: solution_bringup.launch.py
 
   scan_topic: /scan_filtered      # filtre d'auto-détection des organisateurs
-  amcl_pose_topic: /amcl_pose
   cmd_vel_topic: /cmd_vel         # Twist, relu par obstacle_avoidance (organisateurs)
   odom_topic: /botwheel_explorer/odom
   odom_frame: odom
+
   # Empreinte dans base_frame (x vers l'avant). Valeurs du URDF simulé :
   # À MESURER sur le robot réel avant la course.
   footprint: [[0.22, 0.25], [0.22, -0.25], [-0.31, -0.25], [-0.31, 0.25]]
@@ -53,6 +32,7 @@ navigation:
   max_linear_speed: 0.30          # m/s, arène de 5 m avec des personnes
   max_angular_speed: 0.80         # rad/s
   laser_self_filter: false        # true seulement en simulation (lidar sous le châssis)
+
   # Scans utilisés par les costmaps. Si les caméras voient le sol comme un
   # obstacle sur le robot (TF à vérifier), passer leurs sources à false.
   obstacle_sources:
@@ -85,39 +65,18 @@ navigation:
   global_costmap_clear_service: /global_costmap/clear_entirely_global_costmap
   local_costmap_clear_service: /local_costmap/clear_entirely_local_costmap
 
-  guiding_speed_mps: 0.30
-  guiding_wait_sec: 15.0
-
-  # Carte vide de secours (monde différent du café).
-  blank_map_resolution: 0.05
-  blank_map_margin: 15.0
-
   # Temporisations de service (secondes réelles).
-  clock_wait_sec: 10.0
   cancel_timeout_sec: 2.0
-  bringup_stop_timeouts: [10.0, 5.0, 2.0]   # SIGINT, SIGTERM, SIGKILL
-  stop_repeat_count: 10
   feedback_log_period_sec: 5.0
-  floor_line_distance: 0.0      # 0.0 = calcul automatique par l'IMU
 
 perception:
-  top_color_topic: /top_camera_color/image_raw
-  top_depth_topic: /top_camera_depth/points
-  top_info_topic: /top_camera_color/camera_info
-  bottom_color_topic: /bottom_camera_color/image_raw
-  bottom_depth_topic: /bottom_camera_depth/points
-  entities_topic: /perception/entities
   tags_topic: /perception/tags
-  person_events_topic: /perception/person_events
 
   apriltag:
     family: 36h11
     size_m: 0.165                 # côté du carré noir (règlement : 16,5 cm)
     ids: [1, 4, 7, 9]             # aucun autre tag dans l'arène
     max_distance_m: 4.5
-    detector: opencv              # opencv | apriltag_ros
-    calibration_samples: 10
-    calibration_file: ~/.ros/fosa_tag_calibration.yaml
     # Évite le rejet d'un tag à marge blanche d'un bit posé sur un fond sombre.
     min_marker_distance_rate: 0.01
     max_rate_hz: 10.0             # cadence max de détection par caméra
@@ -135,31 +94,6 @@ perception:
       - name: camera2
         color_topic: /camera2/camera2/color/image_raw
         info_topic: /camera2/camera2/color/camera_info
-
-  yolo:
-    enabled: true                 # install.sh --models télécharge et exporte le modèle ONNX
-    model_path: models/yolo11n.onnx
-    confidence: 0.45
-    input_size: 640
-    person_class_index: 0
-    max_fps: 8.0
-    device: cpu
-
-  person:
-    min_distance_m: 0.8
-    max_distance_m: 2.5
-    min_confidence: 0.50
-    consecutive_frames: 3
-    cooldown_sec: 25.0
-    dynamic_speed_mps: 0.10
-    min_height_m: 0.80
-    max_width_m: 1.20
-    cluster_tolerance_m: 0.18
-    min_cluster_points: 12
-    tracker_match_m: 0.45
-    bearing_tolerance_rad: 0.25
-    front_fov_rad: 1.57
-    robot_stop_threshold_mps: 0.03
 
   # Profondeur -> obstacles entre deux hauteurs du repère du robot -> LaserScan
   # (le lidar bas ne voit pas les plateaux de table). Une entrée par caméra.
@@ -197,94 +131,6 @@ perception:
       pixel_step: 4
       min_points: 3                 # points par secteur pour un obstacle
       rate_hz: 10.0
-
-  # Conversion des nuages de points caméra en LaserScan pour Nav2 (héritage phase 1).
-  top_scan:
-    cloud_topic: /top_camera_depth/points
-    scan_topic: /top_camera_scan
-    target_frame: base_footprint_level
-    transform_tolerance: 0.5
-    min_height: 0.60
-    max_height: 1.40
-    angle_min: -0.785
-    angle_max: 0.785
-    angle_increment: 0.0087
-    scan_time: 0.067
-    range_min: 0.3
-    range_max: 3.0
-    use_inf: true
-    inf_epsilon: 1.0
-
-  bottom_scan:
-    cloud_topic: /bottom_camera_depth/points
-    scan_topic: /bottom_camera_scan
-    target_frame: base_footprint_level
-    transform_tolerance: 0.5
-    min_height: 0.25
-    max_height: 1.40
-    angle_min: -0.785
-    angle_max: 0.785
-    angle_increment: 0.0087
-    scan_time: 0.067
-    range_min: 0.3
-    range_max: 1.2
-    use_inf: true
-    inf_epsilon: 1.0
-
-audio:
-  input_device: default
-  output_device: default
-  sample_rate: 16000
-  vad_threshold: 0.50
-  vad_rms_scale: 0.03
-  vad_frame_ms: 100
-  silence_ms: 700
-  piper_executable: piper
-  audio_player: aplay
-
-dialogue:
-  languages: [fr, en]
-  default_input_mode: microphone
-  greeting_reply: "Bonjour, comment puis-je vous aider ?"
-  greeting_en_reply: "Hello, how can I help you?"
-  stt:
-    provider: local               # local | api | auto
-    local_model: small            # faster-whisper : tiny | base | small
-    local_device: cpu
-    local_compute_type: int8
-    api_model: whisper-1
-    api_base: https://api.openai.com/v1
-    timeout_sec: 8.0
-  tts:
-    provider: local               # local | api | auto
-    local_voice: models/fr_FR-siwis-medium.onnx
-    api_voice: ""
-    api_model: tts-1
-    api_base: https://api.openai.com/v1
-    timeout_sec: 5.0
-  llm:
-    provider: local               # local | api | auto
-    local_model: qwen2.5:3b
-    local_base: http://127.0.0.1:11434
-    api_model: ""
-    api_base: https://api.openai.com/v1
-    timeout_sec: 8.0
-    max_retries: 2
-    temperature: 0.2
-  confirmation_required: true
-  max_turns_memory: 5
-  listening_timeout_sec: 10.0
-  unknown_location_reply: "Je ne connais pas ce lieu, l'accueil pourra vous renseigner."
-  unknown_information_reply: "Je n'ai pas cette information, l'accueil pourra vous renseigner."
-  transcript_topic: /assistant/transcript
-  response_topic: /assistant/response
-  state_topic: /assistant/state
-
-mission:
-  greeting_enabled: true
-  emergency_location: infirmerie
-  default_wait_sec: 20.0
-  emergency_keywords: [mal, blessé, blessure, secours, urgence, tomber, tombé, évanoui, sang]
 
 # --------------------------------------------------------------------------
 # Course officielle de la phase réelle (guide des équipes PARC 2026).
