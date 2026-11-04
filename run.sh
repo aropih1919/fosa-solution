@@ -24,7 +24,8 @@ Modes de la course (robot réel par défaut) :
                     et lidar (robot dégagé, course arrêtée, ~1 min)
 
 Profils : FOSA_PROFIL=simulation pour Gazebo (sinon robot réel).
-Espace de travail de base du robot : FOSA_BASE_WS=<dossier> (sourcé d'abord).
+Espace de travail de base du robot (parc_msgs de l'arbitre) : FOSA_BASE_WS,
+~/ros2_ws par défaut (sourcé avant le nôtre).
 
 Exemples :
   ./run.sh course
@@ -70,9 +71,10 @@ fi
 
 set +u
 source "/opt/ros/$ROS_DISTRO/setup.bash"
-# Espace de travail de base du robot (paquets des organisateurs) : sourcé avant
-# le nôtre pour que nos paquets restent prioritaires.
-if [[ -n "${FOSA_BASE_WS:-}" ]]; then
+# Espace de travail de base du robot (paquets des organisateurs, dont
+# parc_msgs pour l'arbitre) : sourcé avant le nôtre, qui reste prioritaire.
+export FOSA_BASE_WS="${FOSA_BASE_WS:-$HOME/ros2_ws}"
+if [[ "$(cd "$FOSA_BASE_WS" 2>/dev/null && pwd)" != "$ESPACE_TRAVAIL" ]]; then
     for script in "$FOSA_BASE_WS/install/setup.bash" "$FOSA_BASE_WS/setup.bash"; do
         if [[ -f "$script" ]]; then source "$script"; break; fi
     done
@@ -111,6 +113,10 @@ verifier_paquet() {
 case "$mode" in
     course)
         verifier_paquet caytu_course
+        if ! python3 -c 'import parc_msgs.msg' 2>/dev/null; then
+            echo "ATTENTION : parc_msgs introuvable (FOSA_BASE_WS=$FOSA_BASE_WS)." >&2
+            echo "Les visites ne seront PAS signalées à l'arbitre." >&2
+        fi
         DONNEES="${FOSA_DONNEES:-$HOME/.ros/fosa}"
         mkdir -p "$DONNEES"
         JOURNAL="$DONNEES/course_$(date +%Y%m%d_%H%M%S).log"
