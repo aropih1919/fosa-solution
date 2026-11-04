@@ -16,8 +16,8 @@ from caytu_config.modeles_course import (
     AlignmentConfig,
     CourseConfig,
     ObstacleSourceConfig,
+    RefereeConfig,
     StartWordConfig,
-    StatusTopicsConfig,
     TagCameraConfig,
 )
 from caytu_config.models import (
@@ -37,8 +37,8 @@ __all__ = [
     "NavigationConfig",
     "ObstacleSourceConfig",
     "PerceptionConfig",
+    "RefereeConfig",
     "StartWordConfig",
-    "StatusTopicsConfig",
     "SystemConfig",
     "TagCameraConfig",
     "config_directory",

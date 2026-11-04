@@ -58,6 +58,26 @@ for source in $(lire_config "' '.join(s.topic for s in c.navigation.obstacle_sou
     verifier_topic "$source" "source d'obstacles (activée ou non dans fosa.yaml)"
 done
 
+titre "Arbitre (parc_msgs)"
+# Les définitions exactes des messages ne sont pas dans la documentation reçue :
+# elles sont enregistrées ici dans le rapport du premier créneau.
+if ros2 interface package parc_msgs >/dev/null 2>&1; then
+    ok "parc_msgs installé"
+    for interface in $(ros2 interface package parc_msgs); do
+        info "$interface"
+        ros2 interface show "$interface" 2>&1 | sed 's/^/      /'
+    done
+else
+    ko "parc_msgs absent : sourcer ~/ros2_ws/install/setup.bash avant l'espace de l'équipe"
+fi
+for topic in "$(lire_config c.course.order_topic)" "$(lire_config c.course.referee.start_topic)" \
+    "$(lire_config c.course.referee.visit_topic)" "$(lire_config c.course.referee.finish_topic)" \
+    "$(lire_config c.course.referee.run_status_topic)"; do
+    info "$topic"
+    ros2 topic info -v "$topic" 2>&1 | grep -E "Type|Node name|Endpoint type|Reliability|Durability" \
+        | sed 's/^/      /'
+done
+
 titre "Type de la commande de vitesse"
 ros2 topic info "$(lire_config c.navigation.cmd_vel_topic)" 2>&1 | sed 's/^/  /'
 info "Nav2 publie un Twist non horodaté (enable_stamped_cmd_vel: false)."

@@ -41,7 +41,7 @@ from caytu_course.geometrie_tags import erreurs_visite, pose_approche, visite_va
 from caytu_course.memoire_tags import MemoireTags
 from caytu_course.recherche import points_recherche
 from caytu_course.sequence import SequenceTags, budget_pour_tag
-from caytu_course.statut import PublicateurStatut, qos_statut
+from caytu_course.statut import PublicateurArbitre, qos_statut
 from caytu_nav_solution.nav_math import Pose2D, lacet_depuis_quaternion
 from caytu_nav_solution.navigation_runtime import (
     ChronometreCourse,
@@ -71,7 +71,7 @@ class NoeudCourse(Node):
         self._entrees = EntreesCourse(
             self, configuration, self._memoire, self._memoire_tf,
             lambda: self._en_attente)
-        self._statut = PublicateurStatut(self, self._course.status)
+        self._statut = PublicateurArbitre(self, self._course.referee)
         self._publicateur_etat = self.create_publisher(
             String, self._course.state_topic, qos_statut(1))
         self._publicateur_vitesse = self.create_publisher(
@@ -175,10 +175,12 @@ class NoeudCourse(Node):
         self._en_attente = False
         self._chrono.demarrer()
         self.publier_etat('DEMARRAGE', detail=self._entrees.source_depart)
-        # Le départ est signalé dès qu'il est donné, même si l'ordre n'est pas
-        # encore arrivé : le chronomètre des juges tourne déjà.
-        self._statut.signaler_depart(
-            self._entrees.ordre or (), self._entrees.source_depart)
+        # Le départ est signalé à l'arbitre dès qu'il est donné, même avant
+        # l'ordre : son chronomètre démarre à ce signal. Un départ publié
+        # directement sur /parc/start est déjà connu de l'arbitre.
+        if not self._entrees.depart_de_l_arbitre:
+            self._statut.signaler_depart(
+                self._entrees.source_depart == 'voix', self._entrees.mot_entendu)
         self._attendre_ordre_apres_depart()
         if self._entrees.ordre is None:
             self._terminer('ordre_absent')

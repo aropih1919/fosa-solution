@@ -136,19 +136,28 @@ perception:
 # Course officielle de la phase réelle (guide des équipes PARC 2026).
 course:
   tag_ids: [1, 4, 7, 9]
-  # Ordre publié par les organisateurs : nom et type À CONFIRMER.
-  # string : "7,1,9,4", "[7, 1, 9, 4]" ou JSON {"order": [...]}.
+  # Ordre publié par l'arbitre (transient local). auto : type lu sur le graphe
+  # ROS au démarrage ; string ou int32_multi_array pour l'imposer.
   order_topic: /parc/tag_order
-  order_type: string              # string | int32_multi_array
-  start_topic: /fosa/course/depart   # départ par commande (./run.sh depart) ou par la voix
+  order_type: auto                # auto | string | int32_multi_array
+  start_topic: /fosa/course/depart   # départ interne (./run.sh depart ou voix), relayé à l'arbitre
   state_topic: /fosa/course/etat
   map_topic: /map                 # carte publiée par slam_toolbox
-  # Statut lu par les juges : À REMPLACER par le paquet officiel (caytu_course/statut.py).
-  status:
-    start_topic: /fosa/statut/depart
-    visit_topic: /fosa/statut/tag
-    image_topic: /fosa/statut/image
-    finish_topic: /fosa/statut/fin
+  # Arbitre officiel (parc_msgs, installé dans l'espace de travail de base du
+  # robot) : départ, visites avec image JPEG, fin. Consignes du 04/11.
+  referee:
+    start_topic: /parc/start
+    start_type: parc_msgs/msg/StartSignal
+    start_method_command: 0
+    start_method_voice: 1
+    listen_start: true            # un départ publié sur /parc/start lance aussi la course
+    visit_topic: /parc/tag_visit
+    visit_type: parc_msgs/msg/TagVisit
+    finish_topic: /parc/finish
+    finish_type: parc_msgs/msg/Finish
+    finish_reason: 0              # seule valeur connue (consignes) : À CONFIRMER
+    run_status_topic: /parc/run_status
+    jpeg_quality: 85
   time_limit_sec: 600.0
   stop_margin_sec: 5.0
   nav2_ready_timeout_sec: 60.0

@@ -6,6 +6,7 @@ de course (`noeud_course.py`).
 
 from collections import deque
 from dataclasses import dataclass
+import json
 import math
 import time
 
@@ -21,12 +22,16 @@ from sensor_msgs.msg import Image, LaserScan
 from std_msgs.msg import Int32MultiArray, String
 from tf2_ros import TransformException
 
+from caytu_course.arbitre import contenu_ordre
 from caytu_course.geometrie_tags import cap_normale
 from caytu_course.ordre_tags import OrdreInvalide, lire_ordre
 from caytu_course.recherche import GrilleOccupation
+from caytu_course.statut import charger_type
 from caytu_interfaces.msg import TagDetectionArray
 
 IMAGES_GARDEES = 30
+TYPES_ORDRE = {'string': String, 'int32_multi_array': Int32MultiArray}
+PERIODE_DECOUVERTE = 0.5
 
 
 @dataclass(frozen=True)
@@ -56,23 +61,22 @@ class EntreesCourse:
         self._repere_robot = configuration.system.base_frame
         self.ordre = None
         self.source_depart = None
+        self.mot_entendu = ''
+        self.depart_de_l_arbitre = False
+        self.statut_arbitre = None
         self._detections_robot = {}
         self._stamps_tag = {}
         self._images = deque(maxlen=IMAGES_GARDEES)
         self._grille = None
         self._scan = None
 
-        type_ordre = (String if self._course.order_type == 'string'
-                      else Int32MultiArray)
-        # Deux abonnements : le premier récupère un ordre publié avant notre
-        # démarrage (transient local), le second accepte tout éditeur.
-        for qos in (
-                _qos(ReliabilityPolicy.RELIABLE, DurabilityPolicy.TRANSIENT_LOCAL, 1),
-                _qos(ReliabilityPolicy.BEST_EFFORT, DurabilityPolicy.VOLATILE, 10)):
-            node.create_subscription(
-                type_ordre, self._course.order_topic, self._recevoir_ordre, qos)
+        if self._course.order_type == 'auto':
+            self._abonner_quand_publie(self._course.order_topic, self._abonner_ordre)
+        else:
+            self._abonner_ordre(TYPES_ORDRE[self._course.order_type])
         node.create_subscription(
             String, self._course.start_topic, self._recevoir_depart, 10)
+        self._abonner_arbitre(self._course.referee)
         node.create_subscription(
             TagDetectionArray, configuration.perception.tags_topic,
             self._recevoir_detections, 20)
@@ -86,12 +90,56 @@ class EntreesCourse:
             LaserScan, configuration.navigation.scan_topic, self._recevoir_scan,
             qos_profile_sensor_data)
 
+    def _abonner_quand_publie(self, topic, abonner):
+        """Attend qu'un éditeur apparaisse sur `topic`, puis s'abonne avec son type."""
+        def verifier():
+            types = dict(self._node.get_topic_names_and_types()).get(topic)
+            if not types:
+                return
+            classe = charger_type(types[0])
+            if classe is None:
+                self._node.get_logger().error(
+                    f'{topic} : type {types[0]} introuvable (espace de travail '
+                    'du robot non sourcé ?).', throttle_duration_sec=10.0)
+                return
+            minuterie.cancel()
+            self._node.get_logger().info(f'{topic} : type {types[0]}.')
+            abonner(classe)
+        minuterie = self._node.create_timer(PERIODE_DECOUVERTE, verifier)
+
+    def _abonner_ordre(self, type_ordre):
+        # Deux abonnements : le premier récupère un ordre publié avant notre
+        # démarrage (transient local), le second accepte tout éditeur.
+        for qos in (
+                _qos(ReliabilityPolicy.RELIABLE, DurabilityPolicy.TRANSIENT_LOCAL, 1),
+                _qos(ReliabilityPolicy.BEST_EFFORT, DurabilityPolicy.VOLATILE, 10)):
+            self._node.create_subscription(
+                type_ordre, self._course.order_topic, self._recevoir_ordre, qos)
+
+    def _abonner_arbitre(self, arbitre):
+        if arbitre.listen_start:
+            classe = charger_type(arbitre.start_type)
+            if classe is None:
+                self._node.get_logger().warning(
+                    f'{arbitre.start_type} introuvable : départ par {arbitre.start_topic} '
+                    'non écouté.')
+            else:
+                # Volatile : un ancien départ resté en mémoire ne relance rien.
+                self._node.create_subscription(
+                    classe, arbitre.start_topic, self._recevoir_depart_arbitre, 10)
+        # Best effort : compatible avec tout éditeur, simple suivi dans le journal.
+        self._abonner_quand_publie(
+            arbitre.run_status_topic,
+            lambda classe: self._node.create_subscription(
+                classe, arbitre.run_status_topic, self._recevoir_statut_arbitre,
+                _qos(ReliabilityPolicy.BEST_EFFORT, DurabilityPolicy.VOLATILE, 10)))
+
     # ------------------------------------------------------------ ordre/départ
     def _recevoir_ordre(self, message):
-        valeur = message.data
-        if not isinstance(valeur, str):
-            valeur = list(valeur)     # Int32MultiArray : tableau d'entiers
+        valeur = contenu_ordre(message)
         try:
+            if valeur is None:
+                raise OrdreInvalide(f'aucun ordre lisible dans {message!r}')
             ordre = lire_ordre(valeur, self._course.tag_ids)
         except OrdreInvalide as erreur:
             self._node.get_logger().error(
@@ -108,10 +156,40 @@ class EntreesCourse:
         self._node.get_logger().info(f'Ordre des tags reçu : {list(ordre)}.')
 
     def _recevoir_depart(self, message):
+        """Départ interne : « commande » ou JSON {"source": "voix", "entendu": ...}."""
+        texte = message.data.strip()
+        try:
+            contenu = json.loads(texte)
+        except ValueError:
+            contenu = None
+        if isinstance(contenu, dict):
+            self._noter_depart(
+                str(contenu.get('source', 'commande')), str(contenu.get('entendu', '')),
+                de_l_arbitre=False)
+        else:
+            self._noter_depart(texte or 'commande', '', de_l_arbitre=False)
+
+    def _recevoir_depart_arbitre(self, message):
+        """Départ publié directement sur /parc/start (déjà connu de l'arbitre)."""
+        vocal = int(message.method) == self._course.referee.start_method_voice
+        self._noter_depart(
+            'voix' if vocal else 'commande', str(getattr(message, 'heard', '')),
+            de_l_arbitre=True)
+
+    def _noter_depart(self, source, entendu, de_l_arbitre):
         if self.source_depart is not None or not self._attente_depart():
             return
-        self.source_depart = message.data.strip() or 'commande'
-        self._node.get_logger().info(f'DÉPART reçu ({self.source_depart}).')
+        self.source_depart = source
+        self.mot_entendu = entendu
+        self.depart_de_l_arbitre = de_l_arbitre
+        origine = ' via l\'arbitre' if de_l_arbitre else ''
+        self._node.get_logger().info(f'DÉPART reçu ({source}{origine}).')
+
+    def _recevoir_statut_arbitre(self, message):
+        texte = str(message)
+        if texte != self.statut_arbitre:
+            self.statut_arbitre = texte
+            self._node.get_logger().info(f'Statut de l\'arbitre : {texte[:300]}')
 
     # -------------------------------------------------------------- détections
     def _recevoir_detections(self, message):

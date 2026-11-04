@@ -20,7 +20,7 @@ from caytu_config.validation import (
     _section,
 )
 
-ORDER_TYPES = ("string", "int32_multi_array")
+ORDER_TYPES = ("auto", "string", "int32_multi_array")
 DEPTH_INPUTS = ("depth_image", "pointcloud")
 AUDIO_MODES = ("utterance", "stream")
 # Règlement : visite valide si le robot est aligné à ±12° près.
@@ -174,21 +174,44 @@ class TagCameraConfig:
 
 
 @dataclass(frozen=True)
-class StatusTopicsConfig:
-    """Topics de statut (départ, visite, image, fin) lus par les juges."""
+class RefereeConfig:
+    """Interface de l'arbitre officiel (`parc_msgs`, topics `/parc/*`)."""
 
     start_topic: str
+    start_type: str
+    start_method_command: int
+    start_method_voice: int
+    listen_start: bool
     visit_topic: str
-    image_topic: str
+    visit_type: str
     finish_topic: str
+    finish_type: str
+    finish_reason: int
+    run_status_topic: str
+    jpeg_quality: int
 
     @classmethod
-    def from_mapping(cls, data, path="course.status"):
+    def from_mapping(cls, data, path="course.referee"):
         data = _section(data, path)
-        cles = ("start_topic", "visit_topic", "image_topic", "finish_topic")
-        _check_keys(data, cles, path)
-        return cls(**{
-            cle: _as_str(_get(data, cle, path), f"{path}.{cle}") for cle in cles})
+        textes = ("start_topic", "start_type", "visit_topic", "visit_type",
+                  "finish_topic", "finish_type", "run_status_topic")
+        entiers = ("start_method_command", "start_method_voice", "finish_reason")
+        _check_keys(data, textes + entiers + ("listen_start", "jpeg_quality"), path)
+        valeurs = {cle: _as_str(_get(data, cle, path), f"{path}.{cle}")
+                   for cle in textes}
+        valeurs.update({cle: _as_int(_get(data, cle, path), f"{path}.{cle}", 0, 255)
+                        for cle in entiers})
+        arbitre = cls(
+            listen_start=_as_bool(
+                _get(data, "listen_start", path), f"{path}.listen_start"),
+            jpeg_quality=_as_int(
+                _get(data, "jpeg_quality", path), f"{path}.jpeg_quality", 10, 100),
+            **valeurs,
+        )
+        if arbitre.start_method_command == arbitre.start_method_voice:
+            raise ConfigurationError(
+                f"{path}: les méthodes de départ commande et voix doivent différer.")
+        return arbitre
 
 
 @dataclass(frozen=True)
@@ -298,7 +321,7 @@ class CourseConfig:
     start_topic: str
     state_topic: str
     map_topic: str
-    status: StatusTopicsConfig
+    referee: RefereeConfig
     time_limit_sec: float
     stop_margin_sec: float
     nav2_ready_timeout_sec: float
@@ -331,7 +354,7 @@ class CourseConfig:
     def from_mapping(cls, data, path="course"):
         data = _section(data, path)
         _check_keys(data, (
-            "tag_ids", "order_type", "status", "stable_cycles", "alignment")
+            "tag_ids", "order_type", "referee", "stable_cycles", "alignment")
             + _TEXTES_COURSE + _CHEMINS_COURSE
             + tuple(cle for cle, _ in _NOMBRES_COURSE), path)
         valeurs = {
@@ -349,8 +372,8 @@ class CourseConfig:
             order_type=_choice(
                 _get(data, "order_type", path), ORDER_TYPES,
                 f"{path}.order_type"),
-            status=StatusTopicsConfig.from_mapping(
-                _get(data, "status", path), f"{path}.status"),
+            referee=RefereeConfig.from_mapping(
+                _get(data, "referee", path), f"{path}.referee"),
             stable_cycles=_as_int(
                 _get(data, "stable_cycles", path), f"{path}.stable_cycles", 1),
             alignment=AlignmentConfig.from_mapping(

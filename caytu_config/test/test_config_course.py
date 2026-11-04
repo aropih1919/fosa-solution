@@ -29,9 +29,14 @@ def _course_minimale(**surcharges):
         "order_type": "string",
         "start_topic": "/depart",
         "state_topic": "/etat", "map_topic": "/map",
-        "status": {
-            "start_topic": "/s/depart", "visit_topic": "/s/tag",
-            "image_topic": "/s/image", "finish_topic": "/s/fin"},
+        "referee": {
+            "start_topic": "/parc/start", "start_type": "parc_msgs/msg/StartSignal",
+            "start_method_command": 0, "start_method_voice": 1,
+            "listen_start": True,
+            "visit_topic": "/parc/tag_visit", "visit_type": "parc_msgs/msg/TagVisit",
+            "finish_topic": "/parc/finish", "finish_type": "parc_msgs/msg/Finish",
+            "finish_reason": 0, "run_status_topic": "/parc/run_status",
+            "jpeg_quality": 85},
         "time_limit_sec": 600.0, "stop_margin_sec": 5.0,
         "nav2_ready_timeout_sec": 60.0,
         "visit_distance_m": 0.5, "approach_distance_m": 0.9,
@@ -84,7 +89,23 @@ def test_la_course_suit_le_reglement(robot):
     assert course.visit_distance_m == pytest.approx(0.5)
     assert course.time_limit_sec == pytest.approx(600.0)
     assert course.heading_tolerance_deg < 12.0
-    assert course.status.visit_topic
+
+
+def test_l_arbitre_officiel_est_configure(robot):
+    arbitre = robot.course.referee
+    assert robot.course.order_topic == "/parc/tag_order"
+    assert robot.course.order_type == "auto"
+    assert arbitre.start_topic == "/parc/start"
+    assert arbitre.visit_topic == "/parc/tag_visit"
+    assert arbitre.finish_topic == "/parc/finish"
+    assert (arbitre.start_method_command, arbitre.start_method_voice) == (0, 1)
+
+
+def test_des_methodes_de_depart_identiques_sont_refusees():
+    base = _course_minimale()
+    base["referee"] = dict(base["referee"], start_method_voice=0)
+    with pytest.raises(ConfigurationError, match="méthodes de départ"):
+        CourseConfig.from_mapping(base)
 
 
 def test_le_mot_de_depart_est_hors_ligne(robot):

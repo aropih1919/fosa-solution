@@ -114,18 +114,20 @@ class NoeudMotDepart(Node):
             self._decider(self._flux.Result())
 
     def _decider(self, resultat):
+        try:
+            texte = json.loads(resultat).get('text', '')
+        except (TypeError, ValueError, AttributeError):
+            texte = ''
         if not est_mot_depart(resultat, self._voix.words, self._voix.min_confidence):
-            try:
-                texte = json.loads(resultat).get('text', '')
-            except (TypeError, ValueError, AttributeError):
-                texte = ''
             if texte:
                 self.get_logger().info(f'Entendu « {texte} » : pas un départ.')
             return
         self._depart_publie = True
         self._arme = False
-        self._publicateur.publish(String(data='voix'))
-        self.get_logger().info('Mot de départ reconnu : DÉPART.')
+        # Le mot entendu est transmis à l'arbitre (champ `heard`).
+        self._publicateur.publish(String(data=json.dumps(
+            {'source': 'voix', 'entendu': texte}, ensure_ascii=False)))
+        self.get_logger().info(f'Mot de départ « {texte} » reconnu : DÉPART.')
 
 
 def main(args=None):
