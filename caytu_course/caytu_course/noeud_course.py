@@ -175,12 +175,15 @@ class NoeudCourse(Node):
         self._en_attente = False
         self._chrono.demarrer()
         self.publier_etat('DEMARRAGE', detail=self._entrees.source_depart)
+        # Le départ est signalé dès qu'il est donné, même si l'ordre n'est pas
+        # encore arrivé : le chronomètre des juges tourne déjà.
+        self._statut.signaler_depart(
+            self._entrees.ordre or (), self._entrees.source_depart)
         self._attendre_ordre_apres_depart()
         if self._entrees.ordre is None:
             self._terminer('ordre_absent')
             return
         self._sequence = SequenceTags(self._entrees.ordre)
-        self._statut.signaler_depart(self._sequence.ordre, self._entrees.source_depart)
         self._attendre_nav2()
 
         while rclpy.ok() and not self._sequence.terminee():
