@@ -47,8 +47,7 @@ def tourner_vecteur(quaternion, vecteur):
     croix2 = (y * croix1[2] - z * croix1[1],
               z * croix1[0] - x * croix1[2],
               x * croix1[1] - y * croix1[0])
-    return tuple(
-        vecteur[i] + 2.0 * (w * croix1[i] + croix2[i]) for i in range(3))
+    return tuple(vecteur[i] + 2.0 * (w * croix1[i] + croix2[i]) for i in range(3))
 
 
 def composer(translation, rotation, position, orientation):

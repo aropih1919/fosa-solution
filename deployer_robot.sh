@@ -4,12 +4,12 @@
 # Règlement : tout dans le dossier de l'équipe, rien dans le système ; les
 # paquets système (Nav2, slam_toolbox) se demandent aux organisateurs.
 #
+#   Sur le PC :                  ./deployer_robot.sh --envoyer ROBOT_IP
+#       archive uniquement src/, copie fosa.zip vers sitoe@ROBOT_IP,
+#       remplace ~/teams/fosa/src et compile dans ~/teams/fosa sur le robot.
 #   Sur le PC, avec Internet :  ./deployer_robot.sh --preparer
-#       télécharge dans livraison/ les paquets Python de Vosk pour aarch64 /
-#       Python 3.12 et le modèle FR, à copier avec le dépôt sur le robot.
-#   Sur le PC :                  ./deployer_robot.sh --envoyer <utilisateur@IP> <dossier équipe>
-#       copie par SSH (rsync) uniquement ce qui sert au robot dans
-#       <dossier équipe>/ws/src/fosa-solution (ni simulation, ni docs, ni git).
+#       télécharge dans caytu_config/config/livraison les paquets Python de Vosk
+#       pour aarch64 / Python 3.12 et le modèle FR. Facultatif.
 #   Sur le robot :               ./deployer_robot.sh
 #       vérifie les prérequis, construit les paquets de la course, puis
 #       installe Vosk dans <workspace>/.fosa_python (sans venv ni pip requis).
@@ -18,7 +18,9 @@ set -euo pipefail
 
 DOSSIER_SCRIPT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ESPACE_TRAVAIL="$(cd -- "$DOSSIER_SCRIPT/../.." && pwd)"
-LIVRAISON="${FOSA_LIVRAISON:-$DOSSIER_SCRIPT/livraison}"
+EQUIPE="fosa"
+UTILISATEUR_ROBOT="sitoe"
+LIVRAISON="${FOSA_LIVRAISON:-$DOSSIER_SCRIPT/caytu_config/config/livraison}"
 CIBLE_PYTHON="$ESPACE_TRAVAIL/.fosa_python"
 MODELE="vosk-model-small-fr-0.22"
 URL_MODELE="https://alphacephei.com/vosk/models/$MODELE.zip"
@@ -28,6 +30,24 @@ PAQUETS_ROS=(nav2_controller nav2_planner nav2_behaviors nav2_bt_navigator
     nav2_costmap_2d nav2_msgs slam_toolbox cv_bridge tf2_ros)
 PLATEFORME=(--platform manylinux2014_aarch64 --platform manylinux_2_17_aarch64
     --python-version 3.12 --implementation cp --only-binary=:all:)
+
+afficher_aide() {
+    cat <<AIDE
+Usage : ./deployer_robot.sh [MODE]
+
+Sur le PC :
+  --envoyer ROBOT_IP   archive uniquement src/, copie vers sitoe@ROBOT_IP,
+                       puis extrait et compile dans ~/teams/fosa sur le Jetson.
+  --preparer           prépare les dépendances et le modèle Vosk facultatifs
+                       dans caytu_config/config/livraison (à faire avant --envoyer).
+
+Sur le robot, depuis ~/teams/fosa/src/fosa-solution :
+  (sans argument)     vérifie les prérequis, compile et installe Vosk si prêt.
+
+Équipe : fosa. Compte SSH : sitoe. Les paquets système manquants sont à
+demander aux organisateurs ; ce script n'utilise pas sudo.
+AIDE
+}
 
 preparer() {
     local roues="$LIVRAISON/roues"
@@ -39,23 +59,66 @@ preparer() {
     python3 -m pip download srt --no-deps --no-binary=:all: --dest "$roues"
     echo "[3/3] Modèle Vosk $MODELE..."
     [[ -f "$LIVRAISON/$MODELE.zip" ]] || curl -fsSL "$URL_MODELE" -o "$LIVRAISON/$MODELE.zip"
-    echo "Puis : $0 --envoyer <utilisateur@IP du robot> <dossier équipe sur le robot>"
+    echo "Puis : ./deployer_robot.sh --envoyer ROBOT_IP"
 }
 
 envoyer() {
-    local cible="${1:-}" dossier="${2:-}"
-    if [[ -z "$cible" || -z "$dossier" ]]; then
-        echo "Usage : $0 --envoyer <utilisateur@IP du robot> <dossier équipe sur le robot>" >&2
+    local ip="${1:-}" archive="$ESPACE_TRAVAIL/$EQUIPE.zip"
+    local cible
+    if [[ -z "$ip" || -n "${2:-}" ]]; then
+        echo "Usage : $0 --envoyer ROBOT_IP" >&2
         exit 2
     fi
-    local destination="$dossier/ws/src/fosa-solution"
-    ssh "$cible" "mkdir -p '$destination'"
-    rsync -az --delete --info=stats1 \
-        --exclude='.git/' --exclude='simulation/' --exclude='docs/' \
-        --exclude='build/' --exclude='install/' --exclude='log/' \
-        --exclude='__pycache__/' --exclude='.pytest_cache/' --exclude='AGENTS.md' \
-        "$DOSSIER_SCRIPT/" "$cible:$destination/"
-    echo "Copié dans $cible:$destination. Sur le robot : cd $destination && ./deployer_robot.sh"
+    if [[ ! -d "$ESPACE_TRAVAIL/src" ]]; then
+        echo "Dossier src absent dans le workspace $ESPACE_TRAVAIL." >&2
+        exit 1
+    fi
+    for commande in zip scp ssh; do
+        command -v "$commande" >/dev/null 2>&1 || {
+            echo "Commande requise absente : $commande" >&2
+            exit 1
+        }
+    done
+
+    cible="$UTILISATEUR_ROBOT@$ip"
+    rm -f "$archive"
+    echo "[1/3] Archive des seules sources : $archive"
+    (cd "$ESPACE_TRAVAIL" && zip -qr "$archive" src) || exit 1
+    echo "[2/3] Copie vers $cible:~/$(basename "$archive")"
+    scp "$archive" "$cible:~/$(basename "$archive")" || exit 1
+    echo "[3/3] Extraction et compilation dans ~/teams/$EQUIPE sur le robot..."
+    ssh "$cible" 'bash -s' <<REMOTE
+set -eo pipefail
+[[ -f "\$HOME/ros2_ws/install/setup.bash" ]] || {
+    echo "Workspace ROS absent : \$HOME/ros2_ws/install/setup.bash" >&2
+    exit 1
+}
+command -v unzip >/dev/null 2>&1 || {
+    echo "unzip est absent sur le robot ; demander son installation aux organisateurs." >&2
+    exit 1
+}
+source "\$HOME/ros2_ws/install/setup.bash"
+command -v colcon >/dev/null 2>&1 || {
+    echo "colcon est absent après le chargement du workspace ROS." >&2
+    exit 1
+}
+mkdir -p "\$HOME/teams/$EQUIPE"
+cd "\$HOME/teams/$EQUIPE"
+rm -rf src
+unzip -q "\$HOME/$EQUIPE.zip"
+source "\$HOME/ros2_ws/install/setup.bash"
+colcon build
+source install/setup.bash
+echo "Sources compilées dans \$HOME/teams/$EQUIPE."
+REMOTE
+    cat <<FIN
+
+Déploiement terminé. Archive conservée sur le PC : $archive
+Étape suivante, sur le PC :
+  ssh $cible
+  cd ~/teams/$EQUIPE/src/fosa-solution
+  ./run.sh diagnostic-robot
+FIN
 }
 
 sourcer_ros() {
@@ -90,8 +153,8 @@ verifier_prerequis() {
 construire() {
     cd "$ESPACE_TRAVAIL"
     set +u
-    colcon build --symlink-install --base-paths "$DOSSIER_SCRIPT" \
-        --packages-up-to caytu_course
+    colcon build
+    source install/setup.bash
     set -u
 }
 
@@ -134,7 +197,7 @@ case "${1:-}" in
         # Sur le PC, ce build (--symlink-install) se mélangerait à colcon build.
         if [[ "$(uname -m)" != aarch64 && "${FOSA_FORCER_PC:-0}" != 1 ]]; then
             echo "Ce script s'exécute SUR LE ROBOT. Sur le PC : colcon build, ou" >&2
-            echo "  $0 --envoyer <utilisateur@IP du robot> <dossier équipe>" >&2
+            echo "  $0 --envoyer ROBOT_IP" >&2
             exit 1
         fi
         echo "[1/3] Prérequis (aucune installation système)..."
@@ -154,5 +217,6 @@ Déploiement terminé. Pour chaque créneau (le robot redémarre entre deux) :
   ./run.sh depart                     # départ par commande (sinon dire « allez »)
 FIN
         ;;
-    *) echo "Usage : $0 [--preparer | --envoyer <utilisateur@IP> <dossier équipe>]" >&2; exit 2 ;;
+    --help|-h|aide) afficher_aide ;;
+    *) afficher_aide >&2; exit 2 ;;
 esac
