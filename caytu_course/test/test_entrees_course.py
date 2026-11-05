@@ -94,6 +94,13 @@ class _DepartArbitre:
         self.heard = heard
 
 
+class _StatutArbitre:
+    IDLE, ARMED, RUNNING, FINISHED, TIMED_OUT, TERMINATED = range(6)
+
+    def __init__(self, state):
+        self.state = state
+
+
 def _entrees(attente, monkeypatch=None, **options):
     if monkeypatch is not None:
         types = {'parc_msgs/msg/StartSignal': _DepartArbitre}
@@ -202,3 +209,12 @@ def test_l_age_d_une_detection_suit_l_horloge_ros():
     assert entrees.detection_recente(7, 0.6) is not None
     noeud.horloge.secondes += 0.2
     assert entrees.detection_recente(7, 0.6) is None
+
+
+def test_un_etat_terminal_de_l_arbitre_arrete_la_course():
+    _noeud, entrees = _entrees({'valeur': False})
+    entrees._recevoir_statut_arbitre(_StatutArbitre(_StatutArbitre.RUNNING))
+    assert entrees.arbitre_termine is False
+    entrees._recevoir_statut_arbitre(_StatutArbitre(_StatutArbitre.TERMINATED))
+    assert entrees.arbitre_termine is True
+    assert entrees.motif_arbitre == 'arbitre_termine'

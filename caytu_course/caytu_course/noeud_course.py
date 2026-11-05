@@ -77,6 +77,8 @@ class NoeudCourse(Node):
         self._etat = None
         self._en_attente = True
         self._tours = []           # positions où un tour sur place a été fait
+        self._rotations_rates = []  # positions où le tour sur place a échoué
+        self._rotation_indisponible = False  # behavior Spin absent de Nav2
         self._points_essayes = []  # points de recherche déjà tentés
         self._echecs = {}          # visites ratées par tag
         self._debut_cible = {}     # instant où chaque tag est devenu la cible
@@ -219,7 +221,9 @@ class NoeudCourse(Node):
             self.traiter_pendant(0.02)
 
     def _temps_ecoule(self):
-        return self._chrono.expire()
+        # L'arbitre peut terminer la course (FINISHED, TIMED_OUT, TERMINATED) :
+        # toutes les boucles d'attente s'arrêtent alors comme sur un temps écoulé.
+        return self._chrono.expire() or self._entrees.arbitre_termine
 
     def _temps(self):
         """Secondes depuis le départ, sur l'horloge ROS (comme le chrono)."""
@@ -235,6 +239,9 @@ class NoeudCourse(Node):
         self._attendre_ordre_et_depart()
         if not rclpy.ok():
             return
+        if self._entrees.arbitre_termine:
+            self._terminer(self._entrees.motif_arbitre)
+            return
         self._en_attente = False
         self._chrono.demarrer()
         self.publier_etat('DEMARRAGE', detail=self._entrees.source_depart)
@@ -248,7 +255,7 @@ class NoeudCourse(Node):
                 self._entrees.source_depart == 'voix', self._entrees.mot_entendu)
         self._attendre_ordre_apres_depart()
         if self._entrees.ordre is None:
-            self._terminer('ordre_absent')
+            self._terminer(self._entrees.motif_arbitre or 'ordre_absent')
             return
         self._sequence = SequenceTags(self._entrees.ordre)
         self.evenement('ordre', recit.phrase_ordre(self._sequence.ordre),
@@ -276,10 +283,12 @@ class NoeudCourse(Node):
             elif resultat == 'saute':
                 self._sequence.sauter()
             self._plan_instant = None   # nouvelle cible : replanifier
-        self._terminer('terminee' if self._sequence.terminee() else 'temps_ecoule')
+        self._terminer(self._entrees.motif_arbitre or (
+            'terminee' if self._sequence.terminee() else 'temps_ecoule'))
 
     def _attendre_ordre_et_depart(self):
-        while rclpy.ok() and self._entrees.source_depart is None:
+        while (rclpy.ok() and self._entrees.source_depart is None
+               and not self._entrees.arbitre_termine):
             etat = 'ATTENTE_ORDRE' if self._entrees.ordre is None else 'ATTENTE_DEPART'
             self.publier_etat(etat)
             rclpy.spin_once(self, timeout_sec=PERIODE_BOUCLE)
@@ -409,14 +418,23 @@ class NoeudCourse(Node):
             self.traiter_pendant(0.5)
             return
         rayon = self._course.search_visited_radius_m
-        if all(math.dist((pose.x, pose.y), tour) > rayon for tour in self._tours):
+        deja_tourne = any(
+            math.dist((pose.x, pose.y), tour) <= rayon
+            for tour in self._tours + self._rotations_rates)
+        if not self._rotation_indisponible and not deja_tourne:
             self.publier_etat('RECHERCHE', tag_id, 'tour sur place')
             resultat = self._navigateur.tourner(
                 2.0 * math.pi, self._course.search_spin_time_sec, interrompre)
-            if resultat != 'interrompu':
+            if resultat == 'succes':
                 self._tours.append((pose.x, pose.y))
-            if resultat in ('indisponible', 'echec'):
-                self.get_logger().warning(f'Tour sur place impossible ({resultat}).')
+            elif resultat in ('indisponible', 'echec'):
+                # Ne pas boucler sur un spin impossible : marquer la position
+                # comme tentée pour passer à la navigation vers un point.
+                self._rotations_rates.append((pose.x, pose.y))
+                self.get_logger().warning(
+                    f'Tour sur place impossible ({resultat}) : '
+                    'recherche d\'un point de passage.')
+                self._rotation_indisponible = resultat == 'indisponible'
             return
 
         if self._entrees.grille() is None:
@@ -713,7 +731,11 @@ class NoeudCourse(Node):
                 math.degrees(erreurs.cap)), tag=tag_id)
         self.publier_etat('VISITE', tag_id, f'maintien {self._course.hold_sec:.0f} s')
         fin = self._temps() + self._course.hold_sec
-        while rclpy.ok() and self._temps() < fin and not self._temps_ecoule():
+        # FINISHED arrive dès le signalement du dernier tag. Garder la pose
+        # pendant le délai réglementaire ; seul un timeout ou un arrêt du juge
+        # interrompt ce maintien.
+        while (rclpy.ok() and self._temps() < fin
+               and not self._entrees.arbitre_interrompt_visite):
             self.publier_vitesse(0.0, 0.0)
             self.traiter_pendant(0.2)
         return 'visite'
@@ -734,6 +756,8 @@ class NoeudCourse(Node):
         lignes = recit.resume_fin(resume['ordre'], resume['visites'], self._raisons)
         if motif == 'ordre_absent':
             lignes.insert(0, "Aucun ordre reçu de l'arbitre : rien n'a pu être visité.")
+        elif motif == 'arbitre_termine':
+            lignes.insert(0, "L'arbitre a mis fin à la course : robot arrêté.")
         self.evenement('fin', ' '.join(lignes), lignes=lignes, motif=motif)
         self.publier_etat('TERMINEE', detail=motif)
 

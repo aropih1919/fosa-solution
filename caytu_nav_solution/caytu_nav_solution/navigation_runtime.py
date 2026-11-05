@@ -130,11 +130,12 @@ class NavigateurNav2:
         while self._is_ok():
             self._traiter(0.2)
             serveur_pret = self.serveur_pret()
+            rotation_prete = self._client_rotation.server_is_ready()
             robot_localise = self._pose_robot() is not None
 
-            if serveur_pret and robot_localise:
+            if serveur_pret and rotation_prete and robot_localise:
                 self._node.get_logger().info(
-                    f'Nav2 prêt et robot localisé après '
+                    f'Nav2 et rotation prêts, robot localisé après '
                     f'{time.monotonic() - debut:.1f} s réelles.')
                 return True
 
@@ -149,6 +150,7 @@ class NavigateurNav2:
                 self._node.get_logger().info(
                     f"Attente de Nav2 (serveur d'action : "
                     f'{"oui" if serveur_pret else "non"}, '
+                    f'spin : {"oui" if rotation_prete else "non"}, '
                     f'localisation : {"oui" if robot_localise else "non"})...')
 
         return False

@@ -369,6 +369,8 @@ _NOMBRES_COURSE = (
     ("search_spin_time_sec", {"positive": True}),
     ("search_grid_step_m", {"positive": True}),
     ("search_clearance_m", {"positive": True}),
+    ("search_frontier_margin_m", {"minimum": 0.0}),
+    ("search_fallback_clearance_m", {"positive": True}),
     ("search_visited_radius_m", {"positive": True}),
     ("front_guard_m", {"minimum": 0.0}),
     ("goal_xy_tolerance_m", {"positive": True}),
@@ -409,6 +411,8 @@ class CourseConfig:
     search_spin_time_sec: float
     search_grid_step_m: float
     search_clearance_m: float
+    search_frontier_margin_m: float
+    search_fallback_clearance_m: float
     search_visited_radius_m: float
     front_guard_m: float
     goal_xy_tolerance_m: float

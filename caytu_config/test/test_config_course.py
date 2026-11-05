@@ -43,8 +43,9 @@ def _course_minimale(**surcharges):
         "distance_tolerance_m": 0.04, "lateral_tolerance_m": 0.06,
         "heading_tolerance_deg": 5.0, "stable_cycles": 5, "hold_sec": 5.0,
         "detection_max_age_sec": 0.6,
-        "search_spin_time_sec": 25.0, "search_grid_step_m": 0.8,
-        "search_clearance_m": 0.45, "search_visited_radius_m": 0.8,
+        "search_spin_time_sec": 25.0, "search_grid_step_m": 0.4,
+        "search_clearance_m": 0.45, "search_frontier_margin_m": 0.25,
+        "search_fallback_clearance_m": 0.35, "search_visited_radius_m": 0.8,
         "front_guard_m": 0.10, "goal_xy_tolerance_m": 0.08,
         "goal_yaw_tolerance_deg": 7.0, "tag_lost_timeout_sec": 4.0,
         "preapproach_margin_m": 0.3, "search_spin_speed_rps": 0.4,
@@ -136,8 +137,11 @@ def test_le_profil_simulation_surcharge_les_interfaces(monkeypatch):
     assert simulation.system.deployment == "simulation"
     assert simulation.system.use_sim_time is True
     assert simulation.system.base_frame == "base_footprint"
-    assert simulation.navigation.odom_topic == "/odom"
-    assert simulation.navigation.laser_self_filter is True
+    assert simulation.navigation.odom_topic == "/botwheel_explorer/odom"
+    assert simulation.navigation.cmd_vel_topic == "/cmd_vel"
+    assert simulation.navigation.laser_self_filter is False
+    assert simulation.perception.apriltag.size_m == 0.12
+    assert simulation.start_word.mode == "utterance"
     assert simulation.course.tag_ids == (1, 4, 7, 9)
 
 

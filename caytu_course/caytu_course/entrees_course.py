@@ -32,6 +32,15 @@ IMAGES_GARDEES = 30
 TYPES_ORDRE = {'string': String, 'int32_multi_array': Int32MultiArray}
 PERIODE_DECOUVERTE = 0.5
 
+# États terminaux de parc_msgs/RunStatus : (nom du champ, valeur de secours).
+# La valeur lue dans la classe du message est prioritaire ; les valeurs de
+# secours sont celles du protocole officiel (parc_msgs/RunStatus.msg).
+ETATS_TERMINAUX_ARBITRE = (
+    ('FINISHED', 3),
+    ('TIMED_OUT', 4),
+    ('TERMINATED', 5),
+)
+
 
 @dataclass(frozen=True)
 class DetectionRobot:
@@ -63,6 +72,9 @@ class EntreesCourse:
         self.mot_entendu = ''
         self.depart_de_l_arbitre = False
         self.statut_arbitre = None
+        self.arbitre_termine = False
+        self.arbitre_interrompt_visite = False
+        self.motif_arbitre = ''
         self._detections_robot = {}
         self._stamps_tag = {}
         self._images = deque(maxlen=IMAGES_GARDEES)
@@ -84,7 +96,9 @@ class EntreesCourse:
             self._recevoir_image, 5)
         node.create_subscription(
             OccupancyGrid, self._course.map_topic, self._recevoir_carte,
-            _qos(ReliabilityPolicy.RELIABLE, DurabilityPolicy.VOLATILE, 1))
+            # SLAM publie la carte en TRANSIENT_LOCAL : l'exploration doit aussi
+            # recevoir la dernière grille si elle démarre après sa publication.
+            _qos(ReliabilityPolicy.RELIABLE, DurabilityPolicy.TRANSIENT_LOCAL, 1))
         node.create_subscription(
             LaserScan, configuration.navigation.scan_topic, self._recevoir_scan,
             qos_profile_sensor_data)
@@ -189,6 +203,16 @@ class EntreesCourse:
         if texte != self.statut_arbitre:
             self.statut_arbitre = texte
             self._node.get_logger().info(f'Statut de l\'arbitre : {texte[:300]}')
+        etat = getattr(message, 'state', None)
+        for nom, secours in ETATS_TERMINAUX_ARBITRE:
+            if etat == getattr(type(message), nom, secours):
+                self.arbitre_interrompt_visite = nom in ('TIMED_OUT', 'TERMINATED')
+                if not self.arbitre_termine:
+                    self.arbitre_termine = True
+                    self.motif_arbitre = 'arbitre_termine'
+                    self._node.get_logger().warning(
+                        f'ARBITRE : état {nom} — arrêt de la course.')
+                return
 
     # -------------------------------------------------------------- détections
     def _recevoir_detections(self, message):

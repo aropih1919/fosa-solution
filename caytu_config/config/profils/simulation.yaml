@@ -1,70 +1,41 @@
-# Profil Gazebo (monde officiel PARC) : surcharge de fosa.yaml.
+# Profil Gazebo (simulateur officiel PARC 2026) : surcharge de fosa.yaml.
 # Activé par FOSA_CONFIG_OVERRIDE ou `FOSA_PROFIL=simulation ./run.sh ...`.
 # Les listes remplacent celles de fosa.yaml ; les mappings se complètent.
+#
+# Le simulateur officiel publie l'interface du vrai robot (/cmd_vel,
+# /botwheel_explorer/odom, /scan_filtered, camera1/camera2, /parc/*) : seuls
+# les écarts propres à Gazebo restent ici.
 
 system:
   deployment: simulation
   use_sim_time: true
-  base_frame: base_footprint
+  base_frame: base_footprint      # le pont Gazebo publie odom -> base_footprint
   ros_domain_id: 42
 
 navigation:
-  # Sortie du filtre d'auto-détection lancé par course.launch.py en simulation.
-  scan_topic: /scan_filtered
-  cmd_vel_topic: /robot_base_controller/cmd_vel_unstamped
-  odom_topic: /odom
-  laser_self_filter: true
-  obstacle_sources:
-    - name: lidar
-      topic: /scan_filtered
-      enabled: true
-      obstacle_min_range: 0.35      # le lidar simulé voit les roues sous 0,35 m
-      obstacle_max_range: 3.5
-      raytrace_max_range: 4.0
-      inf_is_valid: false
-      global_costmap: true
-    - name: camera_haute
-      topic: /fosa/scan_camera_haute
-      enabled: true
-      obstacle_min_range: 0.25
-      obstacle_max_range: 2.0
-      raytrace_max_range: 2.5
-      inf_is_valid: true
-      global_costmap: true
+  # Le simulateur publie déjà /scan_filtered (retours < 0,3 m retirés) :
+  # relancer notre filtre laser écraserait le sien.
+  laser_self_filter: false
 
 perception:
-  depth_scans:
-    - name: camera_haute
-      input_type: pointcloud
-      input_topic: /top_camera_depth/points
-      info_topic: ""
-      output_topic: /fosa/scan_camera_haute
-      min_height: 0.40              # bruit vertical de Gazebo (σ 0,10 m) + inclinaison 2,5°
-      max_height: 1.30
-      range_min: 0.25
-      range_max: 2.5
-      angle_min: -0.78
-      angle_max: 0.78
-      angle_increment: 0.0175
-      pixel_step: 6
-      min_points: 3
-      rate_hz: 5.0
   apriltag:
-    # Taille APPARENTE dans le rendu Gazebo : les bords flous font paraître le
-    # tag 3,8 % plus grand (66 px mesurés au lieu de 63,6 à 0,83 m), d’où une
-    # distance estimée 3 cm trop courte. Robot réel : 0,165 (fosa.yaml).
-    size_m: 0.171
+    # Le modèle officiel mappe une texture 10 cases sur une face de 0,15 m :
+    # le carré noir (8 cases) mesure donc 0,12 m. Utiliser 0,15 surestimerait
+    # toutes les distances de 25 %.
+    size_m: 0.12
     cameras:
-      - name: haute
-        color_topic: /top_camera_color/image_raw
-        info_topic: /top_camera_color/camera_info
+      - name: camera1
+        color_topic: /camera1/camera1/color/image_raw
+        info_topic: /camera1/camera1/color/camera_info
+      - name: camera2
+        color_topic: /camera2/camera2/color/image_raw
+        info_topic: /camera2/camera2/color/camera_info
 
-# Départ vocal avec le micro du PC (simulation/micro_pc.py publie un flux
-# continu, pas une phrase par message comme le ReSpeaker du robot). Sans
-# micro ni Vosk, le nœud le signale et le départ par commande reste possible.
 start_word:
   enabled: true
-  mode: stream
+  # Le respeaker simulé publie une phrase complète sur /speech_audio, comme
+  # le ReSpeaker du robot.
+  mode: utterance
 
 course:
   preparation:

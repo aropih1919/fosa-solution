@@ -413,22 +413,24 @@ une garde lidar à l'arrière :
 - **202 tests automatiques**, sans robot ni simulateur : géométrie,
   alignement, stratégie, lecture de l'ordre, messages de l'arbitre,
   configuration, détection sur images synthétiques.
-- **Simulation Gazebo** : le monde officiel PARC, avec quatre tags ajoutés, et
-  des courses complètes de bout en bout. Un moniteur mesure chaque visite
-  avec la vraie position du robot dans le simulateur.
-- **Résultat** : en simulation, les quatre tags ont été visités dans l'ordre
-  7, 1, 9, 4 en 370 s sur 600, chacun signalé à l'arbitre avec sa photo, face
-  au tag à moins de 1,5°. Une ancienne course tournait peut-être en même temps
-  sur le même robot simulé : ce chiffre est à reconfirmer avec
+- **Simulation Gazebo** : le simulateur officiel PARC 2026 (arène générée par
+  graine, arbitre et messages officiels), avec des courses complètes de bout
+  en bout. Un moniteur mesure chaque visite avec la vraie position du robot
+  dans le simulateur.
+- **Résultat** : sur l'ancien monde (tags ajoutés à la main), les quatre tags
+  ont été visités dans l'ordre 7, 1, 9, 4 en 370 s sur 600, chacun signalé à
+  l'arbitre avec sa photo, face au tag à moins de 1,5°. Ce chiffre est à
+  reconfirmer sur l'arène officielle seedée avec
   `simulation/simulation.sh essai`.
-- **Deux mesures qui ont compté :**
+- **Deux mesures historiques, propres à l'ancien simulateur :**
   - l'odométrie du modèle Gazebo surestimait les rotations de 15 %, à cause
-    d'un mauvais écartement des roues dans le modèle. Sur le vrai robot,
-    `./run.sh mesure-rotation` compare l'odométrie, le gyroscope et le lidar ;
-  - dans le rendu Gazebo, le tag paraît 3,8 % plus grand qu'en réalité, et le
-    robot s'arrêtait à 0,55 m au lieu de 0,50. Nous l'avons mesuré avec un
-    tag posé à distance connue, puis corrigé. Sur le vrai robot, la même
-    vérification se fait au mètre ruban (partie 2, section B.5).
+    d'un mauvais écartement des roues dans le modèle. Le modèle officiel a été
+    repris ; sur le vrai robot, `./run.sh mesure-rotation` compare l'odométrie,
+    le gyroscope et le lidar ;
+  - dans l'ancien rendu, le tag paraissait 3,8 % plus grand qu'en réalité, et
+    le robot s'arrêtait à 0,55 m au lieu de 0,50. Les tags officiels ont une
+    géométrie différente (carré noir de 0,12 m dans une face de 0,15 m) : la
+    taille est réglée dans `profils/simulation.yaml` et reste à remesurer.
 
 ## 1.17 Questions probables du jury
 
@@ -500,22 +502,27 @@ But : pouvoir construire la solution, lancer les tests et la simulation.
 
    ```bash
    sudo apt install ros-jazzy-navigation2 ros-jazzy-slam-toolbox \
-       ros-jazzy-laser-filters ros-jazzy-ros-gz python3-opencv
+       ros-jazzy-laser-filters ros-jazzy-ros-gz ros-jazzy-depthimage-to-laserscan \
+       ros-jazzy-audio-common-msgs python3-opencv
    ```
 
 2. **Placer les dépôts** dans `~/ros2_ws/src` : notre dépôt
-   (`fosa-solution`) et le dépôt de simulation PARC
-   (`parc_robot_bringup`, `parc_robot_description`), comme pour la phase 1.
+   (`fosa-solution`) et le dépôt officiel PARC 2026
+   (`parc_robot_bringup`, `parc_robot_description`, `parc_msgs`,
+   `parc_referee`). Le dépôt officiel contient maintenant le simulateur,
+   l'arbitre et les messages : ne pas garder une ancienne copie de `parc_msgs`
+   dans un autre espace de travail.
 
 3. **Construire** :
 
    ```bash
    cd ~/ros2_ws
    source /opt/ros/jazzy/setup.bash
-   colcon build
+   colcon build --symlink-install
    ```
 
-4. **Préparer la simulation** (copie de `parc_msgs`, modèles des tags) :
+4. **Préparer la simulation** (construit les paquets officiels et vérifie les
+   dépendances) :
 
    ```bash
    cd ~/ros2_ws/src/fosa-solution
@@ -638,33 +645,52 @@ quelques centimètres : un tag imprimé un peu plus grand ou plus petit que
 
 ## C. Simulation sur mon PC
 
-But : voir toute la solution tourner dans Gazebo, sans robot. Le PC doit avoir
-été préparé (section A).
+But : voir toute la solution tourner dans le simulateur officiel PARC 2026,
+sans robot. Le PC doit avoir été préparé (section A).
+
+Le simulateur publie exactement l'interface du robot réel (`/cmd_vel`,
+`/botwheel_explorer/odom`, `/scan_filtered`, `camera1`/`camera2`, `/parc/*`,
+micro ReSpeaker) : un code qui marche ici doit marcher sur le robot. Les
+topics `/sim/*` sont réservés aux tests et ne sont jamais utilisés par la
+solution.
+
+Le script donne à chaque lancement Gazebo une partition dédiée
+(`fosa_simulation_<UID>_<PID>`) pour éviter qu'une autre instance Gazebo du PC
+détourne les topics `/odom`, `/clock` ou les services du monde. Pour la
+personnaliser :
+`FOSA_SIM_GZ_PARTITION=mon_essai simulation/simulation.sh essai`.
 
 ### C.1 La répétition complète, automatique
 
 ```bash
 cd ~/ros2_ws/src/fosa-solution
-FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh essai 7,1,9,4
+simulation/simulation.sh essai
 ```
 
-- **Une fenêtre Gazebo s'ouvre** : on voit le robot rouler, tourner sur
-  lui-même et s'arrêter devant les tags.
+- **Une fenêtre Gazebo s'ouvre** : le robot roule, tourne et s'arrête devant
+  les tags, dans une arène générée à partir d'une graine (7 par défaut).
 - **Le terminal raconte tout**, en phrases (voir 1.14), plus ce que reçoit
-  l'arbitre et le verdict de « juges simulés », qui mesurent la vraie distance
-  et le vrai angle dans Gazebo.
+  l'arbitre et le verdict des « juges simulés », qui mesurent la vraie
+  distance et le vrai angle dans Gazebo.
+- **L'arbitre officiel tourne** et son tableau de bord est disponible sur
+  `http://localhost:8080/` (vue juges : `/judge?token=parc2026`).
 
-Le script enchaîne deux phases, comme le jour J :
+Le script enchaîne deux phases dans la **même arène** :
 
 1. **la préparation** : le robot explore, construit la carte, mesure les tags
    et enregistre tout ;
-2. **le match** : dans un monde neuf, robot à la position de départ, l'ordre
-   7, 1, 9, 4 est publié, le départ est donné, et le robot court sur la carte
-   enregistrée.
+2. **le match** : dans une arène neuve mais identique, robot à la position de
+   départ, l'arbitre tire un ordre au hasard, le départ est donné, et le
+   robot court sur la carte enregistrée.
 
-Comptez environ une heure (Gazebo tourne environ 3 fois moins vite que le
-temps réel). Ajouter `FOSA_SIM_GUI=0` devant la commande masque Gazebo et va
-plus vite.
+Pour imposer l'ordre et la graine :
+
+```bash
+simulation/simulation.sh essai 7,1,9,4 12
+```
+
+Comptez environ une heure (Gazebo tourne plusieurs fois moins vite que le
+temps réel). `FOSA_SIM_GUI=0` masque Gazebo et va plus vite.
 
 Ce que je regarde dans le terminal :
 
@@ -672,25 +698,39 @@ Ce que je regarde dans le terminal :
   ligne rouge `[BLOQUÉ]` ou `[CONTACT]` signale un problème ;
 - `=== FIN ===` puis une ligne par tag : visité, ou **pourquoi** il ne l'a pas
   été ;
+- `[juge simulé] arbitre : état RUNNING/FINISHED/...` ;
 - `[juge simulé] VISITE tag N mesurée dans Gazebo : centre à 0.5xx m, erreur
   de cap ±x° -> VALIDE` ;
 - `[juge simulé] arbitre : visite du tag N reçue, photo jpeg (... octets)`.
 
-### C.2 Le départ à la voix dans la simulation
+### C.2 Choisir et reproduire une arène
 
-Oui, c'est possible : le micro du PC remplace celui du robot.
+Chaque graine produit toujours la même arène (mêmes tags, mêmes obstacles) :
+
+```bash
+simulation/simulation.sh preparation 12    # graine 12
+simulation/simulation.sh course 7,1,9,4 12
+```
+
+Le générateur officiel écrit la vérité terrain à côté du monde :
+`~/.fosa_simulation/mondes/parc_random_seed12.json`. Le moniteur la lit pour
+mesurer les visites ; elle n'est jamais donnée à la solution.
+
+### C.3 Le départ à la voix dans la simulation
+
+Le simulateur publie le micro du PC sur les topics ReSpeaker (`/speech_audio`,
+`/is_speeching`), comme le robot.
 
 Une seule fois :
 
 ```bash
-sudo apt install ros-jazzy-audio-common-msgs
 simulation/simulation.sh voix-preparer        # Vosk + modèle français, sans sudo
 ```
 
 Puis, pour un match avec départ vocal :
 
 ```bash
-FOSA_SIM_VOIX=1 FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh course 7,1,9,4
+FOSA_SIM_VOIX=1 simulation/simulation.sh course 7,1,9,4 7
 ```
 
 Quand le récit affiche `[micro] À l'écoute du mot de départ : dites « allez »`,
@@ -699,18 +739,19 @@ le départ part avec `method 1` vers l'arbitre, comme sur le robot. Si le
 mauvais micro est utilisé : `arecord -L` liste les micros, et
 `FOSA_SIM_MICRO=<nom>` choisit le bon.
 
-### C.3 Une seule phase
+### C.4 Une seule phase
 
 ```bash
-FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh preparation     # carte + tags
-FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh course 9,4,1,7  # match seul
+simulation/simulation.sh preparation 7        # carte + tags de la graine 7
+simulation/simulation.sh course 9,4,1,7 7     # match seul sur cette arène
 ```
 
 Le match seul utilise la dernière préparation de simulation, rangée dans
-`~/.fosa_simulation/preparation` (jamais mélangée avec celle du robot). Pour
-tester un match sans préparation (carte en direct), supprimer ce dossier.
+`~/.fosa_simulation/preparation` (jamais mélangée avec celle du robot). La
+graine doit être celle de la préparation : le script refuse une autre graine.
+Pour tester un match sans préparation (carte en direct), supprimer ce dossier.
 
-### C.4 Tout arrêter
+### C.5 Tout arrêter
 
 Après un Ctrl-C, un terminal fermé, ou le message « Une course ou Gazebo
 tourne déjà » :
@@ -722,24 +763,35 @@ simulation/simulation.sh arreter
 Ne jamais lancer deux simulations à la fois : elles piloteraient le même
 robot simulé et les journaux se mélangeraient.
 
-### C.5 À la main, terminal par terminal (pour déboguer)
+### C.6 À la main, terminal par terminal (pour déboguer)
 
 ```bash
-# Terminal 1 : le monde, le robot et les tags
-FOSA_SIM_ODOM_CORRIGEE=1 simulation/simulation.sh monde
-# Terminal 2 : la préparation OU le match
-export FOSA_PROFIL=simulation FOSA_BASE_WS=~/.fosa_simulation/parc_ws
+# Terminal 1 : le monde, le robot et l'arbitre
+FOSA_SIM_AUDIO=1 simulation/simulation.sh monde 7
+
+# Terminal 2 : l'arbitre officiel (tableau de bord sur le port 8080)
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch parc_referee referee.launch.py \
+    odom_topic:=/botwheel_explorer/odom record:=false
+
+# Terminal 3 : la préparation OU le match
+cd ~/ros2_ws/src/fosa-solution
+export FOSA_PROFIL=simulation
 ./run.sh preparation              # ou : ./run.sh course
-# Terminal 3 : le récit et les juges simulés
-simulation/simulation.sh moniteur
-# Terminal 4 (match seulement) : l'ordre puis le départ
-export FOSA_PROFIL=simulation FOSA_BASE_WS=~/.fosa_simulation/parc_ws
-./run.sh ordre-test "7,1,9,4"
-./run.sh depart                   # ou, pour la voix : simulation/simulation.sh micro
+
+# Terminal 4 : le récit et les juges simulés
+simulation/simulation.sh moniteur 7
 ```
 
-Journaux : `~/.fosa_simulation/journaux/` (`course_*.log` : détail
-technique ; `moniteur_*.log` : le récit).
+Pour un match à la main : armer la course dans le tableau de bord
+(`http://localhost:8080/judge?token=parc2026`), puis `./run.sh depart` dans un
+autre terminal — ou dire « allez » si le micro est publié
+(`FOSA_SIM_AUDIO=1`). Sans arbitre, `./run.sh ordre-test "7,1,9,4"` publie un
+`parc_msgs/TagOrder` de test, mais ne jamais l'utiliser quand l'arbitre tourne.
+
+Journaux : `~/.fosa_simulation/journaux/` (`monde_*.log`, `arbitre_*.log`,
+`course_*.log`, `moniteur_*.log`).
 
 ---
 
@@ -853,10 +905,11 @@ arreter`, toucher le robot, modifier un fichier.
 |---|---|
 | « failed to create symbolic link » au build sur le PC | Supprimer `~/ros2_ws/build/caytu_*` et `~/ros2_ws/install/caytu_*`, puis `colcon build`. |
 | « Une course ou Gazebo tourne déjà » (simulation) | `simulation/simulation.sh arreter`. |
+| « Le robot simulé n'a pas démarré » alors que Gazebo s'ouvre | Le script attend la découverte du topic `/botwheel_explorer/odom`, puis un message d'odométrie. Si le délai expire, lire `~/.fosa_simulation/journaux/monde_*.log`. |
 | « Paquets ROS absents » au déploiement | Demander aux organisateurs d'installer Nav2 et slam_toolbox. |
-| « parc_msgs introuvable » au lancement | L'espace de base `~/ros2_ws` du robot a changé : `FOSA_BASE_WS=<dossier> ./run.sh course`. |
-| Rien sur la page de l'arbitre | Même cause que ci-dessus. |
-| « No image » sur la page de l'arbitre | Le champ photo de `TagVisit` a un autre format : lire le rapport du diagnostic et adapter `caytu_course/caytu_course/arbitre.py`. |
+| « parc_msgs introuvable » au lancement | Le dépôt officiel n'est pas construit : `cd ~/ros2_ws && colcon build --symlink-install`. |
+| Rien sur la page de l'arbitre | L'arbitre n'a pas démarré : lire `~/.fosa_simulation/journaux/arbitre_*.log` (port 8080 occupé ?). |
+| « No image » sur la page de l'arbitre | Vérifier que la caméra a détecté le tag à la visite et que la JPEG n'est pas vide dans le journal de la course. |
 | « Aucune préparation » au lancement du match | La préparation n'a pas enregistré la carte : relancer `./run.sh preparation`. |
 | Le robot se croit ailleurs au début du match | Il n'est pas reparti de la position de départ de la préparation : le reposer et relancer `./run.sh course`. |
 | Aucun tag détecté | Topics des caméras dans `fosa.yaml`, éclairage, distance. |
@@ -865,6 +918,8 @@ arreter`, toucher le robot, modifier un fichier.
 | Le robot dérive en tournant | `./run.sh mesure-rotation`. |
 | Tags sautés trop tôt ou trop tard | Recaler `course.strategy` dans `fosa.yaml` à partir des plans du récit. |
 
-**Encore à confirmer sur le robot** (le diagnostic B.5 y répond) : la valeur de
-`reason` pour la fin de course, le champ photo exact de `TagVisit`, le format
-du son de `/speech_audio`, et quelle caméra est la caméra haute.
+**Encore à confirmer sur le robot** (le diagnostic B.5 y répond) : le format
+du son de `/speech_audio`, et quelle caméra est la caméra haute. Les messages
+officiels fixent déjà `StartSignal.method` (0 = commande, 1 = voix),
+`TagVisit.image` (`sensor_msgs/CompressedImage`) et `Finish.reason`
+(0 = terminé, 1 = abandon).

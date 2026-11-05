@@ -156,7 +156,7 @@ course:
     visit_type: parc_msgs/msg/TagVisit
     finish_topic: /parc/finish
     finish_type: parc_msgs/msg/Finish
-    finish_reason: 0              # seule valeur connue (consignes) : À CONFIRMER
+    finish_reason: 0              # parc_msgs/Finish : 0 terminé, 1 abandon
     run_status_topic: /parc/run_status
     jpeg_quality: 85
   time_limit_sec: 600.0
@@ -171,8 +171,10 @@ course:
   hold_sec: 5.0                   # maintien après le signalement (À CONFIRMER)
   detection_max_age_sec: 0.6
   search_spin_time_sec: 25.0
-  search_grid_step_m: 0.8
+  search_grid_step_m: 0.4
   search_clearance_m: 0.45
+  search_frontier_margin_m: 0.25 # points sûrs près de la frontière connue/inconnue
+  search_fallback_clearance_m: 0.35 # Nav2 vérifie ensuite l'empreinte exacte
   search_visited_radius_m: 0.8
   front_guard_m: 0.10
   goal_xy_tolerance_m: 0.08       # arrivée Nav2 avant l'alignement visuel

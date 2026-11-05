@@ -42,7 +42,7 @@ def _dilater(masque, rayon):
 
 
 def points_recherche(grille, clairance_m, pas_m, visites, rayon_visite_m, position,
-                     centre=None, rayon_max=None):
+                     centre=None, rayon_max=None, clairance_inconnu_m=None):
     """Liste de (x, y) dans le repère de la grille, du plus proche au plus loin.
 
     centre, rayon_max : zone autorisée (cercle autour du départ), pour ne pas
@@ -55,9 +55,15 @@ def points_recherche(grille, clairance_m, pas_m, visites, rayon_visite_m, positi
     cellules = np.asarray(grille.donnees, dtype=np.int16).reshape(
         grille.hauteur, grille.largeur)
     libre = cellules == 0
-    interdit = _dilater(
-        (cellules >= SEUIL_OCCUPE) | (cellules < 0),
+    if clairance_inconnu_m is None:
+        clairance_inconnu_m = clairance_m
+    interdit_occupe = _dilater(
+        cellules >= SEUIL_OCCUPE,
         int(math.ceil(clairance_m / grille.resolution)))
+    interdit_inconnu = _dilater(
+        cellules < 0,
+        int(math.ceil(clairance_inconnu_m / grille.resolution)))
+    interdit = interdit_occupe | interdit_inconnu
     autorise = libre & ~interdit
 
     pas = max(1, int(round(pas_m / grille.resolution)))

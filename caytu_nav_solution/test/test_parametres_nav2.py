@@ -114,7 +114,7 @@ def test_le_temps_simule_suit_le_profil(robot, simulation):
     assert parametres['planner_server']['ros__parameters']['use_sim_time'] is True
     assert _costmap(parametres, 'local_costmap')['robot_base_frame'] == 'base_footprint'
     assert _costmap(parametres, 'local_costmap')['lidar_layer']['lidar'][
-        'obstacle_min_range'] == pytest.approx(0.35)
+        'obstacle_min_range'] == pytest.approx(0.12)
 
 
 def test_le_fichier_ecrit_se_relit(robot, tmp_path):

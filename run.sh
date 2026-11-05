@@ -195,9 +195,12 @@ else:
             exit 2
         fi
         echo "ATTENTION : en course, l'ordre vient UNIQUEMENT des organisateurs."
+        echo "Ne pas utiliser si l'arbitre tourne : armer la course dans son tableau de bord."
         topic="$(lire_config c.course.order_topic)"
+        liste="${ordre//,/ }"          # 7,1,9,4 -> 7 1 9 4
         ros2 topic pub -t 5 -r 1 --qos-reliability reliable \
-            --qos-durability transient_local "$topic" std_msgs/msg/String "{data: '$ordre'}"
+            --qos-durability transient_local "$topic" parc_msgs/msg/TagOrder \
+            "{tag_ids: [${liste//[\[\]]/}]}"
         ;;
     etat)
         ros2 topic echo "$(lire_config c.course.state_topic)" std_msgs/msg/String
