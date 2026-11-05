@@ -113,7 +113,8 @@ class NoeudCourse(Node):
         self._publicateur_vitesse = self.create_publisher(
             Twist, self._navigation.cmd_vel_topic, 10)
 
-        duree = (self._course.preparation.max_duration_sec if self._mode == 'preparation'
+        duree = (self._course.preparation.max_duration_sec
+                 if self._mode in ('preparation', 'preparation_manuelle')
                  else self._course.time_limit_sec)
         self._chrono = ChronometreCourse(
             self.get_clock().now, duree, self._course.stop_margin_sec)
@@ -233,6 +234,9 @@ class NoeudCourse(Node):
     def executer(self):
         if self._mode == 'preparation':
             self.preparer()
+            return
+        if self._mode == 'preparation_manuelle':
+            self.preparer_en_guidage()
             return
         self.evenement('donnees', recit.phrase_donnees_match(
             carte_preparee(self._configuration), self._memoire.ids()))
@@ -482,16 +486,16 @@ class NoeudCourse(Node):
             rayon_max=self._course.search_max_radius_m,
             clairance_inconnu_m=self._course.search_frontier_margin_m)
         if not points:
-            # L'arène officielle a des meubles rapprochés : si la marge
-            # normale ne laisse aucun point, essayer une grille plus dense.
-            # Nav2 garde le dernier mot sur la collision avec l'empreinte réelle.
+            # L'arène officielle a des meubles rapprochés : la recherche de
+            # secours tolère une frontière inconnue plus proche, mais garde la
+            # marge obstacles au-dessus du rayon d'encombrement du robot.
             pas_secours = max(grille.resolution, self._course.search_grid_step_m / 2.0)
             points = points_recherche(
                 grille, self._course.search_fallback_clearance_m, pas_secours,
                 self._tours + self._points_essayes,
                 self._course.search_visited_radius_m, (pose.x, pose.y),
                 centre=(0.0, 0.0), rayon_max=self._course.search_max_radius_m,
-                clairance_inconnu_m=0.0)
+                clairance_inconnu_m=self._course.search_fallback_frontier_margin_m)
         return points[0] if points else None
 
     # ------------------------------------------------------------- visite
@@ -808,6 +812,21 @@ class NoeudCourse(Node):
         self.arreter_robot()
         self.enregistrer_preparation()
 
+    def preparer_en_guidage(self):
+        """Enregistre carte et tags sans envoyer de commande de déplacement."""
+        preparation = self._course.preparation
+        dossier = self._nouveau_dossier_preparation()
+        self._en_attente = False
+        self._chrono.demarrer()
+        self.evenement(
+            'preparation_manuelle',
+            f'Cartographie guidée : vous pilotez le robot. '
+            f'La carte et les tags observés seront enregistrés dans {dossier}.')
+        while rclpy.ok() and not self._temps_ecoule():
+            self._enregistrer_tags()
+            self.traiter_pendant(0.5)
+        self.enregistrer_preparation()
+
     def _exploration_terminee(self):
         """Fin dès que les 4 tags sont mesurés de près : explorer davantage
         n'apporte rien au match et risque de coincer le robot. Sinon, deux
@@ -858,7 +877,8 @@ class NoeudCourse(Node):
 
     def enregistrer_preparation(self):
         """Tags puis carte slam_toolbox (posegraph pour le match, image pour voir)."""
-        if self._mode != 'preparation' or self._preparation_enregistree:
+        if (self._mode not in ('preparation', 'preparation_manuelle')
+                or self._preparation_enregistree):
             return
         self._preparation_enregistree = True
         self._enregistrer_tags()
@@ -874,7 +894,7 @@ class NoeudCourse(Node):
         manquants = [tag for tag in self._course.tag_ids if not self._memoire.connait(tag)]
         lignes = [
             f'Carte enregistrée : {base}.posegraph' if serialisee
-            else 'ÉCHEC de l’enregistrement de la carte : relancer ./run.sh preparation.',
+            else 'ÉCHEC de l’enregistrement de la carte : relancer une préparation.',
             f'Tags enregistrés : {", ".join(map(str, self._memoire.ids())) or "aucun"} '
             f'({fichier_tags(self._configuration)}).']
         if manquants:
@@ -923,11 +943,16 @@ def main(args=None):
     noeud = NoeudCourse(configuration)
     try:
         noeud.executer()
-        # Course terminée : le nœud reste actif (état et statut disponibles).
-        while rclpy.ok():
-            rclpy.spin_once(noeud, timeout_sec=0.5)
+        # Le match garde son statut vivant. Une préparation s'arrête après
+        # avoir enregistré la carte et les tags.
+        if noeud._mode not in ('preparation', 'preparation_manuelle'):
+            while rclpy.ok():
+                rclpy.spin_once(noeud, timeout_sec=0.5)
     except KeyboardInterrupt:
-        pass
+        if noeud._mode in ('preparation', 'preparation_manuelle'):
+            noeud.get_logger().warning(
+                'Arrêt demandé : les tags sont conservés, mais SLAM doit encore '
+                'tourner pour sauvegarder la carte avec ./run.sh sauver-carte.')
     except Exception as erreur:
         # Un Ctrl-C reçu pendant un appel C++ de rclpy arrive sous cette forme.
         noeud.get_logger().error(f'Arrêt de la course : {erreur!r}')
@@ -937,8 +962,11 @@ def main(args=None):
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
         if rclpy.ok():
             noeud.arret_urgence()
-            # Préparation arrêtée avant la fin : on garde ce qui a été appris.
-            noeud.enregistrer_preparation()
+            # Au signal, launch arrête SLAM en même temps que ce nœud : ne pas
+            # appeler son service de sauvegarde après qu'il a disparu.
+            if (noeud._mode in ('preparation', 'preparation_manuelle')
+                    and not noeud._preparation_enregistree):
+                noeud._enregistrer_tags()
         noeud.destroy_node()
         rclpy.try_shutdown()
 

@@ -53,10 +53,10 @@ sourcer() {
     # Les paquets officiels (parc_msgs, referee, bringup) sont dans le même
     # espace de travail : run.sh n'a pas besoin d'un espace de base séparé.
     export FOSA_BASE_WS="$ESPACE_TRAVAIL"
-    if [[ -z "${ROS_DOMAIN_ID:-}" ]]; then
-        ROS_DOMAIN_ID="$(python3 -c 'from caytu_config import load_config; print(load_config().system.ros_domain_id)')"
-        export ROS_DOMAIN_ID
-    fi
+    # Le profil est la source de vérité : ne jamais hériter par accident du
+    # domaine ROS d'une session du robot réel ou d'une autre simulation.
+    ROS_DOMAIN_ID="$(python3 -c 'from caytu_config import load_config; print(load_config().system.ros_domain_id)')"
+    export ROS_DOMAIN_ID
 }
 
 graine() {
@@ -346,7 +346,8 @@ case "${1:-}" in
     monde)
         sourcer || exit 1; verifier_paquets
         graine_monde="$(graine "${2:-}")"
-        mkdir -p "$MONDES"
+        mkdir -p "$MONDES" "$CACHE"
+        echo "$graine_monde" > "$CACHE/graine"
         exec ros2 launch parc_robot_bringup phase2_hard.launch.py \
             seed:="$graine_monde" gui:="$(gazebo_actif)" rviz:="${FOSA_SIM_RVIZ:-0}" \
             audio:="$FOSA_SIM_AUDIO" audio_device:="$FOSA_SIM_MICRO" world_dir:="$MONDES"

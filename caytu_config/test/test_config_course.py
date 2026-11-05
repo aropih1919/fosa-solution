@@ -45,7 +45,9 @@ def _course_minimale(**surcharges):
         "detection_max_age_sec": 0.6,
         "search_spin_time_sec": 25.0, "search_grid_step_m": 0.4,
         "search_clearance_m": 0.45, "search_frontier_margin_m": 0.25,
-        "search_fallback_clearance_m": 0.35, "search_visited_radius_m": 0.8,
+        "search_fallback_clearance_m": 0.50,
+        "search_fallback_frontier_margin_m": 0.15,
+        "search_visited_radius_m": 0.8,
         "front_guard_m": 0.10, "goal_xy_tolerance_m": 0.08,
         "goal_yaw_tolerance_deg": 7.0, "tag_lost_timeout_sec": 4.0,
         "preapproach_margin_m": 0.3, "search_spin_speed_rps": 0.4,
@@ -158,6 +160,11 @@ def test_un_type_d_ordre_inconnu_est_refuse():
 def test_une_tolerance_de_cap_hors_reglement_est_refusee():
     with pytest.raises(ConfigurationError, match="heading_tolerance_deg"):
         CourseConfig.from_mapping(_course_minimale(heading_tolerance_deg=15.0))
+
+
+def test_la_recherche_de_secours_ne_rapproche_pas_des_obstacles():
+    with pytest.raises(ConfigurationError, match="search_fallback_clearance_m"):
+        CourseConfig.from_mapping(_course_minimale(search_fallback_clearance_m=0.35))
 
 
 def test_le_mot_de_depart_exige_au_moins_un_mot():

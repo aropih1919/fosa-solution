@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from caytu_config import load_config
-from caytu_course.lancement import carte_preparee, executable_slam, parametres_slam
+from caytu_course.lancement import (
+    MODES,
+    carte_preparee,
+    executable_slam,
+    parametres_slam,
+)
 
 CONFIG_FOSA = Path(__file__).resolve().parents[2] / 'caytu_config' / 'config'
 
@@ -53,6 +58,13 @@ def test_la_preparation_refait_toujours_une_carte_neuve(robot):
     assert parametres_slam(robot, 'preparation')['mode'] == 'mapping'
     assert executable_slam(robot, 'preparation') == 'async_slam_toolbox_node'
     assert parametres_slam(robot, 'cartographie')['mode'] == 'mapping'
+
+
+def test_la_preparation_manuelle_enregistre_avec_slam_en_mode_mapping(robot):
+    assert 'preparation_manuelle' in MODES
+    parametres = parametres_slam(robot, 'preparation_manuelle')
+    assert parametres['mode'] == 'mapping'
+    assert executable_slam(robot, 'preparation_manuelle') == 'async_slam_toolbox_node'
 
 
 def test_une_carte_incomplete_est_ignoree(robot):

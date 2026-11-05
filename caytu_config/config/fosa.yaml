@@ -174,7 +174,8 @@ course:
   search_grid_step_m: 0.4
   search_clearance_m: 0.45
   search_frontier_margin_m: 0.25 # points sûrs près de la frontière connue/inconnue
-  search_fallback_clearance_m: 0.35 # Nav2 vérifie ensuite l'empreinte exacte
+  search_fallback_clearance_m: 0.50 # marge supérieure au rayon du robot (~0,43 m)
+  search_fallback_frontier_margin_m: 0.15 # réduire l'inconnu, sans rogner la marge obstacle
   search_visited_radius_m: 0.8
   front_guard_m: 0.10
   goal_xy_tolerance_m: 0.08       # arrivée Nav2 avant l'alignement visuel

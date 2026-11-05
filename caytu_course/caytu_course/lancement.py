@@ -3,6 +3,8 @@
 Trois modes :
   - `preparation` : nouvelle carte, exploration autonome, carte et tags
     enregistrés dans `course.preparation.directory` ;
+  - `preparation_manuelle` : SLAM et tags enregistrés pendant que l'équipe
+    guide le robot ; aucune cible autonome n'est envoyée ;
   - `course` : le match ; se localise sur la carte de la préparation si elle
     existe, sinon cartographie en direct ;
   - `cartographie` : SLAM, Nav2 et perception sans mission (réglages).
@@ -10,7 +12,7 @@ Trois modes :
 
 from pathlib import Path
 
-MODES = ('course', 'preparation', 'cartographie')
+MODES = ('course', 'preparation', 'preparation_manuelle', 'cartographie')
 NOM_CARTE = 'carte'            # carte.posegraph + carte.data (slam_toolbox)
 NOM_TAGS = 'tags.yaml'
 

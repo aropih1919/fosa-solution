@@ -20,3 +20,10 @@
 - Cause racine : un échantillonnage unique et une marge identique autour des obstacles et de l'inconnu peuvent éliminer tous les points dans une arène dense.
 - Détecteur manquant : aucun signalement borné quand deux balayages consécutifs ne produisent aucun point de navigation.
 - Garde-fou : échantillonner plus finement près des frontières de carte, laisser Nav2 valider l'empreinte complète, et arrêter avec un diagnostic après deux balayages sans passage.
+
+## [2026-11-05] — Ne pas envoyer le robot dans un passage plus étroit que son empreinte
+- Timing : runtime
+- Symptôme : Nav2 planifie un point de recherche, puis le contrôleur répète « collision ahead » et le robot reste immobile.
+- Cause racine : la marge de secours de 0,35 m était inférieure au rayon d'encombrement du robot (environ 0,43 m avec padding).
+- Détecteur manquant : la configuration acceptait une marge de secours inférieure à la marge normale.
+- Garde-fou : garder 0,50 m autour des obstacles, relâcher uniquement la marge à la frontière inconnue et rejeter une marge de secours plus faible que la marge normale.

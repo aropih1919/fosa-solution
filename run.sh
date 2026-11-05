@@ -13,6 +13,8 @@ Usage : ./run.sh [MODE] [arguments ROS]
 Modes (robot réel par défaut) :
   preparation   les 15 min avant le match : nouvelle carte, recherche et
                 mesure des 4 tags, enregistrement (exploration autonome)
+  preparation-manuelle
+                carte et tags enregistrés pendant que vous guidez le robot
   course        le match : se localise sur la carte de la préparation (ou
                 cartographie en direct), attend l'ordre puis le départ
   suivi         afficher en phrases ce que fait le robot (tags, plans, sauts…)
@@ -21,7 +23,7 @@ Modes (robot réel par défaut) :
   ordre-test O  publier un ordre de test, ex. "7,1,9,4" (ESSAIS SEULEMENT)
   etat          état brut de la course
   cartographie  SLAM, Nav2 et perception sans mission (réglages)
-  sauver-carte  enregistrer tout de suite la carte dans la préparation
+  sauver-carte  enregistrer la carte pendant que SLAM tourne, avant l'arrêt
   diagnostic-robot  vérifier topics, TF, caméras, audio, arbitre (1er créneau)
   mesure-rotation   deux tours lents sur place : odométrie contre gyromètre
                     et lidar (robot dégagé, course arrêtée, ~1 min)
@@ -32,6 +34,7 @@ Espace de travail de base du robot (parc_msgs de l'arbitre) : FOSA_BASE_WS,
 
 Exemples :
   ./run.sh preparation      puis, une fois terminée :   ./run.sh course
+  ./run.sh preparation-manuelle, puis ./run.sh sauver-carte avant ./run.sh arreter
   ./run.sh suivi            (dans un second terminal)
   ./run.sh depart
 AIDE
@@ -80,11 +83,13 @@ if [[ "$(cd "$FOSA_BASE_WS" 2>/dev/null && pwd)" != "$ESPACE_TRAVAIL" ]]; then
     done
 fi
 source "$ESPACE_TRAVAIL/install/setup.bash"
-export FOSA_CONFIG_DIR="${FOSA_CONFIG_DIR:-$DOSSIER_SCRIPT/caytu_config/config}"
+export FOSA_CONFIG_DIR="$DOSSIER_SCRIPT/caytu_config/config"
 case "${FOSA_PROFIL:-robot}" in
-    robot) ;;
+    robot)
+        # Une surcharge héritée d'une simulation ne doit jamais configurer le robot réel.
+        unset FOSA_CONFIG_OVERRIDE ;;
     simulation)
-        export FOSA_CONFIG_OVERRIDE="${FOSA_CONFIG_OVERRIDE:-$FOSA_CONFIG_DIR/profils/simulation.yaml}" ;;
+        export FOSA_CONFIG_OVERRIDE="$FOSA_CONFIG_DIR/profils/simulation.yaml" ;;
     *) echo "Profil inconnu : $FOSA_PROFIL (robot | simulation)" >&2; exit 2 ;;
 esac
 if [[ -d "$ESPACE_TRAVAIL/.fosa_python" ]]; then
@@ -98,9 +103,9 @@ set -u
 lire_config() {
     python3 -c "from caytu_config import load_config; c = load_config(); print($1)"
 }
-if [[ -z "${ROS_DOMAIN_ID:-}" ]]; then
-    export ROS_DOMAIN_ID="$(lire_config c.system.ros_domain_id)"
-fi
+# Le profil actif détermine le domaine : ne pas réutiliser par accident celui
+# d'une session précédente (robot réel ou Gazebo).
+export ROS_DOMAIN_ID="$(lire_config c.system.ros_domain_id)"
 
 verifier_arbitre() {
     if ! python3 -c 'import parc_msgs.msg' 2>/dev/null; then
@@ -163,6 +168,14 @@ else:
         echo "Le robot explore seul, mesure les tags et enregistre tout (12 min au plus)."
         lancer_detache preparation mode:=preparation "$@"
         ;;
+    preparation-manuelle)
+        verifier_paquet caytu_course
+        echo "Préparation guidée : utilisez un seul moyen de pilotage manuel sur /cmd_vel."
+        echo "SLAM enregistre la carte et les caméras mémorisent les tags observés."
+        echo "Avant l'arrêt, exécutez ./run.sh sauver-carte pendant que SLAM tourne ; les tags sont écrits en continu."
+        echo "Aucun objectif autonome n'est lancé."
+        lancer_detache preparation-manuelle mode:=preparation_manuelle "$@"
+        ;;
     suivi)
         ros2 run caytu_course suivi_course "$@"
         ;;
@@ -209,9 +222,24 @@ else:
         dossier="$(lire_config 'c.course.preparation.directory')"
         dossier="${dossier/#\~/$HOME}"
         mkdir -p "$dossier"
-        ros2 service call /slam_toolbox/serialize_map \
-            slam_toolbox/srv/SerializePoseGraph "{filename: '$dossier/carte'}"
-        echo "Carte : $dossier/carte.posegraph (utilisée par ./run.sh course)."
+        base="$dossier/carte"
+        reponse="$(ros2 service call /slam_toolbox/serialize_map \
+            slam_toolbox/srv/SerializePoseGraph "{filename: '$base'}" 2>&1)" || {
+            printf '%s\n' "$reponse" >&2
+            echo "Échec : SLAM doit encore tourner. Ne l'arrêtez qu'après cette sauvegarde." >&2
+            exit 1
+        }
+        printf '%s\n' "$reponse"
+        if [[ ! -s "$base.posegraph" || ! -s "$base.data" ]]; then
+            echo "Échec : les fichiers $base.posegraph et $base.data ne sont pas présents." >&2
+            exit 1
+        fi
+        echo "Carte enregistrée : $base.posegraph."
+        if [[ -s "$dossier/tags.yaml" ]]; then
+            python3 -c 'import sys, yaml; d=yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}; print("Tags mémorisés :", ", ".join(map(str, d.get("tags", {}).keys())) or "aucun")' "$dossier/tags.yaml"
+        else
+            echo "ATTENTION : fichier tags.yaml absent; vérifiez que les caméras ont détecté les tags." >&2
+        fi
         ;;
     diagnostic-robot)
         "$DOSSIER_SCRIPT/outils/diagnostic_robot.sh" "$@"

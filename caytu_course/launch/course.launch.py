@@ -127,6 +127,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'mode', default_value='course',
             description='course : le match ; preparation : carte et tags '
-                        'enregistrés ; cartographie : sans mission (réglages).'),
+                        'enregistrés ; preparation_manuelle : carte et tags '
+                        'pendant un guidage humain ; cartographie : sans mission.'),
         OpaqueFunction(function=_generer),
     ])

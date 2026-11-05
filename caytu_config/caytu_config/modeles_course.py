@@ -371,6 +371,7 @@ _NOMBRES_COURSE = (
     ("search_clearance_m", {"positive": True}),
     ("search_frontier_margin_m", {"minimum": 0.0}),
     ("search_fallback_clearance_m", {"positive": True}),
+    ("search_fallback_frontier_margin_m", {"minimum": 0.0}),
     ("search_visited_radius_m", {"positive": True}),
     ("front_guard_m", {"minimum": 0.0}),
     ("goal_xy_tolerance_m", {"positive": True}),
@@ -413,6 +414,7 @@ class CourseConfig:
     search_clearance_m: float
     search_frontier_margin_m: float
     search_fallback_clearance_m: float
+    search_fallback_frontier_margin_m: float
     search_visited_radius_m: float
     front_guard_m: float
     goal_xy_tolerance_m: float
@@ -467,6 +469,10 @@ class CourseConfig:
         if course.approach_distance_m < course.visit_distance_m:
             raise ConfigurationError(
                 f"{path}: approach_distance_m doit être >= visit_distance_m.")
+        if course.search_fallback_clearance_m < course.search_clearance_m:
+            raise ConfigurationError(
+                f"{path}: search_fallback_clearance_m doit être >= "
+                "search_clearance_m pour ne pas rapprocher les cibles des obstacles.")
         # Un tag jugé proche (sans Nav2) doit rester à portée de l'asservissement.
         if (course.approach_distance_m + course.preapproach_margin_m
                 - course.visit_distance_m > course.alignment.max_distance_error_m):

@@ -14,6 +14,9 @@ Ce fichier est le seul à lire. Il a deux parties :
 Les documents officiels des organisateurs sont dans
 [`docs/parc-phase-finale-docs/`](docs/parc-phase-finale-docs/) (règlement,
 liste des topics du robot, consignes de l'arbitre). On n'y touche pas.
+[`AUDIT-TOPICS-PARC.md`](AUDIT-TOPICS-PARC.md) est notre audit technique
+non officiel : il compare les topics, les types et les repères, et liste ce
+qui doit encore être mesuré sur le robot physique.
 
 ---
 
@@ -26,10 +29,11 @@ les quatre AprilTags 1, 4, 7 et 9, par exemple 7, 1, 9, 4. Le robot ne
 connaît ni la carte de l'arène (5 m × 5 m, des tables, des chaises, parfois
 des personnes) ni la position des tags.
 
-Juste avant le match, les organisateurs accordent **15 minutes** pour
-cartographier l'arène et repérer les tags : le match de 10 minutes peut
-ensuite utiliser ces données. Le mobilier peut changer d'un jour à l'autre :
-il faut donc refaire la carte à chaque fois, pendant ces 15 minutes.
+Juste avant le match, les organisateurs accordent **15 minutes de préparation**
+(consigne communiquée oralement à l'équipe) pour cartographier l'arène et
+repérer les tags. Le robot peut ensuite utiliser ces données pendant le match
+de 10 minutes. Le mobilier peut changer : refaire la carte pendant chaque
+préparation.
 
 Pour chaque tag, dans l'ordre, il doit le trouver, puis s'arrêter avec son
 centre à **0,5 m** du tag, face à lui à **±12°** près, et garder cette position
@@ -59,13 +63,16 @@ La solution tient en six paquets ROS 2 :
 | `caytu_course` | Le « cerveau » de la course : ordre, départ, stratégie, recherche, approche, visites, arbitre. |
 | `caytu_interfaces` | Le format du message « tag détecté » partagé entre la perception et la course. |
 
-Le jour J se déroule en deux temps, une commande chacun :
+Le jour J se déroule en deux temps :
 
-1. `./run.sh preparation` (pendant les 15 minutes) : le robot explore seul,
-   construit la carte, va mesurer chaque tag de près, et enregistre la carte
-   et la position des tags (voir 1.6) ;
-2. `./run.sh course` (le match) : le robot se repère sur cette carte, connaît
-   déjà la position des tags, et les visite dans l'ordre imposé.
+1. **Préparation (15 minutes)** : on peut guider le robot pour choisir un
+   parcours efficace. SLAM construit la carte et les caméras enregistrent les
+   tags vus. `./run.sh preparation-manuelle` enregistre ces données sans
+   envoyer de buts de navigation. `./run.sh preparation` offre l'autre choix :
+   le robot explore seul.
+2. **Match (10 minutes au plus)** : `./run.sh course` charge la carte et les
+   tags enregistrés, attend l'ordre puis le départ. À partir du départ, le
+   robot agit seul et l'équipe ne le touche plus.
 
 `./run.sh course` lance tout en même temps :
 
@@ -169,7 +176,25 @@ cartes de coût.
 
 ## 1.6 La préparation : carte et tags enregistrés avant le match
 
-Pendant les 15 minutes de préparation, `./run.sh preparation` fait tout seul :
+Pendant les 15 minutes de préparation, deux modes sont possibles :
+
+- `./run.sh preparation-manuelle` : l'équipe guide le robot avec le moyen de
+  pilotage autorisé. Le nœud ne commande aucun déplacement; SLAM fait la carte
+  et les caméras mémorisent automatiquement les tags détectés.
+- `./run.sh preparation` : le robot explore et approche les tags de façon
+  autonome. Utiliser ce mode pour vérifier qu'il sait refaire le parcours
+  sans aide.
+
+Dans les deux modes, les données sont sauvegardées dans le même dossier; au
+début du match, `./run.sh course` les charge automatiquement. En guidage
+manuel, les tags sont écrits pendant que le nœud tourne. Avant d'arrêter la
+préparation, lancer `./run.sh sauver-carte` dans un autre terminal : cette
+commande enregistre la carte SLAM active et affiche les tags mémorisés. Ensuite
+seulement, arrêter avec `./run.sh arreter`. Pour éviter deux sources de
+commandes, ne jamais lancer les deux modes en même temps. À la limite de
+12 minutes, le nœud enregistre lui-même avant de quitter.
+
+Le mode autonome suit ce déroulement :
 
 1. il met de côté la préparation précédente (renommée avec la date) et
    repart de zéro : la carte de la veille peut être fausse ;
@@ -210,7 +235,8 @@ Si la cible n'est pas en mémoire, le robot :
 
 1. fait un tour lent sur lui-même, pour que les caméras balaient les murs ;
 2. va vers le point libre de la carte le plus proche qu'il n'a pas encore
-   visité, loin des obstacles ;
+   visité, à au moins 50 cm des obstacles pour laisser passer toute l'empreinte
+   du robot ;
 3. recommence.
 
 Dès que la cible apparaît sur une image, la recherche s'arrête.
@@ -410,7 +436,7 @@ une garde lidar à l'arrière :
 
 ## 1.16 Comment nous l'avons vérifié
 
-- **202 tests automatiques**, sans robot ni simulateur : géométrie,
+- **205 tests automatiques**, sans robot ni simulateur : géométrie,
   alignement, stratégie, lecture de l'ordre, messages de l'arbitre,
   configuration, détection sur images synthétiques.
 - **Simulation Gazebo** : le simulateur officiel PARC 2026 (arène générée par
@@ -450,10 +476,11 @@ seconde et ralentit près des obstacles, et la vitesse est plafonnée.
 tag à partir de sa taille réelle connue, à chaque image. Le robot vise 1,2 cm
 de précision, et la visite n'est validée qu'après plusieurs mesures stables.
 
-**Pourquoi une préparation, et pas une carte faite à l'avance ?** Le mobilier
-peut changer entre les essais et le match. La préparation refait la carte et
-remesure les tags juste avant le match, dans les 15 minutes accordées. Si
-elle échoue, le match sait aussi cartographier et chercher en direct.
+**Pourquoi une préparation ?** D'après les consignes communiquées oralement
+par les organisateurs, les 15 minutes avant le match servent à refaire la
+carte et repérer les tags. Le match peut ainsi commencer avec ces données.
+Même avec une carte enregistrée, le lidar et les caméras continuent de voir
+les obstacles mobiles.
 
 **Et si la voix échoue ?** Le départ par commande reste toujours possible ; la
 voix n'est qu'un bonus.
@@ -503,7 +530,7 @@ But : pouvoir construire la solution, lancer les tests et la simulation.
    ```bash
    sudo apt install ros-jazzy-navigation2 ros-jazzy-slam-toolbox \
        ros-jazzy-laser-filters ros-jazzy-ros-gz ros-jazzy-depthimage-to-laserscan \
-       ros-jazzy-audio-common-msgs python3-opencv
+       ros-jazzy-audio-common-msgs ros-jazzy-teleop-twist-keyboard python3-opencv
    ```
 
 2. **Placer les dépôts** dans `~/ros2_ws/src` : notre dépôt
@@ -512,6 +539,11 @@ But : pouvoir construire la solution, lancer les tests et la simulation.
    `parc_referee`). Le dépôt officiel contient maintenant le simulateur,
    l'arbitre et les messages : ne pas garder une ancienne copie de `parc_msgs`
    dans un autre espace de travail.
+
+   Garder une seule copie de `fosa-solution` sous `~/ros2_ws/src` pendant le
+   build. Un second worktree contenant les mêmes paquets ROS fait échouer
+   `colcon` avec des noms de paquets en double. Pour comparer des branches,
+   placer le worktree hors de `src` ou lui donner un workspace séparé.
 
 3. **Construire** :
 
@@ -534,11 +566,16 @@ But : pouvoir construire la solution, lancer les tests et la simulation.
    ```bash
    cd ~/ros2_ws
    colcon test --packages-select caytu_config caytu_perception caytu_course caytu_nav_solution
-   colcon test-result --verbose          # attendu : 202 tests, 0 errors, 0 failures
+   colcon test-result --verbose          # attendu : 205 tests, 0 errors, 0 failures
    ```
 
 **Après chaque modification du code** : `cd ~/ros2_ws && colcon build
 --packages-up-to caytu_course`, puis relancer les tests.
+
+`run.sh` charge toujours la configuration de ce checkout et choisit le domaine
+ROS d'après le profil actif. Il ignore les anciennes surcharges de profil
+restées dans le terminal : profil normal `robot`, profil de simulation
+`FOSA_PROFIL=simulation`.
 
 À ne pas faire sur le PC :
 
@@ -614,8 +651,17 @@ nos six paquets, et installe la voix dans notre dossier, sans `sudo`.
 ```
 
 Il vérifie les topics, les caméras, le lidar, les repères, l'audio, et note la
-définition exacte des messages de l'arbitre. Je rapatrie le rapport sur le
-PC :
+définition exacte des messages de l'arbitre. L'audit des interfaces signale
+que l'inventaire des TF de caméra pourrait être incomplet. Compare aussi le
+`header.frame_id` d'une image à sa transformation vers `base_link` :
+
+```bash
+ros2 topic echo --once /camera1/camera1/depth/image_rect_raw --field header.frame_id
+ros2 run tf2_ros tf2_echo base_link FRAME_ID_AFFICHÉ
+```
+
+Remplacer `FRAME_ID_AFFICHÉ` par la valeur affichée. Refaire la vérification
+pour camera2, puis rapatrier le rapport sur le PC :
 
 ```bash
 # sur le PC
@@ -648,11 +694,14 @@ quelques centimètres : un tag imprimé un peu plus grand ou plus petit que
 But : voir toute la solution tourner dans le simulateur officiel PARC 2026,
 sans robot. Le PC doit avoir été préparé (section A).
 
-Le simulateur publie exactement l'interface du robot réel (`/cmd_vel`,
-`/botwheel_explorer/odom`, `/scan_filtered`, `camera1`/`camera2`, `/parc/*`,
-micro ReSpeaker) : un code qui marche ici doit marcher sur le robot. Les
-topics `/sim/*` sont réservés aux tests et ne sont jamais utilisés par la
-solution.
+Le simulateur publie les mêmes noms et types d'interface que le robot réel
+(`/cmd_vel`, `/botwheel_explorer/odom`, `/scan_filtered`, `camera1`/`camera2`,
+`/parc/*`, micro ReSpeaker). Le chemin de sécurité des commandes diffère : le
+robot réel passe `/cmd_vel` par `obstacle_avoidance`, tandis que Gazebo le
+reçoit par son pont. Un succès en simulation valide les interfaces et aide à
+repérer les erreurs, mais ne prouve pas le comportement exact du filtre
+matériel. Les topics `/sim/*` sont réservés aux tests et ne sont jamais
+utilisés par la solution.
 
 Le script donne à chaque lancement Gazebo une partition dédiée
 (`fosa_simulation_<UID>_<PID>`) pour éviter qu'une autre instance Gazebo du PC
@@ -662,40 +711,45 @@ personnaliser :
 
 ### C.1 La répétition complète, automatique
 
+Cette commande lance deux simulations successives du même monde : d'abord la
+préparation autonome, puis le match. Tu n'as rien à taper pendant le départ
+par défaut : le script arme l'arbitre et envoie lui-même le départ par
+commande. **Ne dis pas « allez »** dans ce mode.
+
 ```bash
 cd ~/ros2_ws/src/fosa-solution
 simulation/simulation.sh essai
 ```
 
-- **Une fenêtre Gazebo s'ouvre** : le robot roule, tourne et s'arrête devant
-  les tags, dans une arène générée à partir d'une graine (7 par défaut).
-- **Le terminal raconte tout**, en phrases (voir 1.14), plus ce que reçoit
-  l'arbitre et le verdict des « juges simulés », qui mesurent la vraie
-  distance et le vrai angle dans Gazebo.
-- **L'arbitre officiel tourne** et son tableau de bord est disponible sur
-  `http://localhost:8080/` (vue juges : `/judge?token=parc2026`).
+- **Gazebo** ouvre l'arène (graine 7 par défaut), démarre le robot et affiche
+  ses déplacements.
+- Le terminal affiche le récit de la solution, les messages de l'arbitre et
+  les mesures des juges simulés.
+- Le tableau de bord de l'arbitre est sur `http://localhost:8080/`; la vue des
+  juges est `http://localhost:8080/judge?token=parc2026`.
+- La préparation et le match utilisent deux lancements neufs du monde, avec
+  la même graine et donc le même mobilier et les mêmes tags. Au début du match,
+  le robot repart de la position initiale et utilise la préparation enregistrée.
 
-Le robot fait lui-même l'exploration et le repérage des tags pendant la
-préparation. Le guidage manuel est utile pour vérifier les capteurs ou
-diagnostiquer un blocage, mais la carte finale doit venir de cette exploration
-autonome pour représenter ce que le robot peut refaire seul.
+La préparation autonome peut prendre jusqu'à 12 minutes de temps ROS; le match
+dure au plus 10 minutes de temps ROS. Gazebo tourne plus ou moins lentement
+selon le PC : le temps réel peut être beaucoup plus long. Par défaut, chaque
+phase a une limite de deux heures réelles. `FOSA_SIM_GUI=0` masque la fenêtre
+Gazebo; cela ne garantit pas une accélération.
 
-Le script enchaîne deux phases dans la **même arène** :
+Pour lancer sans fenêtre :
 
-1. **la préparation** : le robot explore, construit la carte, mesure les tags
-   et enregistre tout ;
-2. **le match** : dans une arène neuve mais identique, robot à la position de
-   départ, l'arbitre tire un ordre au hasard, le départ est donné, et le
-   robot court sur la carte enregistrée.
+```bash
+FOSA_SIM_GUI=0 simulation/simulation.sh essai
+```
 
-Pour imposer l'ordre et la graine :
+Pour fixer l'ordre et répéter exactement le même monde :
 
 ```bash
 simulation/simulation.sh essai 7,1,9,4 12
 ```
 
-Comptez environ une heure (Gazebo tourne plusieurs fois moins vite que le
-temps réel). `FOSA_SIM_GUI=0` masque Gazebo et va plus vite.
+Sans ordre imposé, l'arbitre en choisit un au hasard.
 
 Ce que je regarde dans le terminal :
 
@@ -721,10 +775,14 @@ Le générateur officiel écrit la vérité terrain à côté du monde :
 `~/.fosa_simulation/mondes/parc_random_seed12.json`. Le moniteur la lit pour
 mesurer les visites ; elle n'est jamais donnée à la solution.
 
+`essai` génère le monde deux fois avec cette même graine : le match commence
+donc dans la même disposition que la préparation, à la position de départ.
+
 ### C.3 Le départ à la voix dans la simulation
 
-Le simulateur publie le micro du PC sur les topics ReSpeaker (`/speech_audio`,
-`/is_speeching`), comme le robot.
+Par défaut, `essai` envoie le départ par commande et il ne faut pas parler.
+Pour tester le bonus vocal, le simulateur publie le micro du PC sur les topics
+ReSpeaker (`/speech_audio`, `/is_speeching`).
 
 Une seule fois :
 
@@ -732,17 +790,17 @@ Une seule fois :
 simulation/simulation.sh voix-preparer        # Vosk + modèle français, sans sudo
 ```
 
-Puis, pour un match avec départ vocal :
+Puis lance la répétition complète avec départ vocal :
 
 ```bash
-FOSA_SIM_VOIX=1 simulation/simulation.sh course 7,1,9,4 7
+FOSA_SIM_VOIX=1 simulation/simulation.sh essai 7,1,9,4 7
 ```
 
-Quand le récit affiche `[micro] À l'écoute du mot de départ : dites « allez »`,
-dire **« allez »** distinctement. Le récit montre ce que le micro a compris ;
-le départ part avec `method 1` vers l'arbitre, comme sur le robot. Si le
-mauvais micro est utilisé : `arecord -L` liste les micros, et
-`FOSA_SIM_MICRO=<nom>` choisit le bon.
+Ne parle pas au lancement : attends le message `>>> Départ À LA VOIX : dites
+« allez » distinctement dans le micro.` qui apparaît après l'armement de
+l'arbitre. Dis alors **« allez »** clairement. Le récit confirme ce que le
+micro a reconnu; le départ vocal est envoyé à l'arbitre. `arecord -L` liste
+les micros; `FOSA_SIM_MICRO=<nom>` sélectionne un autre micro.
 
 ### C.4 Une seule phase
 
@@ -751,10 +809,16 @@ simulation/simulation.sh preparation 7        # carte + tags de la graine 7
 simulation/simulation.sh course 9,4,1,7 7     # match seul sur cette arène
 ```
 
-Le match seul utilise la dernière préparation de simulation, rangée dans
-`~/.fosa_simulation/preparation` (jamais mélangée avec celle du robot). La
-graine doit être celle de la préparation : le script refuse une autre graine.
-Pour tester un match sans préparation (carte en direct), supprimer ce dossier.
+La première commande construit et enregistre carte et tags. La deuxième
+démarre un nouveau monde avec la même graine; le match seul utilise la
+préparation dans `~/.fosa_simulation/preparation`, séparée de celle du robot.
+Le script refuse une graine différente. Pour essayer sans préparation, garder
+la préparation de côté puis lancer :
+
+```bash
+mv ~/.fosa_simulation/preparation ~/.fosa_simulation/preparation_gardee
+simulation/simulation.sh course 9,4,1,7 7
+```
 
 ### C.5 Tout arrêter
 
@@ -768,35 +832,65 @@ simulation/simulation.sh arreter
 Ne jamais lancer deux simulations à la fois : elles piloteraient le même
 robot simulé et les journaux se mélangeraient.
 
-### C.6 À la main, terminal par terminal (pour déboguer)
+### C.6 Guider le robot, enregistrer la carte, puis tester le match
 
-```bash
-# Terminal 1 : le monde, le robot et l'arbitre
-FOSA_SIM_AUDIO=1 simulation/simulation.sh monde 7
+Cette méthode vérifie le scénario que nous utiliserons pendant les essais :
+tu guides le robot pour la préparation, les caméras enregistrent les tags,
+puis un monde neuf reprend la même graine et utilise la carte sauvegardée.
+Lance les étapes dans l'ordre et laisse chaque terminal ouvert.
 
-# Terminal 2 : l'arbitre officiel (tableau de bord sur le port 8080)
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch parc_referee referee.launch.py \
-    odom_topic:=/botwheel_explorer/odom record:=false
+1. **Terminal 1 — monde Gazebo** :
 
-# Terminal 3 : la préparation OU le match
-cd ~/ros2_ws/src/fosa-solution
-export FOSA_PROFIL=simulation
-./run.sh preparation              # ou : ./run.sh course
+   ```bash
+   cd ~/ros2_ws/src/fosa-solution
+   simulation/simulation.sh monde 7
+   ```
 
-# Terminal 4 : le récit et les juges simulés
-simulation/simulation.sh moniteur 7
-```
+   Attendre que le robot démarre.
 
-Pour un match à la main : armer la course dans le tableau de bord
-(`http://localhost:8080/judge?token=parc2026`), puis `./run.sh depart` dans un
-autre terminal — ou dire « allez » si le micro est publié
-(`FOSA_SIM_AUDIO=1`). Sans arbitre, `./run.sh ordre-test "7,1,9,4"` publie un
-`parc_msgs/TagOrder` de test, mais ne jamais l'utiliser quand l'arbitre tourne.
+2. **Terminal 2 — enregistrement guidé** :
 
-Journaux : `~/.fosa_simulation/journaux/` (`monde_*.log`, `arbitre_*.log`,
-`course_*.log`, `moniteur_*.log`).
+   ```bash
+   cd ~/ros2_ws/src/fosa-solution
+   FOSA_PROFIL=simulation ./run.sh preparation-manuelle
+   ```
+
+   Attendre le message « Cartographie guidée ». Ce mode enregistre carte et
+   tags et n'envoie aucun but autonome.
+
+3. **Terminal 3 — clavier téléop** :
+
+   ```bash
+   source /opt/ros/jazzy/setup.bash
+   source ~/ros2_ws/install/setup.bash
+   export ROS_DOMAIN_ID=42
+   ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/cmd_vel
+   ```
+
+   Parcourir les couloirs sans approcher le robot des meubles. Les caméras
+   enregistrent les tags seulement lorsqu'elles les détectent.
+
+4. Quand la carte est suffisante, **arrêter d'abord le téléop** avec Ctrl-C.
+   Dans un autre terminal, lancer `FOSA_PROFIL=simulation ./run.sh sauver-carte`.
+   Vérifier que la commande confirme `carte.posegraph` et `carte.data`, puis
+   affiche les tags mémorisés. Ensuite arrêter la préparation avec
+   `FOSA_PROFIL=simulation ./run.sh arreter`.
+
+5. **Terminal 1** : arrêter le monde Gazebo avec Ctrl-C. Le match doit
+   redémarrer sur le même monde et à la position initiale.
+
+6. **Terminal 1** : lancer le match avec la carte guidée :
+
+   ```bash
+   simulation/simulation.sh course 7,1,9,4 7
+   ```
+
+   Le script démarre Gazebo et l'arbitre. Par défaut, il envoie le départ par
+   commande : **ne dis pas « allez »**. Le tableau de bord est sur
+   `http://localhost:8080/`.
+
+Pour tester le départ vocal, suivre C.3 et lancer `course` avec
+`FOSA_SIM_VOIX=1`. Les journaux restent dans `~/.fosa_simulation/journaux/`.
 
 ---
 
@@ -806,8 +900,8 @@ But : répéter exactement le ranking match, sans points en jeu. Un créneau se
 fait en deux temps : **D.1 enregistrer la carte et les tags**, puis **D.2 la
 mission sur cette carte**. Le robot doit avoir été préparé (section B).
 
-Avant de commencer : ouvrir **deux terminaux SSH** sur le robot, et dans
-chacun :
+Avant de commencer : ouvrir **deux terminaux SSH** sur le robot (un troisième
+est utile si le départ sera donné par commande), et dans chacun :
 
 ```bash
 ssh UTILISATEUR@IP_DU_ROBOT
@@ -816,15 +910,26 @@ cd DOSSIER_EQUIPE/ws/src/fosa-solution
 
 ### D.1 Enregistrer la carte et les tags (préparation)
 
-1. Poser le robot à la **position de départ** du match, arène dégagée.
-2. **Terminal 1** : `./run.sh preparation`.
-   Le robot explore seul. `Ctrl-b` puis `d` quitte l'affichage sans
-   l'arrêter (il tourne dans `tmux`).
-3. **Terminal 2** : `./run.sh suivi`. Il raconte : tags repérés, tags mesurés
-   de près, carte enregistrée.
-4. Attendre `=== FIN ===` (12 minutes au plus). Le suivi indique où sont
-   la carte et les tags, et quels tags manquent éventuellement.
-5. **Terminal 1** : `./run.sh arreter`.
+1. Poser le robot à la **position de départ** du match. Dégager les couloirs.
+2. Choisir un seul mode de préparation :
+   - **Guidage manuel recommandé pour explorer vite** : Terminal 1,
+     `./run.sh preparation-manuelle`. Le nœud n'envoie pas de vitesse; utilise
+     le téléop autorisé pour guider le robot. SLAM enregistre la carte et les
+     caméras mémorisent automatiquement chaque tag qu'elles voient.
+   - **Exploration autonome** : Terminal 1, `./run.sh preparation`. Le robot
+     choisit seul ses trajets et mesure les tags de près.
+3. **Terminal 2** : `./run.sh suivi`. Il affiche les tags détectés, la carte
+   et l'état de la sauvegarde. `Ctrl-b`, puis `d`, détache l'affichage sans
+   arrêter la préparation.
+4. En guidage manuel, balaie les murs et les couloirs ouverts, approche assez
+   les tags pour qu'une caméra les détecte, et évite les passages trop étroits.
+   Ne lance pas `./run.sh preparation` en parallèle du téléop.
+5. Quand tu as fini, arrête d'abord le téléop. Dans un autre terminal, lance
+   `./run.sh sauver-carte` pendant que la préparation et SLAM tournent encore.
+   Vérifie que la commande confirme `carte.posegraph`, `carte.data` et affiche
+   les IDs des tags mémorisés. Ensuite seulement, lance `./run.sh arreter`.
+   Le mode autonome enregistre lui-même à la fin de ses 12 minutes.
+6. Replace le robot à son point de départ avant le test autonome.
 
 ### D.2 La mission sur la carte enregistrée
 
@@ -837,8 +942,8 @@ cd DOSSIER_EQUIPE/ws/src/fosa-solution
 3. **Demander à un organisateur d'armer une course d'essai** : l'ordre des
    tags est publié.
 4. **Terminal 2** : `./run.sh suivi`.
-5. **Donner le départ** : dire « allez » près du robot, ou `./run.sh depart`
-   dans un troisième terminal.
+5. Attendre l'ordre de l'organisateur, puis donner le départ : dire « allez »
+   près du robot, ou lancer `./run.sh depart` dans un troisième terminal.
 6. **Regarder** le récit, et la page `http://IP_DU_ROBOT:8080/` dans un
    navigateur du PC : ce que l'arbitre a reçu (départ, visites avec photo,
    fin).
@@ -861,8 +966,8 @@ Outils utiles pendant un créneau :
 
 | Commande | Usage |
 |---|---|
-| `./run.sh cartographie` | Caméras et carte sans mission : pour voir et régler. |
-| `./run.sh sauver-carte` | Enregistrer tout de suite la carte dans la préparation. |
+| `./run.sh cartographie` | Afficher SLAM, Nav2 et les capteurs sans enregistrer une préparation complète. |
+| `./run.sh sauver-carte` | Pendant une préparation active, sauvegarder la carte et afficher les tags mémorisés; exécuter avant `./run.sh arreter`. |
 | `./run.sh etat` | État brut de la course. |
 | `./run.sh ordre-test "7,1,9,4"` | Publier un faux ordre si aucun organisateur ne peut armer. **Essais seulement.** |
 
@@ -878,25 +983,28 @@ ne touche le robot après le départ.
 - Au gel du code : la version installée sur le robot est la version soumise.
   Ne plus rien modifier ensuite.
 
-**Les 15 minutes de préparation**
+**Les 15 minutes de préparation** (consigne communiquée oralement par les organisateurs)
 
 1. Robot à la **position de départ**, arène telle qu'elle sera pour le match.
-2. **Terminal 1** : `./run.sh preparation`. **Terminal 2** : `./run.sh suivi`.
-3. Attendre `=== FIN ===`, vérifier « Carte enregistrée » et la liste des
-   tags trouvés.
-4. Si la carte n'est pas enregistrée, ou s'il manque des tags et qu'il reste
-   du temps : relancer `./run.sh preparation`.
-5. `./run.sh arreter`.
+2. **Terminal 1** : `./run.sh preparation-manuelle`. **Terminal 2** :
+   `./run.sh suivi`. Utiliser le téléop autorisé pour guider le robot, pendant
+   que SLAM et les caméras enregistrent.
+3. Arrêter le téléop. Pendant que la préparation tourne encore, lancer
+   `./run.sh sauver-carte` dans un autre terminal. Vérifier les deux fichiers
+   de carte et les IDs affichés, puis lancer `./run.sh arreter`.
+4. Ne pas lancer une nouvelle préparation si cela archiverait les données
+   juste enregistrées.
 
 **Le match (10 minutes)**
 
-1. Reposer le robot à la **position de départ**.
+1. Reposer le robot à la **position de départ** utilisée pendant la préparation.
 2. **Terminal 1** : `./run.sh course`, vérifier « Préparation utilisée ».
 3. **Terminal 2** : `./run.sh suivi` (peut rester ouvert pour regarder).
 4. Attendre que les organisateurs publient l'ordre.
 5. Au signal : dire **« allez »** (bonus de 5 points), ou `./run.sh depart`
    si la voix échoue.
-6. **Ne plus rien toucher** : ni le robot, ni le clavier, ni la session SSH.
+6. **À partir du départ, ne plus rien toucher** : ni le robot, ni le clavier,
+   ni la session SSH.
    Le robot s'arrête seul et signale la fin à l'arbitre.
 
 **Ce qu'on ne fait jamais en match** : `./run.sh ordre-test`, `./run.sh
@@ -915,16 +1023,19 @@ arreter`, toucher le robot, modifier un fichier.
 | « parc_msgs introuvable » au lancement | Le dépôt officiel n'est pas construit : `cd ~/ros2_ws && colcon build --symlink-install`. |
 | Rien sur la page de l'arbitre | L'arbitre n'a pas démarré : lire `~/.fosa_simulation/journaux/arbitre_*.log` (port 8080 occupé ?). |
 | « No image » sur la page de l'arbitre | Vérifier que la caméra a détecté le tag à la visite et que la JPEG n'est pas vide dans le journal de la course. |
-| « Aucune préparation » au lancement du match | La préparation n'a pas enregistré la carte : relancer `./run.sh preparation`. |
+| « Aucune préparation » au lancement du match | La carte et les tags n'ont pas été enregistrés : relancer `./run.sh preparation-manuelle` pour guider le robot, ou `./run.sh preparation` pour l'exploration autonome. |
 | Le robot se croit ailleurs au début du match | Il n'est pas reparti de la position de départ de la préparation : le reposer et relancer `./run.sh course`. |
+| Le robot s'immobilise avec `collision ahead` répété | La protection Nav2 détecte un obstacle sur la trajectoire. Ne pas désactiver la protection : arrêter l'essai, reconstruire le code à jour, puis consulter `course_*.log` et `monde_*.log` si le blocage revient. |
 | Aucun tag détecté | Topics des caméras dans `fosa.yaml`, éclairage, distance. |
+| Le tag est visible mais aucune pose n'est mémorisée | Afficher `header.frame_id` de l'image et vérifier `tf2_echo base_link FRAME_ID`; la chaîne TF des caméras reste à confirmer sur le robot. |
 | Le robot ne bouge pas après le départ | Lire le journal : Nav2 pas prêt, carte absente, topic `/cmd_vel` différent. |
 | Le départ vocal ne marche pas | Vosk absent (refaire B.4), format audio, seuil `min_confidence`. Départ par commande en attendant. |
 | Le robot dérive en tournant | `./run.sh mesure-rotation`. |
 | Tags sautés trop tôt ou trop tard | Recaler `course.strategy` dans `fosa.yaml` à partir des plans du récit. |
 
-**Encore à confirmer sur le robot** (le diagnostic B.5 y répond) : le format
-du son de `/speech_audio`, et quelle caméra est la caméra haute. Les messages
+**Encore à confirmer sur le robot** (le diagnostic B.5 y répond) : les TF
+complètes des caméras, le format du son de `/speech_audio`, et quelle caméra
+est la caméra haute. Les messages
 officiels fixent déjà `StartSignal.method` (0 = commande, 1 = voix),
 `TagVisit.image` (`sensor_msgs/CompressedImage`) et `Finish.reason`
 (0 = terminé, 1 = abandon).
