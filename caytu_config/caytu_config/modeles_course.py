@@ -114,12 +114,15 @@ class DepthScanConfig:
     pixel_step: int
     min_points: int
     rate_hz: float
+    max_age_sec: float
+    tf_timeout_sec: float
 
     @classmethod
     def from_mapping(cls, data, path="perception.depth_scans[]"):
         data = _section(data, path)
         nombres = ("min_height", "max_height", "range_min", "range_max",
-                   "angle_min", "angle_max", "angle_increment", "rate_hz")
+                   "angle_min", "angle_max", "angle_increment", "rate_hz",
+                   "max_age_sec", "tf_timeout_sec")
         _check_keys(data, ("name", "input_type", "input_topic", "info_topic",
                            "output_topic", "pixel_step", "min_points") + nombres, path)
         scan = cls(
@@ -146,9 +149,11 @@ class DepthScanConfig:
                           ("angle_min", "angle_max")):
             if getattr(scan, bas) >= getattr(scan, haut):
                 raise ConfigurationError(f"{path}: {bas} doit être inférieur à {haut}.")
-        if scan.angle_increment <= 0.0 or scan.rate_hz <= 0.0:
+        if (scan.angle_increment <= 0.0 or scan.rate_hz <= 0.0
+                or scan.max_age_sec <= 0.0 or scan.tf_timeout_sec <= 0.0):
             raise ConfigurationError(
-                f"{path}: angle_increment et rate_hz doivent être positifs.")
+                f"{path}: angle_increment, rate_hz, max_age_sec et "
+                "tf_timeout_sec doivent être positifs.")
         return scan
 
 
@@ -230,6 +235,7 @@ class AlignmentConfig:
     max_lateral_error_m: float
     timeout_sec: float
     max_renavigations: int
+    allow_reverse: bool
 
     @classmethod
     def from_mapping(cls, data, path="course.alignment"):
@@ -238,7 +244,8 @@ class AlignmentConfig:
             "linear_gain", "angular_gain", "max_linear_mps", "max_angular_rps",
             "min_linear_mps", "min_angular_rps", "precision_point_m",
             "precision_heading_deg", "max_distance_error_m",
-            "max_lateral_error_m", "timeout_sec", "max_renavigations"), path)
+            "max_lateral_error_m", "timeout_sec", "max_renavigations",
+            "allow_reverse"), path)
         alignement = cls(
             linear_gain=_as_number(
                 _get(data, "linear_gain", path), f"{path}.linear_gain",
@@ -277,6 +284,8 @@ class AlignmentConfig:
             max_renavigations=_as_int(
                 _get(data, "max_renavigations", path),
                 f"{path}.max_renavigations", 0),
+            allow_reverse=_as_bool(
+                _get(data, "allow_reverse", path), f"{path}.allow_reverse"),
         )
         if (alignement.min_linear_mps > alignement.max_linear_mps
                 or alignement.min_angular_rps > alignement.max_angular_rps):
@@ -350,7 +359,9 @@ _NOMBRES_COURSE = (
     ("preapproach_margin_m", {"minimum": 0.0}),
     ("search_spin_speed_rps", {"positive": True, "maximum": 1.0}),
     ("search_max_radius_m", {"positive": True}),
+    ("blocked_observation_sec", {"positive": True}),
 )
+_ENTIERS_COURSE = ("same_target_retries",)
 _TEXTES_COURSE = ("order_topic", "start_topic", "state_topic", "map_topic")
 _CHEMINS_COURSE = ("slam_map_file", "memorized_tags_file", "tags_output_file")
 
@@ -388,6 +399,8 @@ class CourseConfig:
     preapproach_margin_m: float
     search_spin_speed_rps: float
     search_max_radius_m: float
+    blocked_observation_sec: float
+    same_target_retries: int
     alignment: AlignmentConfig
     strategy: StrategyConfig
     slam_map_file: str
@@ -399,7 +412,7 @@ class CourseConfig:
         data = _section(data, path)
         _check_keys(data, (
             "tag_ids", "order_type", "referee", "stable_cycles", "alignment",
-            "strategy")
+            "strategy") + _ENTIERS_COURSE
             + _TEXTES_COURSE + _CHEMINS_COURSE
             + tuple(cle for cle, _ in _NOMBRES_COURSE), path)
         valeurs = {
@@ -412,6 +425,9 @@ class CourseConfig:
             cle: _as_str(_get(data, cle, path), f"{path}.{cle}",
                          allow_empty=True)
             for cle in _CHEMINS_COURSE})
+        valeurs.update({
+            cle: _as_int(_get(data, cle, path), f"{path}.{cle}", 0)
+            for cle in _ENTIERS_COURSE})
         course = cls(
             tag_ids=_as_int_list(_get(data, "tag_ids", path), f"{path}.tag_ids"),
             order_type=_choice(

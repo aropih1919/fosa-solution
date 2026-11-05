@@ -49,6 +49,8 @@ perception:
       pixel_step: 6
       min_points: 3
       rate_hz: 5.0
+      max_age_sec: 0.5
+      tf_timeout_sec: 0.1
   apriltag:
     cameras:
       - name: haute

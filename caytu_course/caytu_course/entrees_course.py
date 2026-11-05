@@ -11,6 +11,7 @@ import math
 import time
 
 from nav_msgs.msg import OccupancyGrid
+from rclpy.duration import Duration
 from rclpy.qos import (
     DurabilityPolicy,
     QoSProfile,
@@ -23,11 +24,16 @@ from std_msgs.msg import Int32MultiArray, String
 from tf2_ros import TransformException
 
 from caytu_course.arbitre import contenu_ordre
+from caytu_course.alignement import scan_couvre_tout_autour as scan_circulaire_complet
 from caytu_course.geometrie_tags import cap_normale
 from caytu_course.ordre_tags import OrdreInvalide, lire_ordre
 from caytu_course.recherche import GrilleOccupation
 from caytu_course.statut import charger_type
 from caytu_interfaces.msg import TagDetectionArray
+from caytu_perception.fraicheur_capteurs import (
+    horodatage_recent,
+    nanosecondes_stamp,
+)
 
 IMAGES_GARDEES = 30
 TYPES_ORDRE = {'string': String, 'int32_multi_array': Int32MultiArray}
@@ -59,6 +65,7 @@ class EntreesCourse:
         self._memoire = memoire
         self._memoire_tf = memoire_tf
         self._repere_robot = configuration.system.base_frame
+        self._navigation = configuration.navigation
         self.ordre = None
         self.source_depart = None
         self.mot_entendu = ''
@@ -253,23 +260,52 @@ class EntreesCourse:
     def _recevoir_scan(self, message):
         self._scan = message
 
-    def points_scan_robot(self):
-        """Points du dernier scan dans le repère du robot (liste vide sinon)."""
+    def _scan_recent(self, scan):
+        if scan is None or not scan.header.frame_id:
+            return False
+        return horodatage_recent(
+            nanosecondes_stamp(scan.header.stamp),
+            self._node.get_clock().now().nanoseconds,
+            self._navigation.scan_max_age_sec)
+
+    def scan_couvre_tout_autour(self):
+        """Un mouvement manuel exige un scan frais sans secteur sans mesure."""
         scan = self._scan
-        if scan is None:
-            return []
+        if not self._scan_recent(scan):
+            return False
+        return scan_circulaire_complet(
+            scan.angle_min, scan.angle_max, scan.angle_increment, scan.ranges,
+            scan.range_min, scan.range_max)
+
+    def points_scan_robot(self):
+        """Points frais dans le repère robot, ou None si la mesure est incertaine."""
+        scan = self._scan
+        if not self._scan_recent(scan):
+            return None
+        stamp_ns = nanosecondes_stamp(scan.header.stamp)
+        mesures = [distance for distance in scan.ranges
+                   if math.isfinite(distance)
+                   and scan.range_min <= distance <= scan.range_max]
+        if not mesures:
+            return None
+        instant_mesure = Time(
+            nanoseconds=stamp_ns, clock_type=self._node.get_clock().clock_type)
         try:
             transformation = self._memoire_tf.lookup_transform(
-                self._repere_robot, scan.header.frame_id, Time())
+                self._repere_robot, scan.header.frame_id, instant_mesure,
+                timeout=Duration(seconds=self._navigation.scan_tf_timeout_sec))
         except TransformException:
-            return []
+            return None
+        if not self._scan_recent(scan):
+            return None
         t = transformation.transform.translation
         q = transformation.transform.rotation
         lacet = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                            1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         points = []
         for index, distance in enumerate(scan.ranges):
-            if not (scan.range_min <= distance <= scan.range_max):
+            if not (math.isfinite(distance)
+                    and scan.range_min <= distance <= scan.range_max):
                 continue
             angle = lacet + scan.angle_min + index * scan.angle_increment
             points.append((t.x + distance * math.cos(angle),

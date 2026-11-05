@@ -33,12 +33,12 @@ from caytu_config import ConfigurationError, load_config
 from caytu_course.alignement import (
     ReglagesAlignement,
     commande_alignement,
-    obstacle_derriere,
-    obstacle_devant,
+    vitesse_sure,
 )
 from caytu_course.entrees_course import EntreesCourse
 from caytu_course.geometrie_tags import erreurs_visite, pose_approche, visite_valide
 from caytu_course.memoire_tags import MemoireTags
+from caytu_course.politique_blocage import doit_conserver_cible
 from caytu_course.recherche import points_recherche
 from caytu_course.sequence import SequenceTags
 from caytu_course.strategie import ModeleStrategie, TagRestant, decider
@@ -72,7 +72,7 @@ class NoeudCourse(Node):
 
         self._memoire_tf = Buffer()
         self._ecouteur_tf = TransformListener(
-            self._memoire_tf, self, spin_thread=False)
+            self._memoire_tf, self, spin_thread=True)
         self._memoire = self._charger_memoire()
         self._entrees = EntreesCourse(
             self, configuration, self._memoire, self._memoire_tf,
@@ -164,6 +164,22 @@ class NoeudCourse(Node):
         for _ in range(repetitions):
             self.publier_vitesse(0.0, 0.0)
             self.traiter_pendant(0.02)
+
+    def _observer_blocage(self, tag_id):
+        """Reste immobile un temps borné avant de renvoyer la même cible."""
+        duree = self._course.blocked_observation_sec
+        fin = time.monotonic() + duree
+        self.arreter_robot()
+        self.publier_etat(
+            'OBSERVATION_OBSTACLE', tag_id,
+            f'immobile pendant {duree:.1f} s avant reprise de la cible')
+        while rclpy.ok() and not self._temps_ecoule():
+            restant = fin - time.monotonic()
+            if restant <= 0.0:
+                return True
+            self.publier_vitesse(0.0, 0.0)
+            self.traiter_pendant(min(PERIODE_BOUCLE, restant))
+        return False
 
     def _temps_ecoule(self):
         return self._chrono.expire()
@@ -303,8 +319,16 @@ class NoeudCourse(Node):
         if self._plan_instant is None or maintenant - self._plan_instant >= periode:
             pose = self.pose_robot()
             position = (pose.x, pose.y) if pose is not None else None
-            garder, plan = decider(position, self._tags_restants(),
-                                   self._chrono.restant(), self._modele_strategie)
+            garder_strategie, plan = decider(
+                position, self._tags_restants(), self._chrono.restant(),
+                self._modele_strategie)
+            echecs = self._echecs.get(tag_id, 0)
+            garder = doit_conserver_cible(
+                garder_strategie, echecs, self._course.same_target_retries)
+            if garder and not garder_strategie:
+                self.get_logger().warning(
+                    f'La cible {tag_id} reste prioritaire après {echecs} échec(s) ; '
+                    f'reprises configurées : {self._course.same_target_retries}.')
             if self._plan is None or plan.tags != self._plan.tags:
                 self.get_logger().info(
                     f'Plan : {list(plan.tags)} (durée estimée {plan.duree_s:.0f} s, '
@@ -450,13 +474,16 @@ class NoeudCourse(Node):
         if resultat == 'interrompu':
             return 'echec'
         if resultat == 'refuse':
-            self.traiter_pendant(0.5)
+            if not self._observer_blocage(tag_id):
+                return 'temps_ecoule'
             return 'reessayer'
         courante = self._pose_tag_courante(tag_id)
         if courante is not None and courante[3] <= (
                 course.approach_distance_m + course.preapproach_margin_m):
             return 'arrive'   # même si Nav2 a abandonné : le tag est à portée
         if resultat == 'reessayer':
+            if not self._observer_blocage(tag_id):
+                return 'temps_ecoule'
             return 'reessayer'
         # Arrivé mais tag pas revu de près : la pose mémorisée est fausse.
         return 'perdu'
@@ -482,8 +509,8 @@ class NoeudCourse(Node):
                         else 'echec')
             vue = self._entrees.detection_recente(tag_id, course.detection_max_age_sec)
             if vue is None:
-                # Tourner vers la pose mémorisée avant de conclure à une perte.
-                self.publier_vitesse(0.0, self._rotation_vers_memoire(tag_id))
+                # Une pose mémorisée n'autorise jamais un pivot à l'aveugle.
+                self.publier_vitesse(0.0, 0.0)
                 if maintenant - dernier_vu > course.tag_lost_timeout_sec:
                     self.arreter_robot()
                     self.get_logger().warning(
@@ -508,6 +535,11 @@ class NoeudCourse(Node):
             if commande.etat == 'renaviguer':
                 self.arreter_robot()
                 return 'renaviguer'
+            if commande.lineaire < 0.0 and not course.alignment.allow_reverse:
+                self.arreter_robot()
+                self.get_logger().warning(
+                    'Recul de l’alignement désactivé : retour à une approche Nav2 sûre.')
+                return 'renaviguer'
             if commande.etat == 'aligne':
                 self.publier_vitesse(0.0, 0.0)
                 stables += 1
@@ -521,33 +553,30 @@ class NoeudCourse(Node):
         return 'echec'
 
     def _vitesse_gardee(self, commande, x_avant, x_arriere, demi_largeur):
-        """Annule l'avance (ou le recul) si un obstacle occupe le couloir."""
+        """Bloque tout mouvement si le scan est inconnu ou le trajet occupé."""
         lineaire = commande.lineaire
-        if lineaire == 0.0:
-            return 0.0, commande.angulaire
-        points = self._entrees.points_scan_robot()
-        garde = self._course.front_guard_m
-        bloque = (obstacle_devant(points, x_avant, demi_largeur, garde) if lineaire > 0.0
-                  else obstacle_derriere(points, x_arriere, demi_largeur, garde))
-        if bloque:
+        if lineaire < 0.0 and not self._course.alignment.allow_reverse:
             self.get_logger().warning(
-                'Obstacle sur le trajet : déplacement bloqué.', throttle_duration_sec=2.0)
-            return 0.0, commande.angulaire
-        return lineaire, commande.angulaire
-
-    def _rotation_vers_memoire(self, tag_id):
-        """Vitesse angulaire pour regarder vers le tag mémorisé (0 si inconnu)."""
-        tag, robot = self._memoire.pose(tag_id), self.pose_robot()
-        if tag is None or robot is None:
-            return 0.0
-        relevement = math.atan2(math.sin(
-            math.atan2(tag.y - robot.y, tag.x - robot.x) - robot.yaw), math.cos(
-            math.atan2(tag.y - robot.y, tag.x - robot.x) - robot.yaw))
-        if abs(relevement) <= math.radians(self._course.heading_tolerance_deg):
-            return 0.0
-        vitesse = min(self._reglages.max_angulaire,
-                      max(self._reglages.min_angulaire, abs(relevement)))
-        return math.copysign(vitesse, relevement)
+                'Recul désactivé par configuration : commande ignorée.',
+                throttle_duration_sec=2.0)
+            return 0.0, 0.0
+        points = self._entrees.points_scan_robot()
+        if points is None:
+            self.get_logger().warning(
+                'Scan absent, périmé ou sans TF exacte : alignement immobile.',
+                throttle_duration_sec=2.0)
+            return 0.0, 0.0
+        vitesse = vitesse_sure(
+            commande, points, self._navigation.footprint, x_avant, x_arriere,
+            demi_largeur, self._course.front_guard_m,
+            self._entrees.scan_couvre_tout_autour(),
+            self._course.alignment.allow_reverse)
+        if ((commande.lineaire, commande.angulaire) != (0.0, 0.0)
+                and vitesse == (0.0, 0.0)):
+            self.get_logger().warning(
+                'Trajet ou balayage du pivot non dégagé : observation immobile.',
+                throttle_duration_sec=2.0)
+        return vitesse
 
     def _position_acceptable(self, erreurs, tolerance_laterale):
         """Objectif de précision non atteint à temps : tolérances d'acceptation."""

@@ -99,3 +99,42 @@ def obstacle_derriere(points, x_arriere, demi_largeur, marge):
     limite = x_arriere - marge
     return any(
         limite <= x < 0.0 and abs(y) <= demi_largeur for x, y in points)
+
+
+def obstacle_pivot(points, rayon):
+    """Vrai si un obstacle est dans le disque balayé par le robot en pivotant."""
+    return any(math.hypot(x, y) <= rayon for x, y in points)
+
+
+def scan_couvre_tout_autour(angle_min, angle_max, increment, distances,
+                            portee_min, portee_max):
+    """Vrai si un scan frais a 360° et une mesure valide dans chaque secteur."""
+    if increment <= 0.0:
+        return False
+    couverture = angle_max - angle_min + increment
+    if couverture < 2.0 * math.pi - 2.0 * increment:
+        return False
+    return all(math.isfinite(distance)
+               and portee_min <= distance <= portee_max
+               for distance in distances)
+
+
+def vitesse_sure(commande, points, empreinte, x_avant, x_arriere,
+                 demi_largeur, marge, couverture_complete, recul_autorise=False):
+    """Applique les gardes scan/couloir/pivot et refuse tout état incertain."""
+    if (points is None or not couverture_complete
+            or (commande.lineaire < 0.0 and not recul_autorise)):
+        return 0.0, 0.0
+
+    bloque = False
+    if commande.lineaire > 0.0:
+        bloque = obstacle_devant(points, x_avant, demi_largeur, marge)
+    elif commande.lineaire < 0.0:
+        bloque = obstacle_derriere(points, x_arriere, demi_largeur, marge)
+
+    if not bloque and commande.angulaire != 0.0:
+        rayon_pivot = max(math.hypot(x, y) for x, y in empreinte) + marge
+        bloque = obstacle_pivot(points, rayon_pivot)
+    if bloque:
+        return 0.0, 0.0
+    return commande.lineaire, commande.angulaire

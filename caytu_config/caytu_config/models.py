@@ -98,6 +98,8 @@ class NavigationConfig:
     success_radius: float
     arrival_recheck_radius: float
     scan_topic: str
+    scan_max_age_sec: float
+    scan_tf_timeout_sec: float
     cmd_vel_topic: str
     odom_topic: str
     odom_frame: str
@@ -119,6 +121,7 @@ class NavigationConfig:
         _check_keys(data, (
             "profile", "success_radius", "arrival_recheck_radius",
             "scan_topic", "cmd_vel_topic", "odom_topic", "odom_frame",
+            "scan_max_age_sec", "scan_tf_timeout_sec",
             "footprint", "footprint_padding", "center_offset_x",
             "max_linear_speed", "max_angular_speed", "laser_self_filter",
             "obstacle_sources", "global_costmap_clear_service",
@@ -134,6 +137,12 @@ class NavigationConfig:
                 f"{path}.arrival_recheck_radius", positive=True),
             scan_topic=_as_str(
                 _get(data, "scan_topic", path), f"{path}.scan_topic"),
+            scan_max_age_sec=_as_number(
+                _get(data, "scan_max_age_sec", path),
+                f"{path}.scan_max_age_sec", positive=True),
+            scan_tf_timeout_sec=_as_number(
+                _get(data, "scan_tf_timeout_sec", path),
+                f"{path}.scan_tf_timeout_sec", positive=True),
             cmd_vel_topic=_as_str(
                 _get(data, "cmd_vel_topic", path), f"{path}.cmd_vel_topic"),
             odom_topic=_as_str(

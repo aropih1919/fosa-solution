@@ -10,10 +10,14 @@ import math
 import pytest
 
 from caytu_course.alignement import (
+    CommandeAlignement,
     ReglagesAlignement,
     commande_alignement,
     obstacle_derriere,
     obstacle_devant,
+    obstacle_pivot,
+    scan_couvre_tout_autour,
+    vitesse_sure,
 )
 from caytu_course.geometrie_tags import erreurs_visite
 
@@ -131,3 +135,62 @@ def test_la_garde_avant_detecte_un_obstacle_dans_le_couloir():
 def test_la_garde_arriere_protege_le_recul():
     assert obstacle_derriere([(-0.38, 0.1)], -0.31, 0.25, 0.10)
     assert not obstacle_derriere([(-0.5, 0.0), (-0.35, 0.4), (0.3, 0.0)], -0.31, 0.25, 0.10)
+
+
+def test_la_garde_de_pivot_verifie_le_disque_balaye():
+    assert obstacle_pivot([(0.2, 0.1)], 0.25)
+    assert not obstacle_pivot([(0.3, 0.2)], 0.25)
+
+
+def test_une_commande_est_bloquee_si_le_scan_est_inconnu_ou_incomplet():
+    commande = _commande(0.9, 0.0)
+    empreinte = ((0.22, 0.25), (0.22, -0.25), (-0.31, -0.25), (-0.31, 0.25))
+
+    assert vitesse_sure(
+        commande, None, empreinte, 0.22, -0.31, 0.25, 0.10, True) == (0.0, 0.0)
+    assert vitesse_sure(
+        commande, [], empreinte, 0.22, -0.31, 0.25, 0.10, False) == (0.0, 0.0)
+
+
+def test_un_obstacle_dans_le_couloir_bloque_toute_la_commande():
+    commande = _commande(0.9, 0.0)
+    empreinte = ((0.22, 0.25), (0.22, -0.25), (-0.31, -0.25), (-0.31, 0.25))
+
+    assert vitesse_sure(
+        commande, [(0.30, 0.0)], empreinte, 0.22, -0.31, 0.25,
+        0.10, True) == (0.0, 0.0)
+
+
+def test_un_pivot_est_bloque_si_le_disque_balaye_est_occupe():
+    commande = CommandeAlignement(0.0, 0.1, 'en_cours')
+    empreinte = ((0.22, 0.25), (0.22, -0.25), (-0.31, -0.25), (-0.31, 0.25))
+
+    assert vitesse_sure(
+        commande, [(0.3, 0.0)], empreinte, 0.22, -0.31, 0.25,
+        0.10, True) == (0.0, 0.0)
+    assert vitesse_sure(
+        commande, [(0.8, 0.0)], empreinte, 0.22, -0.31, 0.25,
+        0.10, True) == (0.0, 0.1)
+
+
+def test_la_couverture_complete_exige_360_degres_et_aucun_secteur_invalide():
+    assert scan_couvre_tout_autour(-math.pi, math.pi, 0.1, [1.0] * 63, 0.1, 5.0)
+    assert not scan_couvre_tout_autour(-math.pi / 2, math.pi / 2, 0.1,
+                                       [1.0] * 32, 0.1, 5.0)
+    assert not scan_couvre_tout_autour(-math.pi, math.pi, 0.1,
+                                       [1.0, math.inf], 0.1, 5.0)
+
+
+def test_le_recul_reste_interdit_sauf_activation_explicite_et_garde():
+    commande = _commande(0.4, 0.0)
+    empreinte = ((0.22, 0.25), (0.22, -0.25), (-0.31, -0.25), (-0.31, 0.25))
+
+    assert vitesse_sure(
+        commande, [(0.8, 0.0)], empreinte, 0.22, -0.31, 0.25,
+        0.10, True) == (0.0, 0.0)
+    assert vitesse_sure(
+        commande, [(-0.42, 0.0)], empreinte, 0.22, -0.31, 0.25,
+        0.10, True, recul_autorise=True) == (0.0, 0.0)
+    assert vitesse_sure(
+        commande, [(0.8, 0.0)], empreinte, 0.22, -0.31, 0.25,
+        0.10, True, recul_autorise=True)[0] < 0.0

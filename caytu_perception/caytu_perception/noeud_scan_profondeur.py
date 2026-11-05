@@ -9,6 +9,7 @@ import time
 
 import numpy as np
 import rclpy
+from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -17,6 +18,10 @@ from sensor_msgs.msg import CameraInfo, Image, LaserScan, PointCloud2
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from caytu_config import load_config
+from caytu_perception.fraicheur_capteurs import (
+    horodatage_recent,
+    nanosecondes_stamp,
+)
 from caytu_perception.scan_profondeur import (
     points_depuis_profondeur,
     scan_depuis_points,
@@ -106,13 +111,39 @@ class NoeudScanProfondeur(Node):
         self._publier(message.header, points[::pas * pas])
 
     def _publier(self, entete, points):
+        stamp_ns = nanosecondes_stamp(entete.stamp)
+        maintenant_ns = self.get_clock().now().nanoseconds
+        if not horodatage_recent(
+                stamp_ns, maintenant_ns, self._reglages.max_age_sec):
+            self.get_logger().warning(
+                f'Mesure profondeur ignorée : horodatage absent, futur ou vieux de '
+                f'{(maintenant_ns - stamp_ns) * 1e-9:.2f} s.',
+                throttle_duration_sec=5.0)
+            return
+        if not entete.frame_id:
+            self.get_logger().warning(
+                'Mesure profondeur ignorée : frame_id absent.',
+                throttle_duration_sec=5.0)
+            return
+
+        instant_mesure = Time(
+            nanoseconds=stamp_ns, clock_type=self.get_clock().clock_type)
         try:
             transformation = self._memoire_tf.lookup_transform(
-                self._repere_robot, entete.frame_id, Time())
+                self._repere_robot, entete.frame_id, instant_mesure,
+                timeout=Duration(seconds=self._reglages.tf_timeout_sec))
         except TransformException as erreur:
             self.get_logger().warning(
-                f'TF {self._repere_robot} <- {entete.frame_id} absente : {erreur}',
+                f'TF au timestamp de la mesure '
+                f'{self._repere_robot} <- {entete.frame_id} absente : {erreur}',
                 throttle_duration_sec=10.0)
+            return
+        if not horodatage_recent(
+                stamp_ns, self.get_clock().now().nanoseconds,
+                self._reglages.max_age_sec):
+            self.get_logger().warning(
+                'Mesure profondeur ignorée : elle est devenue périmée pendant '
+                'l’attente de la TF.', throttle_duration_sec=5.0)
             return
         t, q = transformation.transform.translation, transformation.transform.rotation
         reglages = self._reglages

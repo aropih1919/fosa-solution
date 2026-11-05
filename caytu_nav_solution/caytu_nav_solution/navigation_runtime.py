@@ -1,8 +1,8 @@
 """Chronomètre et client Nav2 de la course.
 
 - `ChronometreCourse` : temps officiel sur l'horloge ROS, marge de sécurité ;
-- `NavigateurNav2` : envoi de buts, rotation sur place, retour d'état,
-  annulation, interruption et nettoyage des costmaps.
+- `NavigateurNav2` : envoi de buts, rotation contrôlée, retour d'état,
+  annulation et interruption.
 
 Aucune valeur métier n'est codée ici : tout vient de `caytu_config`.
 """
@@ -15,7 +15,6 @@ from builtin_interfaces.msg import Duration
 from caytu_nav_solution.nav_math import quaternion_depuis_lacet
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose, Spin
-from nav2_msgs.srv import ClearEntireCostmap
 import rclpy
 from rclpy.action import ActionClient
 
@@ -99,14 +98,6 @@ class NavigateurNav2:
 
         self._client = ActionClient(node, NavigateToPose, 'navigate_to_pose')
         self._client_rotation = ActionClient(node, Spin, 'spin')
-        self._clear_clients = [
-            node.create_client(
-                ClearEntireCostmap,
-                navigation.global_costmap_clear_service),
-            node.create_client(
-                ClearEntireCostmap,
-                navigation.local_costmap_clear_service),
-        ]
         self._but_en_cours = None
         self._dernier_log_feedback = 0.0
 
@@ -176,11 +167,6 @@ class NavigateurNav2:
         self._node.get_logger().info(
             f'En route : {distance_restante:.2f} m restants, '
             f'{self._chronometre.ecoule():.0f} s écoulées.')
-
-    def vider_costmaps(self):
-        for client in self._clear_clients:
-            if client.service_is_ready():
-                client.call_async(ClearEntireCostmap.Request())
 
     def annuler_but(self):
         """Annule le but en cours et attend la temporisation configurée."""

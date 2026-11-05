@@ -7,6 +7,7 @@ import pytest
 from caytu_config import ConfigurationError, load_config
 from caytu_config.modeles_course import (
     CourseConfig,
+    DepthScanConfig,
     ObstacleSourceConfig,
     StartWordConfig,
 )
@@ -48,14 +49,15 @@ def _course_minimale(**surcharges):
         "front_guard_m": 0.10, "goal_xy_tolerance_m": 0.08,
         "goal_yaw_tolerance_deg": 7.0, "tag_lost_timeout_sec": 4.0,
         "preapproach_margin_m": 0.3, "search_spin_speed_rps": 0.4,
-        "search_max_radius_m": 5.0,
+        "search_max_radius_m": 5.0, "blocked_observation_sec": 2.0,
+        "same_target_retries": 2,
         "alignment": {
             "linear_gain": 0.6, "angular_gain": 1.2, "max_linear_mps": 0.08,
             "max_angular_rps": 0.35, "min_linear_mps": 0.03,
             "min_angular_rps": 0.1, "precision_point_m": 0.025,
             "precision_heading_deg": 2.0, "max_distance_error_m": 0.75,
             "max_lateral_error_m": 0.30, "timeout_sec": 30.0,
-            "max_renavigations": 2},
+            "max_renavigations": 2, "allow_reverse": False},
         "strategy": {
             "points_per_tag": 25.0, "travel_speed_mps": 0.15,
             "detour_factor": 1.4, "visit_time_sec": 45.0,
@@ -77,6 +79,7 @@ def test_le_profil_par_defaut_est_le_robot_reel(robot):
     assert robot.navigation.odom_topic == "/botwheel_explorer/odom"
     assert robot.navigation.cmd_vel_topic == "/cmd_vel"
     assert robot.navigation.scan_topic == "/scan_filtered"
+    assert robot.navigation.scan_max_age_sec == pytest.approx(0.25)
     assert robot.navigation.laser_self_filter is False
 
 
@@ -95,6 +98,9 @@ def test_la_course_suit_le_reglement(robot):
     assert course.visit_distance_m == pytest.approx(0.5)
     assert course.time_limit_sec == pytest.approx(600.0)
     assert course.heading_tolerance_deg < 12.0
+    assert course.blocked_observation_sec == pytest.approx(2.0)
+    assert course.same_target_retries == 2
+    assert course.alignment.allow_reverse is False
 
 
 def test_l_arbitre_officiel_est_configure(robot):
@@ -173,6 +179,19 @@ def test_une_source_d_obstacles_incoherente_est_refusee():
             "global_costmap": True})
 
 
+def test_une_mesure_profondeur_sans_fenetre_de_fraicheur_est_refusee():
+    with pytest.raises(ConfigurationError, match="max_age_sec"):
+        DepthScanConfig.from_mapping({
+            "name": "camera", "input_type": "depth_image",
+            "input_topic": "/depth", "info_topic": "/info",
+            "output_topic": "/scan", "min_height": 0.1,
+            "max_height": 1.2, "range_min": 0.2, "range_max": 3.0,
+            "angle_min": -1.0, "angle_max": 1.0,
+            "angle_increment": 0.01, "pixel_step": 4,
+            "min_points": 2, "rate_hz": 10.0,
+            "max_age_sec": 0.0, "tf_timeout_sec": 0.1})
+
+
 def test_les_tags_de_la_course_doivent_etre_detectes(tmp_path, monkeypatch):
     surcharge = tmp_path / "surcharge.yaml"
     surcharge.write_text("perception:\n  apriltag:\n    ids: [1, 4, 7]\n",
@@ -200,3 +219,5 @@ def test_les_cameras_detectent_les_obstacles_hauts(robot):
     assert noms == ["camera1", "camera2"]
     actives = {s.topic for s in robot.navigation.obstacle_sources if s.enabled}
     assert {s.output_topic for s in robot.perception.depth_scans} <= actives
+    assert all(s.max_age_sec > 0.0 and s.tf_timeout_sec > 0.0
+               for s in robot.perception.depth_scans)

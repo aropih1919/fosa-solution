@@ -14,6 +14,11 @@ Les documents officiels des organisateurs sont dans
 [`docs/parc-phase-finale-docs/`](docs/parc-phase-finale-docs/) (règlement,
 liste des topics du robot, consignes de l'arbitre). On n'y touche pas.
 
+**Tester sans installer ROS 2 sur son poste :**
+`bash outils/tester_docker.sh` compile et exécute les tests dans Docker Jazzy.
+Voir [le guide des tests Docker](docker/tests/README.md) pour les résultats et
+la portée de cette validation.
+
 ---
 
 # Partie 1 — Comment marche notre solution

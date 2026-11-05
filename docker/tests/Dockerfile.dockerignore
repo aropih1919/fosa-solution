@@ -1,0 +1,22 @@
+# Seuls les manifestes et le banc de test entrent dans l'image Docker.
+**
+!caytu_config/
+!caytu_config/package.xml
+!caytu_course/
+!caytu_course/package.xml
+!caytu_interfaces/
+!caytu_interfaces/package.xml
+!caytu_nav_bringup/
+!caytu_nav_bringup/package.xml
+!caytu_nav_solution/
+!caytu_nav_solution/package.xml
+!caytu_perception/
+!caytu_perception/package.xml
+!simulation/
+!simulation/parc_msgs/
+!simulation/parc_msgs/package.xml
+!docker/
+!docker/tests/
+!docker/tests/Dockerfile
+!docker/tests/executer.sh
+!docker/tests/test_installation_ros.py

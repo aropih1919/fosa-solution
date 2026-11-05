@@ -20,6 +20,8 @@ navigation:
   arrival_recheck_radius: 0.35
 
   scan_topic: /scan_filtered      # filtre d'auto-détection des organisateurs
+  scan_max_age_sec: 0.25          # un scan plus ancien ne peut autoriser un mouvement
+  scan_tf_timeout_sec: 0.1        # aucune TF récente substituée à celle du scan
   cmd_vel_topic: /cmd_vel         # Twist, relu par obstacle_avoidance (organisateurs)
   odom_topic: /botwheel_explorer/odom
   odom_frame: odom
@@ -62,6 +64,8 @@ navigation:
       raytrace_max_range: 2.5
       inf_is_valid: true
       global_costmap: true
+  # Compatibilité de configuration uniquement : le nœud de course ne vide
+  # jamais les costmaps.
   global_costmap_clear_service: /global_costmap/clear_entirely_global_costmap
   local_costmap_clear_service: /local_costmap/clear_entirely_local_costmap
 
@@ -116,6 +120,8 @@ perception:
       pixel_step: 4
       min_points: 3                 # points par secteur pour un obstacle
       rate_hz: 10.0
+      max_age_sec: 0.4              # rejeter les images profondeur périmées
+      tf_timeout_sec: 0.1           # TF demandée au timestamp exact de la mesure
     - name: camera2
       input_type: depth_image
       input_topic: /camera2/camera2/depth/image_rect_raw
@@ -131,6 +137,8 @@ perception:
       pixel_step: 4
       min_points: 3                 # points par secteur pour un obstacle
       rate_hz: 10.0
+      max_age_sec: 0.4
+      tf_timeout_sec: 0.1
 
 # --------------------------------------------------------------------------
 # Course officielle de la phase réelle (guide des équipes PARC 2026).
@@ -180,6 +188,8 @@ course:
   preapproach_margin_m: 0.3       # vu de plus loin que approach + marge : pré-approche
   search_spin_speed_rps: 0.4      # tour de recherche lent : pas de flou de bougé
   search_max_radius_m: 5.0        # zone de recherche autour du départ (arène 5 m)
+  blocked_observation_sec: 2.0    # arrêt immobile avant une reprise de la même cible
+  same_target_retries: 2          # reprises avant que la stratégie puisse sauter la cible
   alignment:
     linear_gain: 0.6
     angular_gain: 1.2
@@ -196,6 +206,7 @@ course:
     max_lateral_error_m: 0.30     # tag vu trop de biais
     timeout_sec: 30.0
     max_renavigations: 2
+    allow_reverse: false          # désactivé avant validation de la couverture arrière
   # Stratégie de visite (caytu_course/strategie.py) : replanification
   # continue des tags à tenter selon le temps restant. Durées estimées :
   # À RECALER sur les essais (journal « Plan : ... »).
