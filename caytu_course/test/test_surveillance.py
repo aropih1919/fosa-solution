@@ -83,4 +83,4 @@ def test_la_ligne_d_etat():
     surveillance.contact({'table', 'sitoe_robot'})
     ligne = surveillance.ligne_etat((1.234, -0.5, math.radians(90)))
     assert ligne == ('[ÉTAT] position (1,23 ; -0,50), cap +90° | v=+0.00 w=+0.00 | '
-                     'Nav2 inactif | chemins 0 | contacts 1')
+                     'trajet Nav2 inactif | chemins 0 | contacts 1')
