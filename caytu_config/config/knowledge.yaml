@@ -1,0 +1,44 @@
+# Base de connaissances du site. Le LLM ne fait que reformuler ces données :
+# s'il ne trouve pas la réponse, il doit dire qu'il ne la connaît pas.
+# Adapter le programme et la FAQ au site réel avant la démonstration.
+
+world: cafe
+
+program:
+  - time: "09:00"
+    title: "Ouverture au public"
+    location: accueil
+    description: "Accueil des visiteurs et retrait des badges."
+  - time: "10:00"
+    title: "Démonstrations des équipes"
+    location: terrain
+    description: "Présentation des robots et des parcours."
+  - time: "12:00"
+    title: "Pause déjeuner"
+    location: buvette
+    description: "Service à la buvette."
+  - time: "15:00"
+    title: "Finale de la compétition"
+    location: terrain
+    description: "Épreuve finale devant le jury."
+  - time: "17:00"
+    title: "Remise des prix"
+    location: accueil
+    description: "Cérémonie de clôture."
+
+faq:
+  - question: "Où sont les toilettes ?"
+    answer: "Les toilettes se trouvent au niveau du point d'accueil, à droite en entrant."
+    keywords: [toilettes, wc, sanitaires]
+  - question: "Où puis-je manger ?"
+    answer: "La buvette est ouverte toute la journée à côté du terrain."
+    keywords: [manger, boire, buvette, restaurant, faim, soif]
+  - question: "À quelle heure commence la finale ?"
+    answer: "La finale commence à 15 heures sur le terrain principal."
+    keywords: [finale, heure, commence, horaire]
+  - question: "Où est l'infirmerie ?"
+    answer: "Le poste de secours est signalé près de l'accueil."
+    keywords: [infirmerie, secours, médecin, blessé, urgence]
+  - question: "Combien de temps dure la compétition ?"
+    answer: "La compétition se déroule sur la journée, de 9 heures à 17 heures."
+    keywords: [durée, dure, compétition, journée, horaire]

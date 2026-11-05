@@ -15,13 +15,16 @@ setup(
     zip_safe=True,
     maintainer='Équipe Fosa',
     maintainer_email='johny@fosa.mg',
-    description='Détection AprilTag et obstacles hauts par profondeur.',
+    description='AprilTag, profondeur géométrique, YOLO et suivi personne.',
     license='MIT',
-    extras_require={'test': ['pytest']},
     entry_points={
         'console_scripts': [
             'tag_detector = caytu_perception.detecteur_tags:main',
-            'depth_scan = caytu_perception.noeud_scan_profondeur:main',
+            'registre_tags = caytu_perception.registre_tags:main',
+            'essai_tags = caytu_perception.essai_tags:main',
+            'tag_calibrator = caytu_perception.calibrateur_tags:main',
+            'obstacle_classifier = caytu_perception.classificateur_obstacles:main',
+            'person_tracker = caytu_perception.suivi_personnes:main',
         ],
     },
 )

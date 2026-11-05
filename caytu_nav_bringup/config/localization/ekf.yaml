@@ -1,0 +1,9 @@
+# Ce fichier est une fiche de disponibilité, pas un YAML de paramètres ROS.
+# Ne pas lancer robot_localization tant que le publisher actuel de
+# odom -> base_footprint et les covariances source n'ont pas été vérifiés.
+mode: amcl_ekf
+available: false
+reason: >-
+  Le paquet parc_robot_bringup et son URDF ne sont pas présents dans cet
+  environnement. L'historique indique que le plugin DiffDrive publie déjà
+  odom -> base_footprint. Un second publisher TF serait incorrect.

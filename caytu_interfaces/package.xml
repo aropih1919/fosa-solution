@@ -3,7 +3,7 @@
 <package format="3">
   <name>caytu_interfaces</name>
   <version>0.1.0</version>
-  <description>Message de détection AprilTag partagé par la perception et la course.</description>
+  <description>Messages et services partagés par les paquets CAYTU.</description>
   <maintainer email="johny@fosa.mg">Équipe Fosa</maintainer>
   <license>MIT</license>
   <buildtool_depend>ament_cmake</buildtool_depend>

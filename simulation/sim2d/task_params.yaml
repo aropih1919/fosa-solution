@@ -1,0 +1,10 @@
+# Point de départ du robot dans le simulateur 2D (repère du monde), au format
+# de parc_robot_bringup/config/task_params.yaml. mapping.launch.py gazebo:=true
+# s'en sert pour relier la carte au monde (world_from_map de fosa_map.yaml).
+/**:
+  ros__parameters:
+    x: -0.200546
+    y: -7.485170
+    yaw: 1.571
+    goal_x: -2.293350
+    goal_y: 2.232090

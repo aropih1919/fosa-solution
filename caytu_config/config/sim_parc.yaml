@@ -1,0 +1,26 @@
+# Surcouche de fosa.yaml pour le simulateur Gazebo officiel de la phase finale
+# (mêmes topics que le vrai robot, temps simulé). À utiliser avec robot:=parc :
+#
+#   export FOSA_CONFIG_OVERRIDE=$PWD/caytu_config/config/sim_parc.yaml
+#
+# Mêmes réglages que robot_reel.yaml, sauf le temps simulé et la taille des tags.
+
+system:
+  use_sim_time: true
+  ros_domain_id: 0                # celui d'un `ros2 launch parc_robot_bringup ...` sans réglage
+
+navigation:
+  cmd_vel_topic: /cmd_vel
+
+perception:
+  top_color_topic: /camera1/camera1/color/image_raw    # camera1 = caméra haute
+  top_info_topic: /camera1/camera1/color/camera_info
+  bottom_color_topic: /camera2/camera2/color/image_raw
+  top_depth_topic: /fosa/top_camera/points
+  bottom_depth_topic: /fosa/bottom_camera/points
+  top_scan:
+    cloud_topic: /fosa/top_camera/points
+  bottom_scan:
+    cloud_topic: /fosa/bottom_camera/points
+  apriltag:
+    size_m: 0.12                  # texture de 0,15 m, carré noir de 0,12 m (world_generator.py)

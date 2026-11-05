@@ -2,12 +2,61 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>caytu_nav_bringup</name>
-  <version>0.2.0</version>
-  <description>Paramètres Nav2, filtre du lidar et arbre de comportement de la course — CAYTU Sito-É, PARC 2026, équipe Fosa</description>
-  <maintainer email="johny@fosa.mg">Équipe Fosa</maintainer>
+  <version>0.3.0</version>
+  <description>Configuration et lancement Nav2 pour le CAYTU Sito-É — PARC 2026, équipe Fosa (costmaps, planificateur, contrôleur, carte du café, cartographie slam_toolbox, profils de robot)</description>
+  <maintainer email="johny@fosa.mg">Johny — Trinôme 2</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Imports des fichiers de lancement Python. -->
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>caytu_config</exec_depend>
+
+  <!-- Nav2 : serveurs lancés par navigation.launch.py et plugins configurés. -->
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nav2_planner</exec_depend>
+  <exec_depend>nav2_smac_planner</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_regulated_pure_pursuit_controller</exec_depend>
+  <exec_depend>nav2_dwb_controller</exec_depend>
+  <exec_depend>nav2_mppi_controller</exec_depend>
+  <exec_depend>nav2_behaviors</exec_depend>
+  <exec_depend>nav2_bt_navigator</exec_depend>
+  <exec_depend>nav2_behavior_tree</exec_depend>
+  <exec_depend>nav2_costmap_2d</exec_depend>
+  <!-- Garde-fou de la course (course.launch.py) : arrêt devant tout objet. -->
+  <exec_depend>nav2_collision_monitor</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+
+  <!-- Perception : filtre d'auto-détection du lidar et caméras -> LaserScan. -->
+  <exec_depend>laser_filters</exec_depend>
+  <exec_depend>pointcloud_to_laserscan</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <!-- Cartographie manuelle (mapping.launch.py) et localisation sur la carte
+       enregistrée (solution_bringup.launch.py localization:=slam). -->
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>rosbag2</exec_depend>
+  <exec_depend>teleop_twist_keyboard</exec_depend>
+  <!-- Robot réel : images de profondeur des caméras -> nuages de points. Si le
+       paquet manque, la solution démarre au lidar seul. -->
+  <exec_depend>depth_image_proc</exec_depend>
+  <!-- rviz2 n'est utile qu'avec rviz:=true, sur un poste avec écran : il n'est
+       pas déclaré pour ne pas l'imposer sur le robot. -->
+
+  <!-- Les nœuds localisateur_odom_imu, filtre_sol_lidar, mapping_session,
+       tf_bag_relay et wait_for_tf lancés ici viennent de
+       caytu_nav_solution. La dépendance est déclarée dans l'autre sens
+       (caytu_nav_solution dépend de caytu_nav_bringup) pour éviter un cycle. -->
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-yaml</test_depend>
+  <test_depend>caytu_config</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

@@ -1,0 +1,56 @@
+# Garde-fou de la course : nav2_collision_monitor, placé entre les vitesses
+# demandées (Nav2, course_tags) et la base du robot. Il ne connaît pas la
+# carte : tout ce que voient le lidar et les caméras compte, meubles déplacés
+# comme personnes.
+#   ZoneArret   : pare-chocs + 8 cm devant, 4 cm sur les côtés -> arrêt net ;
+#   ZoneRalenti : jusqu'à 0,45 m du centre (23 cm devant le pare-chocs) ->
+#                 vitesse réduite à 40 %. Le support du tag, à 0,5 m du
+#                 centre à l'arrivée, reste hors de cette zone : l'approche
+#                 finale n'est pas ralentie.
+# Nav2 ralentit déjà de lui-même près des obstacles (RPP).
+# L'approche finale s'arrête à 0,5 m du tag : le support du tag reste à
+# ~0,28 m du pare-chocs, hors de la zone d'arrêt.
+# Les topics d'entrée et de sortie et la liste des sources (sans caméras pour
+# real_remote) sont complétés par course.launch.py.
+collision_monitor:
+  ros__parameters:
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    transform_tolerance: 0.3
+    source_timeout: 1.0
+    # false : pas de recherche TF dans le passé de l'odométrie (erreurs
+    # d'extrapolation constatées) ; à 0,3 m/s, l'écart reste de quelques cm.
+    base_shift_correction: false
+    stop_pub_timeout: 2.0
+    enable_stamped_cmd_vel: false
+    polygons: ["ZoneArret", "ZoneRalenti"]
+    ZoneArret:
+      type: polygon
+      points: "[[0.30, 0.29], [0.30, -0.29], [-0.36, -0.29], [-0.36, 0.29]]"
+      action_type: stop
+      min_points: 3
+      visualize: true
+      polygon_pub_topic: /fosa/zone_arret
+      enabled: true
+    ZoneRalenti:
+      type: polygon
+      points: "[[0.45, 0.33], [0.45, -0.33], [0.22, -0.33], [0.22, 0.33]]"
+      action_type: slowdown
+      slowdown_ratio: 0.4
+      min_points: 3
+      visualize: true
+      polygon_pub_topic: /fosa/zone_ralenti
+      enabled: true
+    observation_sources: ["lidar"]
+    lidar:
+      type: scan
+      topic: /scan_clean
+      enabled: true
+    camera_haute:
+      type: scan
+      topic: /top_camera_scan
+      enabled: true
+    camera_basse:
+      type: scan
+      topic: /bottom_camera_scan
+      enabled: true

@@ -1,0 +1,62 @@
+# Profil « real » : CAYTU Sito-É réel de la phase finale (Dakar).
+# Source : relevé officiel des topics PARC du 2 novembre 2026 (ROS 2 Jazzy,
+# ROS_DOMAIN_ID=0). Les lignes « À VÉRIFIER » se contrôlent au premier
+# créneau (docs/ROBOT_REEL.md, partie 3).
+robot: real
+
+# /cmd_vel (Twist) est écouté par le nœud de sécurité obstacle_avoidance des
+# organisateurs, qui commande ensuite la base (/botwheel_explorer/cmd_vel).
+# Ne jamais publier sur /botwheel_explorer/cmd_vel ni /stamped_vel.
+# À VÉRIFIER : point d'entrée officiel à confirmer avec les organisateurs.
+cmd_vel_topic: /cmd_vel
+odom_topic: /botwheel_explorer/odom
+# Pas d'IMU de base : seulement celles des caméras, dans leur repère optique.
+# La solution s'en passe (cap de l'odométrie, sol supposé plat).
+imu_topic: ''
+scan_topic: /scan                   # rplidar_node, repère `laser`
+
+# L'arbre TF réel est odom -> base_link, sans base_footprint. On ajoute
+# base_footprint sous base_link, au niveau du sol, pour garder les réglages
+# de Nav2, de slam_toolbox et des caméras.
+base_footprint:
+  publish: true
+  parent: base_link
+  # Hauteur de base_link au-dessus du sol (m). À VÉRIFIER : hauteur du lidar
+  # mesurée au mètre, moins le z de `laser` dans base_link (tf2_echo).
+  base_link_height: 0.0
+
+# Les secteurs de la phase 1 (roues vues dans Gazebo) ne valent pas pour le
+# vrai robot : seulement les retours très proches (le châssis) sont retirés.
+laser_filter_file: laser_filter_params_real.yaml
+
+# Lidar supposé horizontal, sans IMU : aucun rayon n'est attribué au sol.
+# Si une ligne de faux obstacles apparaît, forcer floor_line_distance.
+floor_filter:
+  imu_topic: ''
+  default_robot_pitch: 0.0
+  lidar_mount_pitch: 0.0
+
+# Les caméras réelles publient des images de profondeur, pas de nuages :
+# depth_image_proc les convertit (s'il est installé).
+# camera1 = caméra haute, camera2 = basse (README officiel PARC du 5 novembre).
+cameras:
+  top:
+    depth_image: /camera1/camera1/depth/image_rect_raw
+    cloud: /fosa/top_camera/points
+  bottom:
+    depth_image: /camera2/camera2/depth/image_rect_raw
+    cloud: /fosa/bottom_camera/points
+
+# Garde-fou (nav2_collision_monitor) : lidar + caméras. Si une caméra cesse de
+# publier plus de source_timeout (1 s), le garde-fou arrête le robot (« invalid
+# source »). Secours au lancement : garde_fou_cameras:=false (lidar seul).
+collision_cameras: true
+
+record_topics: [/scan, /botwheel_explorer/odom, /camera1/camera1/imu, /camera2/camera2/imu,
+                /tf, /tf_static, /robot_description, /joint_states]
+record_camera_topics: [/camera1/camera1/color/image_raw, /camera1/camera1/color/camera_info]
+
+# Topics des organisateurs sur lesquels la solution ne doit jamais publier.
+reserved_topics: [/scan_filtered, /scan_merged, /camera1/scan, /camera2/scan, /goal,
+                  /nav_goal, /botwheel_explorer/cmd_vel, /stamped_vel, /safe_vel, /auto_vel,
+                  /status_led, /footprint]

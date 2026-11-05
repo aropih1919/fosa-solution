@@ -2,21 +2,41 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>caytu_nav_solution</name>
-  <version>0.2.0</version>
-  <description>Chronomètre de course, client Nav2 et génération du YAML Nav2 depuis caytu_config — CAYTU Sito-É, équipe Fosa</description>
-  <maintainer email="johny@fosa.mg">Équipe Fosa</maintainer>
+  <version>0.3.0</version>
+  <description>Point d'entrée officiel PARC 2026 (task_solution.py), localisation roues + IMU ou slam_toolbox, cartographie manuelle et filtrage du lidar — CAYTU Sito-É, équipe Fosa</description>
+  <maintainer email="liantsoaandreane@gmail.com">Liantsoa — Trinôme 2</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <exec_depend>rclpy</exec_depend>
-  <exec_depend>action_msgs</exec_depend>
-  <exec_depend>builtin_interfaces</exec_depend>
-  <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>nav2_msgs</exec_depend>
-  <exec_depend>python3-yaml</exec_depend>
+  <!-- Bibliothèques ROS utilisées par les nœuds Python. -->
+  <depend>rclpy</depend>
+  <depend>action_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>nav2_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2_ros</depend>
+  <!-- Cartographie : service de sauvegarde (std_srvs), graphe de slam_toolbox,
+       relais TF du rejeu (tf2_msgs). -->
+  <depend>std_srvs</depend>
+  <depend>tf2_msgs</depend>
+  <depend>slam_toolbox</depend>
+  <!-- Course finale : tags du registre, ordre publié dans un type quelconque. -->
+  <depend>caytu_interfaces</depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
+  <!-- Lecture de task_params.yaml et du YAML de carte. -->
+  <exec_depend>python3-yaml</exec_depend>
   <exec_depend>caytu_config</exec_depend>
+  <!-- task_solution.py lit task_params.yaml dans le package officiel... -->
+  <exec_depend>parc_robot_bringup</exec_depend>
+  <exec_depend>ros_gz_interfaces</exec_depend>
+  <exec_depend>python3-psutil</exec_depend>
+  <!-- ...puis démarre toute la pile avec `ros2 launch caytu_nav_bringup ...`. -->
+  <exec_depend>ros2launch</exec_depend>
+  <exec_depend>caytu_nav_bringup</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 

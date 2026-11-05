@@ -1,0 +1,64 @@
+# Prompt système et règles du dialogue. Les exemples sont donnés à titre de
+# calibration : le modèle doit toujours répondre avec une intention et un lieu,
+# jamais avec des coordonnées ou une commande moteur.
+
+system: |
+  Tu es l'assistant vocal du robot Fosa sur un site de compétition.
+  Tu réponds en français simple, en une ou deux phrases courtes.
+  Tu ne donnes JAMAIS de coordonnées, de vitesse ou de commande moteur.
+  Tu ne proposes que des lieux présents dans la carte sémantique.
+  Si tu ne connais pas une information, tu dis que tu ne la connais pas et tu
+  renvoies vers l'accueil.
+  Tu ne dois produire que le JSON demandé, sans texte autour.
+
+intentions: [navigation, localiser, information, confirmation, salutation, fin, autre]
+
+rules:
+  - "Une demande de déplacement utilise l'intention navigation avec un lieu connu."
+  - "Une question sur un lieu utilise localiser, sans déplacement immédiat."
+  - "Une question sur le programme ou les services utilise information."
+  - "Une réponse courte oui/non utilise confirmation."
+  - "Une urgence (mal, blessé, secours) est traitée par une règle déterministe, pas par le modèle."
+  - "Le lieu doit être un nom ou un alias de locations.yaml ; sinon il reste vide."
+
+examples:
+  - question: "Où sont les toilettes ?"
+    intent: localiser
+    location: toilettes
+  - question: "Emmène-moi à la buvette"
+    intent: navigation
+    location: buvette
+  - question: "À quelle heure est la finale ?"
+    intent: information
+    location: ""
+  - question: "Oui, allons-y"
+    intent: confirmation
+    location: ""
+  - question: "Bonjour"
+    intent: salutation
+    location: ""
+  - question: "Merci, au revoir"
+    intent: fin
+    location: ""
+
+fallback_keywords:
+  'yes': [oui, "yes", d'accord, okay, ok]
+  'no': [non, "no", "pas maintenant"]
+  stop: [stop, annule, "annule navigation", cancel, "cancel navigation"]
+  navigation: [emmene, emmener, conduis, "va a", "allez a", "take me to"]
+  localization: ["ou est", "ou sont", "ou se trouve", "where is", "where are"]
+  greeting: [bonjour, salut, hello, hi]
+  farewell: ["au revoir", bye, merci]
+
+responses:
+  farewell: "À bientôt."
+  declined: "D’accord, je reste ici."
+  no_pending_destination: "Je n’ai pas de destination en attente."
+  location_question: "{description} Voulez-vous que je vous y accompagne ?"
+  navigation_confirmation: "Je peux vous accompagner à {name}. Confirmez-vous ?"
+  emergency_unconfigured: "Urgence détectée, mais le lieu de secours n’est pas configuré."
+  navigation_pose_missing: "Je connais {name}, mais sa pose d’approche n’est pas encore disponible. Aucun déplacement n’a été lancé."
+  navigation_success: "Nous sommes arrivés à {name}."
+  navigation_failure: "Je n’ai pas pu rejoindre {name}."
+  navigation_cancelled: "Navigation arrêtée."
+  fallback: "Je n’ai pas compris. Pouvez-vous reformuler ?"

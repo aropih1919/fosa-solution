@@ -1,0 +1,30 @@
+# Robot réel et simulateur officiel PARC (profils real, real_remote, parc).
+#   1. Retours à moins de 0,20 m (le châssis tout près du lidar) -> NaN.
+#   2. Retours DANS l'emprise du robot (roues, carrosserie) -> NaN. Le lidar
+#      voit aussi le robot lui-même : dans le simulateur officiel, des retours
+#      à 0,17-0,28 m sur les côtés (±45° à ±80°), au-delà du filtre 1. Gardés,
+#      ils marquent un obstacle sur le robot : Nav2 refuse tout chemin
+#      (« Start occupied ») et le robot ne part jamais. La boîte reprend
+#      l'emprise de Nav2 (footprint de nav2_params.yaml) avec 3 à 4 cm de marge.
+# Nav2 et slam_toolbox ignorent les NaN.
+scan_to_scan_filter_chain:
+  ros__parameters:
+    filter1:
+      name: chassis_range_filter
+      type: laser_filters/LaserScanRangeFilter
+      params:
+        use_message_range_limits: false
+        lower_threshold: 0.20
+        upper_threshold: 100.0
+    filter2:
+      name: emprise_robot
+      type: laser_filters/LaserScanBoxFilter
+      params:
+        box_frame: base_footprint
+        min_x: -0.35
+        max_x: 0.26
+        min_y: -0.29
+        max_y: 0.29
+        min_z: -0.50
+        max_z: 2.00
+        invert: false

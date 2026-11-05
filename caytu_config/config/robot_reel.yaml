@@ -1,0 +1,35 @@
+# Surcouche de fosa.yaml pour le CAYTU Sito-É réel de Dakar (relevé officiel
+# PARC du 2 novembre 2026). Seules les valeurs qui changent sont listées.
+#
+#   export FOSA_CONFIG_OVERRIDE=$(ros2 pkg prefix caytu_config)/share/caytu_config/config/robot_reel.yaml
+#
+# La navigation choisit en plus le profil robot:=real ou robot:=real_remote
+# (caytu_nav_bringup/config/robots/). Les deux doivent rester d'accord.
+# camera1 = caméra haute, camera2 = basse (README officiel PARC du 5 novembre).
+# À VÉRIFIER au créneau : la taille réelle des tags (perception.apriltag.size_m).
+
+system:
+  use_sim_time: false
+  ros_domain_id: 0                # domaine du robot (relevé officiel)
+
+navigation:
+  cmd_vel_topic: /cmd_vel         # lu par obstacle_avoidance des organisateurs
+
+perception:
+  # Caméra haute : camera1 (README officiel PARC ; l'arbitre attend son image).
+  top_color_topic: /camera1/camera1/color/image_raw
+  top_info_topic: /camera1/camera1/color/camera_info
+  bottom_color_topic: /camera2/camera2/color/image_raw
+  # Le robot publie des images de profondeur, pas de nuages : avec
+  # robot:=real, depth_image_proc les convertit sous ces noms.
+  top_depth_topic: /fosa/top_camera/points
+  bottom_depth_topic: /fosa/bottom_camera/points
+  top_scan:
+    cloud_topic: /fosa/top_camera/points
+  bottom_scan:
+    cloud_topic: /fosa/bottom_camera/points
+  apriltag:
+    # Côté du CARRÉ NOIR. Le guide annonce des tags de 16,5 cm : si cette taille
+    # comprend la marge blanche (comme dans le simulateur officiel), le carré
+    # noir mesure 0,132 m. À MESURER au premier créneau, à la règle.
+    size_m: 0.165

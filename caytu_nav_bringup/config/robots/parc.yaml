@@ -1,0 +1,53 @@
+# Profil « parc » : simulateur Gazebo officiel de la phase finale (dépôt
+# PARC2026-Engineers-League, version du 5 novembre : phase2_hard.launch.py,
+# phase2.launch.py, task.launch.py). Il publie les mêmes topics que le vrai
+# robot (profil real), avec ces différences :
+#   - temps simulé (/clock) ;
+#   - l'odométrie et l'URDF ont déjà base_footprint (odom -> base_footprint
+#     -> base_link) : on ne l'ajoute pas ;
+#   - tags de 0,15 m dont le carré noir mesure 0,12 m (FOSA_CONFIG_OVERRIDE=
+#     caytu_config/config/sim_parc.yaml).
+# camera1 est la caméra haute, camera2 la basse (README officiel).
+robot: parc
+
+cmd_vel_topic: /cmd_vel
+odom_topic: /botwheel_explorer/odom
+imu_topic: ''                       # IMU des caméras seulement, comme le vrai robot
+scan_topic: /scan                   # repère `laser`, retours du robot compris
+
+base_footprint:
+  publish: false
+
+laser_filter_file: laser_filter_params_real.yaml
+
+floor_filter:
+  imu_topic: ''
+  default_robot_pitch: 0.0
+  lidar_mount_pitch: 0.0
+
+# Images de profondeur 16UC1 (mm), converties par depth_image_proc.
+cameras:
+  top:
+    depth_image: /camera1/camera1/depth/image_rect_raw
+    cloud: /fosa/top_camera/points
+  bottom:
+    depth_image: /camera2/camera2/depth/image_rect_raw
+    cloud: /fosa/bottom_camera/points
+
+# Garde-fou (nav2_collision_monitor) : les caméras en font partie seulement si
+# leurs images arrivent à temps. Le simulateur officiel tourne souvent bien
+# plus lentement que le temps réel sur un PC sans carte graphique : les nuages
+# des caméras arrivent avec des secondes de retard, le garde-fou les déclare
+# « invalid source » et arrête le robot. Ici : lidar seul dans le garde-fou ;
+# Nav2 se sert quand même des caméras pour contourner. Forçage au lancement :
+# garde_fou_cameras:=true.
+collision_cameras: false
+
+record_topics: [/scan, /botwheel_explorer/odom, /camera1/camera1/imu, /camera2/camera2/imu,
+                /tf, /tf_static, /robot_description, /joint_states, /clock]
+record_camera_topics: [/camera1/camera1/color/image_raw, /camera1/camera1/color/camera_info]
+
+# Comme sur le vrai robot : topics de l'organisation, jamais publiés par nous.
+reserved_topics: [/scan_filtered, /scan_merged, /camera1/scan, /camera2/scan, /goal,
+                  /nav_goal, /botwheel_explorer/cmd_vel, /stamped_vel, /safe_vel, /auto_vel,
+                  /status_led, /footprint]

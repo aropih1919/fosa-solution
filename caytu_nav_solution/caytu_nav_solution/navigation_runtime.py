@@ -1,27 +1,37 @@
-"""Chronomètre et client Nav2 de la course.
+"""Briques d'exécution réutilisables par la tâche et par l'assistant.
 
-- `ChronometreCourse` : temps officiel sur l'horloge ROS, marge de sécurité ;
-- `NavigateurNav2` : envoi de buts, rotation sur place, retour d'état,
-  annulation, interruption et nettoyage des costmaps.
+- `TaskTimer` : chronomètre officiel (horloge ROS, marge de sécurité) ;
+- `BringupManager` : lancement et arrêt propre du bringup ROS ;
+- `Nav2Navigator` : client Nav2 (but, retour d'état, annulation, costmaps).
 
 Aucune valeur métier n'est codée ici : tout vient de `caytu_config`.
 """
 
 import math
+import os
+import shutil
+import signal
+import subprocess
+import tempfile
 import time
 
 from action_msgs.msg import GoalStatus
-from builtin_interfaces.msg import Duration
+from caytu_config import ConfigurationError
+from caytu_nav_solution.benchmark_config import (
+    build_experiment_config,
+    validate_experiment_config,
+    write_experiment_config,
+)
 from caytu_nav_solution.nav_math import quaternion_depuis_lacet
 from geometry_msgs.msg import PoseStamped
-from nav2_msgs.action import NavigateToPose, Spin
+from nav2_msgs.action import NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 import rclpy
 from rclpy.action import ActionClient
 
 
-class ChronometreCourse:
-    """Chronomètre de la course, basé sur l'horloge ROS (simulée ou réelle)."""
+class TaskTimer:
+    """Chronomètre de la tâche, basé sur l'horloge ROS (simulée ou réelle)."""
 
     def __init__(self, now, time_limit_sec, stop_margin_sec):
         self._now = now
@@ -29,29 +39,128 @@ class ChronometreCourse:
         self._stop_margin_sec = float(stop_margin_sec)
         self._start = None
 
-    def demarrer(self):
+    def start(self):
         """Démarre le chronomètre et retourne False si l'horloge n'est pas prête."""
         self._start = self._now()
         return self._start.nanoseconds != 0
 
-    def ecoule(self):
+    def elapsed(self):
         if self._start is None:
             return 0.0
         return (self._now() - self._start).nanoseconds * 1e-9
 
-    def restant(self):
+    def remaining(self):
         """Temps restant avant la limite officielle, marge déduite."""
-        return self._time_limit_sec - self._stop_margin_sec - self.ecoule()
+        return self._time_limit_sec - self._stop_margin_sec - self.elapsed()
 
-    def expire(self):
-        return self.restant() <= 0.0
+    def expired(self):
+        return self.remaining() <= 0.0
 
 
-def construire_but(goal_x, goal_y, frame, stamp, pose, spawn, cap=None):
-    """Message NavigateToPose ; sans cap imposé, orienté du robot vers le but."""
-    if cap is None:
-        reference = pose or spawn
-        cap = math.atan2(goal_y - reference.y, goal_x - reference.x)
+class BringupManager:
+    """Lance `ros2 launch` dans un groupe de processus et l'arrête proprement."""
+
+    def __init__(self, navigation, logger, popen=None, killpg=None,
+                 getpgid=None):
+        self._navigation = navigation
+        self._logger = logger
+        self._popen = popen or subprocess.Popen
+        self._killpg = killpg or os.killpg
+        self._getpgid = getpgid or os.getpgid
+        self._process = None
+        self._config_dir = None
+
+    def start(self, *, map_yaml, use_sim_time, params_file, controller,
+              localization, profile, task_params_path, spawn,
+              bringup_package=None, bringup_launch=None, robot=None,
+              slam_map_dir=None):
+        """Prépare le YAML d'essai puis lance le bringup complet.
+
+        robot : profil caytu_nav_bringup/config/robots/<robot>.yaml (sim par
+        défaut côté launch) ; slam_map_dir : carte enregistrée, avec
+        localization='slam'.
+        """
+        params_file = str(params_file or '')
+        if params_file:
+            if not os.path.isfile(params_file):
+                raise ConfigurationError(
+                    f'nav2_params_file absent : {params_file}')
+            import yaml
+            with open(params_file, encoding='utf-8') as stream:
+                configuration = yaml.safe_load(stream)
+            if not isinstance(configuration, dict):
+                raise ConfigurationError(
+                    'nav2_params_file doit contenir un mapping YAML complet.')
+            validate_experiment_config(
+                configuration, controller, localization, profile)
+        else:
+            # Le laboratoire fusionne nav2_params + contrôleur + profil +
+            # localisation dans un seul YAML, puis le passe au bringup.
+            self._config_dir = tempfile.mkdtemp(prefix='fosa_nav_config_')
+            params_file = os.path.join(self._config_dir, 'params.yaml')
+            configuration = build_experiment_config(
+                controller, localization, profile, spawn,
+                use_sim_time=use_sim_time)
+            write_experiment_config(configuration, params_file)
+
+        # Liste de morceaux de commande, jamais une chaîne : aucun passage par
+        # le shell, donc aucun caractère spécial interprété.
+        command = [
+            'ros2', 'launch',
+            bringup_package or self._navigation.bringup_package,
+            bringup_launch or self._navigation.bringup_launch,
+            f'use_sim_time:={"true" if use_sim_time else "false"}',
+            f'map:={map_yaml}',
+            f'controller:={controller}',
+            f'localization:={localization}',
+            f'profile:={profile}',
+            f'params_file:={params_file}',
+            f'task_params_file:={task_params_path}',
+            f'initial_pose_x:={spawn.x}',
+            f'initial_pose_y:={spawn.y}',
+            f'initial_pose_yaw:={spawn.yaw}',
+        ]
+        if robot:
+            command.append(f'robot:={robot}')
+        if slam_map_dir:
+            command.append(f'slam_map_dir:={slam_map_dir}')
+        self._logger.info('Démarrage de la solution : ' + ' '.join(command))
+        self._process = self._popen(command, start_new_session=True)
+
+    def alive(self):
+        """Indique si le bringup tourne ou n'a pas été démarré ici."""
+        return self._process is None or self._process.poll() is None
+
+    def stop(self):
+        """Arrêt gradué SIGINT -> SIGTERM -> SIGKILL, puis nettoyage."""
+        if self._process is not None and self._process.poll() is None:
+            self._logger.info('Arrêt du bringup...')
+            for signal_envoye, attente in zip(
+                    (signal.SIGINT, signal.SIGTERM, signal.SIGKILL),
+                    self._navigation.bringup_stop_timeouts):
+                try:
+                    self._killpg(
+                        self._getpgid(self._process.pid), signal_envoye)
+                except ProcessLookupError:
+                    break
+                try:
+                    self._process.wait(timeout=attente)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        self.cleanup()
+
+    def cleanup(self):
+        """Supprime le YAML d'essai généré, s'il existe."""
+        if self._config_dir is not None:
+            shutil.rmtree(self._config_dir, ignore_errors=True)
+            self._config_dir = None
+
+
+def construire_but(goal_x, goal_y, frame, stamp, pose, spawn):
+    """Message NavigateToPose orienté du robot vers le but."""
+    reference = pose or spawn
+    cap = math.atan2(goal_y - reference.y, goal_x - reference.x)
 
     but = PoseStamped()
     but.header.frame_id = frame
@@ -75,15 +184,16 @@ def est_arrive(pose, goal_x, goal_y, rayon):
     return pose is not None and pose.distance_vers(goal_x, goal_y) <= rayon
 
 
-class NavigateurNav2:
+class Nav2Navigator:
     """Client Nav2 réutilisable : envoi de but, suivi, annulation, costmaps."""
 
-    def __init__(self, node, navigation, chronometre, pose_robot,
+    def __init__(self, node, navigation, timer, bringup, pose_robot,
                  spin_once=None, is_ok=None, success_radius=None,
                  arrival_recheck_radius=None):
         self._node = node
         self._navigation = navigation
-        self._chronometre = chronometre
+        self._timer = timer
+        self._bringup = bringup
         self._pose_robot = pose_robot
         # Les paramètres ROS peuvent surcharger les valeurs du YAML. Les
         # conserver explicitement évite de perdre ces overrides à l'extraction.
@@ -98,7 +208,6 @@ class NavigateurNav2:
         self._is_ok = is_ok or rclpy.ok
 
         self._client = ActionClient(node, NavigateToPose, 'navigate_to_pose')
-        self._client_rotation = ActionClient(node, Spin, 'spin')
         self._clear_clients = [
             node.create_client(
                 ClearEntireCostmap,
@@ -119,18 +228,20 @@ class NavigateurNav2:
                 break
             self._spin(min(0.05, restant))
 
-    def serveur_pret(self):
+    def server_is_ready(self):
         return self._client.server_is_ready()
 
-    def attendre_pret(self, timeout_sec):
+    def attendre_pret(self, amcl_ready, localization, timeout_sec):
         """Attend que Nav2 accepte des buts et que le robot soit localisé."""
         debut = time.monotonic()
         dernier_log = debut
 
         while self._is_ok():
             self._traiter(0.2)
-            serveur_pret = self.serveur_pret()
-            robot_localise = self._pose_robot() is not None
+            serveur_pret = self.server_is_ready()
+            robot_localise = (
+                self._pose_robot() is not None
+                and (localization != 'amcl' or amcl_ready()))
 
             if serveur_pret and robot_localise:
                 self._node.get_logger().info(
@@ -138,7 +249,12 @@ class NavigateurNav2:
                     f'{time.monotonic() - debut:.1f} s réelles.')
                 return True
 
-            if (self._chronometre.restant() <= 0.0
+            if not self._bringup.alive():
+                self._node.get_logger().error(
+                    "Le bringup s'est arrêté pendant le démarrage.")
+                return False
+
+            if (self._timer.remaining() <= 0.0
                     or time.monotonic() - debut > timeout_sec):
                 self._node.get_logger().error(
                     "Nav2 n'est pas devenu disponible à temps.")
@@ -153,11 +269,11 @@ class NavigateurNav2:
 
         return False
 
-    def message_but(self, goal_x, goal_y, frame, spawn, cap=None):
+    def message_but(self, goal_x, goal_y, frame, spawn):
         return construire_but(
             goal_x, goal_y, frame,
             self._node.get_clock().now().to_msg(),
-            self._pose_robot(), spawn, cap)
+            self._pose_robot(), spawn)
 
     def est_arrive(self, goal_x, goal_y):
         return est_arrive(
@@ -175,7 +291,7 @@ class NavigateurNav2:
             message_feedback.feedback, 'distance_remaining', float('nan'))
         self._node.get_logger().info(
             f'En route : {distance_restante:.2f} m restants, '
-            f'{self._chronometre.ecoule():.0f} s écoulées.')
+            f'{self._timer.elapsed():.0f} s écoulées.')
 
     def vider_costmaps(self):
         for client in self._clear_clients:
@@ -193,45 +309,26 @@ class NavigateurNav2:
             self._spin(0.05)
         self._but_en_cours = None
 
-    def _annuler_si_accepte(self, future_envoi):
-        """But abandonné avant son acceptation : s'il est accepté juste après,
-        on l'annule, sinon le robot repartirait (par exemple après la fin)."""
-        fin = time.monotonic() + self._navigation.cancel_timeout_sec
-        while self._is_ok() and not future_envoi.done() and time.monotonic() < fin:
-            self._spin(0.05)
-        poignee = future_envoi.result() if future_envoi.done() else None
-        if poignee is not None and poignee.accepted:
-            self._but_en_cours = poignee
-            self.annuler_but()
-
-    def _attendre_future(self, future, interrompre=None):
+    def _attendre_future(self, future):
         """Traite les messages jusqu'à la fin de `future`.
 
-        Retourne 'ok', 'temps_ecoule' ou 'interrompu'.
+        Retourne 'ok', 'temps_ecoule' ou 'arret'.
         """
         while self._is_ok() and not future.done():
             self._spin(0.05)
-            if self._chronometre.restant() <= 0.0:
+            if self._timer.remaining() <= 0.0:
                 return 'temps_ecoule'
-            if interrompre is not None and interrompre():
-                return 'interrompu'
+            if not self._bringup.alive():
+                return 'arret'
         return 'ok'
 
-    def naviguer_une_fois(self, goal_x, goal_y, frame, spawn, cap=None,
-                          interrompre=None):
-        """Un envoi du but et l'interprétation de son résultat.
-
-        `cap` impose l'orientation finale ; `interrompre()` vrai annule le but
-        en cours (cible trouvée pendant une recherche, budget épuisé...).
-        """
-        if not self._client.server_is_ready():
-            return 'refuse'
+    def naviguer_une_fois(self, goal_x, goal_y, frame, spawn):
+        """Un envoi du but et l'interprétation de son résultat."""
         future_envoi = self._client.send_goal_async(
-            self.message_but(goal_x, goal_y, frame, spawn, cap),
+            self.message_but(goal_x, goal_y, frame, spawn),
             feedback_callback=self.recevoir_feedback)
-        resultat = self._attendre_future(future_envoi, interrompre)
+        resultat = self._attendre_future(future_envoi)
         if resultat != 'ok':
-            self._annuler_si_accepte(future_envoi)
             return resultat
 
         but = future_envoi.result() if future_envoi.done() else None
@@ -240,15 +337,14 @@ class NavigateurNav2:
         self._but_en_cours = but
 
         future_resultat = but.get_result_async()
-        resultat = self._attendre_future(future_resultat, interrompre)
+        resultat = self._attendre_future(future_resultat)
         if resultat == 'temps_ecoule':
             self._node.get_logger().error(
                 'Limite de temps atteinte : annulation du but.')
             self.annuler_but()
             return 'temps_ecoule'
-        if resultat == 'interrompu':
-            self.annuler_but()
-            return 'interrompu'
+        if resultat == 'arret':
+            return 'arret'
 
         self._but_en_cours = None
         resultat_final = (future_resultat.result()
@@ -274,39 +370,3 @@ class NavigateurNav2:
         self._node.get_logger().warn(
             f'Nav2 a interrompu la navigation (statut {statut}).')
         return 'reessayer'
-
-    def tourner(self, angle, delai_sec, interrompre=None):
-        """Rotation sur place par le behavior Spin de Nav2 (collisions vérifiées).
-
-        Retourne 'succes', 'echec', 'interrompu', 'temps_ecoule'
-        ou 'indisponible'.
-        """
-        fin = time.monotonic() + 2.0
-        while not self._client_rotation.server_is_ready():
-            if time.monotonic() > fin or not self._is_ok():
-                return 'indisponible'
-            self._spin(0.05)
-
-        but = Spin.Goal()
-        but.target_yaw = float(angle)
-        but.time_allowance = Duration(
-            sec=int(delai_sec), nanosec=int((delai_sec % 1.0) * 1e9))
-        future_envoi = self._client_rotation.send_goal_async(but)
-        resultat = self._attendre_future(future_envoi, interrompre)
-        if resultat != 'ok':
-            self._annuler_si_accepte(future_envoi)
-            return resultat
-        poignee = future_envoi.result() if future_envoi.done() else None
-        if poignee is None or not poignee.accepted:
-            return 'echec'
-
-        self._but_en_cours = poignee
-        future_resultat = poignee.get_result_async()
-        resultat = self._attendre_future(future_resultat, interrompre)
-        if resultat in ('interrompu', 'temps_ecoule'):
-            self.annuler_but()
-            return resultat
-        self._but_en_cours = None
-        final = future_resultat.result() if future_resultat.done() else None
-        statut = final.status if final is not None else GoalStatus.STATUS_UNKNOWN
-        return 'succes' if statut == GoalStatus.STATUS_SUCCEEDED else 'echec'

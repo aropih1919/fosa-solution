@@ -17,4 +17,7 @@ test.txt
 .DS_Store
 
 modeles-fosa.tar.gz.tmp
-livraison/
+
+# Déploiement sur le robot : réglages locaux et données rapatriées.
+deploy/robot.env
+robot_data/

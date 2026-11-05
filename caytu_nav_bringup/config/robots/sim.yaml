@@ -1,0 +1,32 @@
+# Profil « sim » : robot de la phase 1 dans Gazebo (dépôt officiel PARC).
+# Valeurs de la version phase 1, inchangées. Voir aussi robots/real.yaml.
+robot: sim
+
+cmd_vel_topic: /robot_base_controller/cmd_vel_unstamped   # Twist
+odom_topic: /odom
+imu_topic: /imu                     # IMU de la base, axes du robot
+scan_topic: /scan
+
+# base_footprint existe déjà dans le URDF de la phase 1.
+base_footprint:
+  publish: false
+
+laser_filter_file: laser_filter_params.yaml
+
+# filtre_sol_lidar : géométrie du URDF de la phase 1 (valeurs par défaut du nœud).
+floor_filter: {}
+
+# Nuages de points des caméras, déjà publiés par Gazebo.
+cameras:
+  top:
+    cloud: /top_camera_depth/points
+  bottom:
+    cloud: /bottom_camera_depth/points
+
+# Enregistrement (mapping.launch.py record:=true).
+# Garde-fou : lidar + caméras (garde_fou_cameras:=false pour le lidar seul).
+collision_cameras: true
+
+record_topics: [/scan, /odom, /imu, /tf, /tf_static, /robot_description,
+                /sitoe_robot/pose]          # vraie pose Gazebo, pour mesurer les écarts
+record_camera_topics: [/top_camera_color/image_raw, /top_camera_color/camera_info]
