@@ -443,11 +443,13 @@ class NoeudCourse(Node):
             return
         point = self._prochain_point(pose)
         if point is None:
-            # Toute la carte a été parcourue : nouveau passage. Il ne compte
-            # que si des points ont vraiment été visités.
-            if self._points_essayes:
-                self._passages += 1
-            self.publier_etat('RECHERCHE', tag_id, 'nouveau passage')
+            # Sans candidat sûr, refaire le même tour indéfiniment ne fait pas
+            # progresser la préparation : borner les cycles sans passage.
+            self._passages += 1
+            self.get_logger().warning(
+                f'Aucun point de recherche praticable après un balayage '
+                f'({self._passages}/2).')
+            self.publier_etat('RECHERCHE', tag_id, 'aucun passage praticable')
             self._tours.clear()
             self._points_essayes.clear()
             self.traiter_pendant(0.5)
@@ -477,7 +479,19 @@ class NoeudCourse(Node):
             grille, self._course.search_clearance_m, self._course.search_grid_step_m,
             self._tours + self._points_essayes, self._course.search_visited_radius_m,
             (pose.x, pose.y), centre=(0.0, 0.0),
-            rayon_max=self._course.search_max_radius_m)
+            rayon_max=self._course.search_max_radius_m,
+            clairance_inconnu_m=self._course.search_frontier_margin_m)
+        if not points:
+            # L'arène officielle a des meubles rapprochés : si la marge
+            # normale ne laisse aucun point, essayer une grille plus dense.
+            # Nav2 garde le dernier mot sur la collision avec l'empreinte réelle.
+            pas_secours = max(grille.resolution, self._course.search_grid_step_m / 2.0)
+            points = points_recherche(
+                grille, self._course.search_fallback_clearance_m, pas_secours,
+                self._tours + self._points_essayes,
+                self._course.search_visited_radius_m, (pose.x, pose.y),
+                centre=(0.0, 0.0), rayon_max=self._course.search_max_radius_m,
+                clairance_inconnu_m=0.0)
         return points[0] if points else None
 
     # ------------------------------------------------------------- visite

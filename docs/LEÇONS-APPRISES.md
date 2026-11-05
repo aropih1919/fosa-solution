@@ -13,3 +13,10 @@
 - Cause racine : l'abonnement de `course_parc` en `VOLATILE` manque la carte déjà publiée par `slam_toolbox` en `TRANSIENT_LOCAL`.
 - Détecteur manquant : aucun contrôle que la grille reçue par `course_parc` contient la carte publiée.
 - Garde-fou : conserver `TRANSIENT_LOCAL` pour l'abonnement à `/map`, et attendre les serveurs Nav2 requis avant la première action de recherche.
+
+## [2026-11-05] — Garder une recherche de tags praticable dans une carte encombrée
+- Timing : runtime
+- Symptôme : le robot répète des tours sur place, sans trajet Nav2, jusqu'à expiration de la préparation.
+- Cause racine : un échantillonnage unique et une marge identique autour des obstacles et de l'inconnu peuvent éliminer tous les points dans une arène dense.
+- Détecteur manquant : aucun signalement borné quand deux balayages consécutifs ne produisent aucun point de navigation.
+- Garde-fou : échantillonner plus finement près des frontières de carte, laisser Nav2 valider l'empreinte complète, et arrêter avec un diagnostic après deux balayages sans passage.

@@ -156,5 +156,5 @@ class Surveillance:
                     f'position ({_m(pose[0])} ; {_m(pose[1])}), cap {math.degrees(pose[2]):+.0f}°')
         lineaire, angulaire = self._commande
         return (f'[ÉTAT] {position} | v={lineaire:+.2f} w={angulaire:+.2f} | '
-                f'Nav2 {"actif" if self.nav2_actif else "inactif"} | '
+                f'trajet Nav2 {"actif" if self.nav2_actif else "inactif"} | '
                 f'chemins {self.replanifications} | contacts {self.contacts}')

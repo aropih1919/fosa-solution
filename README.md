@@ -675,6 +675,11 @@ simulation/simulation.sh essai
 - **L'arbitre officiel tourne** et son tableau de bord est disponible sur
   `http://localhost:8080/` (vue juges : `/judge?token=parc2026`).
 
+Le robot fait lui-même l'exploration et le repérage des tags pendant la
+préparation. Le guidage manuel est utile pour vérifier les capteurs ou
+diagnostiquer un blocage, mais la carte finale doit venir de cette exploration
+autonome pour représenter ce que le robot peut refaire seul.
+
 Le script enchaîne deux phases dans la **même arène** :
 
 1. **la préparation** : le robot explore, construit la carte, mesure les tags
