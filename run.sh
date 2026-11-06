@@ -93,6 +93,22 @@ else
     export FOSA_DONNEES="${FOSA_DONNEES:-$HOME/$(lire_exploitation dossier_robot)/donnees}"
 fi
 ETAT_SESSION="$FOSA_DONNEES/sessions/course.json"
+# L'arrêt couvre la livraison active et les anciennes livraisons du robot.
+PORTEE_ROBOT="$HOME/$(lire_exploitation dossier_robot)"
+PORTEES_ARRET=("$ESPACE_TRAVAIL")
+if [[ "$PORTEE_ROBOT" != "$ESPACE_TRAVAIL" ]]; then
+    PORTEES_ARRET+=("$PORTEE_ROBOT")
+fi
+PORTEES_ARGUMENT=()
+for portee in "${PORTEES_ARRET[@]}"; do
+    PORTEES_ARGUMENT+=(--portee "$portee")
+done
+
+# Valeur lue dans la configuration active (profil compris) : le robot est sur
+# le domaine 0 ; le profil impose aussi le domaine aux outils.
+lire_config() {
+    python3 -c "from caytu_config import load_config; c = load_config(); print($1)"
+}
 
 # L'ancienne version lançait la course dans tmux. Cette session connue doit
 # être arrêtée avant la nouvelle, sinon deux nœuds publient sur /cmd_vel.
@@ -107,17 +123,78 @@ signaler_course_ancienne() {
     local lignes
     lignes="$(pgrep -af '[c]aytu_course/course_parc|[c]ourse\.launch\.py' || true)"
     [[ -z "$lignes" ]] && return 0
-    echo "Une course Fosa tourne encore (ancienne version ou session sans état) :" >&2
+    echo "Des nœuds Fosa tournent encore :" >&2
     printf '%s\n' "$lignes" | sed 's/^/  /' >&2
-    echo "Arrêtez-la avant de relancer : ./run.sh arreter puis vérifiez ros2 node list." >&2
     return 1
+}
+
+arreter_moteurs() {
+    local service="${1:-/stop_motor}" reponse
+    command -v ros2 >/dev/null 2>&1 || return 0
+    if reponse="$(timeout 6 ros2 service call "$service" std_srvs/srv/Empty 2>&1)"; then
+        echo "Moteurs coupés ($service)."
+    else
+        echo "Service $service indisponible : coupez les moteurs au bouton." >&2
+    fi
+}
+
+demarrer_moteurs() {
+    local service="${1:-/start_motor}"
+    if timeout 6 ros2 service call "$service" std_srvs/srv/Empty >/dev/null 2>&1; then
+        echo "Moteurs activés ($service)."
+    else
+        echo "Service $service indisponible : le robot ne bougera pas." >&2
+    fi
+}
+
+annuler_vitesse() {
+    command -v ros2 >/dev/null 2>&1 || return 0
+    local topic publie=0
+    for topic in /fosa/cmd_vel /cmd_vel; do
+        if timeout 5 ros2 topic pub --once -w 1 --max-wait-time-secs 2 \
+                "$topic" geometry_msgs/msg/Twist \
+                "{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}" \
+                >/dev/null 2>&1; then
+            publie=1
+        fi
+    done
+    ((publie)) && echo "Vitesse nulle publiée sur la commande du robot."
+    return 0
 }
 
 # L'arrêt doit rester disponible même si ROS ou le workspace est endommagé.
 if [[ "$mode" == arreter ]]; then
     arreter_ancienne_session
-    python3 "$DOSSIER_SCRIPT/outils/processus.py" arreter --etat "$ETAT_SESSION"
-    signaler_course_ancienne || true
+    source_arret_ok=0
+    if [[ -f "/opt/ros/$ROS_DISTRO/setup.bash" ]]; then
+        set +u
+        source "/opt/ros/$ROS_DISTRO/setup.bash"
+        if [[ -f "$ESPACE_TRAVAIL/install/setup.bash" ]]; then
+            source "$ESPACE_TRAVAIL/install/setup.bash" || true
+        fi
+        set -u
+        export FOSA_CONFIG_DIR="$DOSSIER_SCRIPT/caytu_config/config"
+        source "$DOSSIER_SCRIPT/outils/environnement_dds.sh"
+        configurer_dds || true
+        export ROS_DOMAIN_ID="$(lire_config c.system.ros_domain_id 2>/dev/null || echo 0)"
+        source_arret_ok=1
+    fi
+    echec=0
+    if ! python3 "$DOSSIER_SCRIPT/outils/processus.py" arreter \
+            --etat "$ETAT_SESSION" "${PORTEES_ARGUMENT[@]}"; then
+        echec=1
+    fi
+    if ((source_arret_ok)); then
+        service_arret="$(lire_config c.course.motor_stop_service 2>/dev/null || echo /stop_motor)"
+        arreter_moteurs "$service_arret"
+        annuler_vitesse
+    fi
+    signaler_course_ancienne || echec=1
+    if ((echec)); then
+        echo "Arrêt incomplet : voir les processus ci-dessus." >&2
+        exit 1
+    fi
+    echo "Arrêt terminé : course, nœuds et moteurs sont arrêtés."
     exit 0
 fi
 
@@ -166,11 +243,6 @@ set -u
 source "$DOSSIER_SCRIPT/outils/environnement_dds.sh"
 configurer_dds
 
-# Valeur lue dans la configuration active (profil compris) : le robot est sur
-# le domaine 0 ; le profil impose aussi le domaine aux outils.
-lire_config() {
-    python3 -c "from caytu_config import load_config; c = load_config(); print($1)"
-}
 # Le profil actif détermine le domaine : ne pas réutiliser par accident celui
 # d'une session précédente (robot réel ou Gazebo).
 export ROS_DOMAIN_ID="$(lire_config c.system.ros_domain_id)"
@@ -193,17 +265,22 @@ lancer_detache() {
         echo "Si vous êtes simplement reconnecté après une coupure SSH, utilisez ./run.sh suivi." >&2
         exit 1
     fi
-    if command -v tmux >/dev/null 2>&1 && tmux has-session -t fosa_course 2>/dev/null; then
-        echo "Ancienne session tmux « fosa_course » active : ./run.sh arreter." >&2
-        exit 1
+    arreter_ancienne_session
+    # Nœuds d'une ancienne version ou d'une session sans état : les arrêter
+    # automatiquement plutôt que de laisser deux sources de commandes.
+    if python3 "$DOSSIER_SCRIPT/outils/processus.py" actif \
+            --etat "$ETAT_SESSION" "${PORTEES_ARGUMENT[@]}" >/dev/null 2>&1; then
+        echo "Anciens nœuds Fosa détectés : arrêt automatique avant le lancement."
+        python3 "$DOSSIER_SCRIPT/outils/processus.py" arreter \
+            --etat "$ETAT_SESSION" "${PORTEES_ARGUMENT[@]}" || exit 1
+        annuler_vitesse
     fi
-    signaler_course_ancienne || exit 1
     mkdir -p "$donnees"
     journal="$donnees/${nom}_$(date +%Y%m%d_%H%M%S).log"
     local interne=("$DOSSIER_SCRIPT/run.sh" course-premier-plan "$@")
     echo "Suivi lisible dans un autre terminal : ./run.sh suivi"
     python3 "$DOSSIER_SCRIPT/outils/processus.py" lancer --etat "$ETAT_SESSION" \
-        --journal "$journal" -- "${interne[@]}"
+        --journal "$journal" "${PORTEES_ARGUMENT[@]}" -- "${interne[@]}"
     echo "Lancement détaché de SSH. Arrêt : ./run.sh arreter ; journal : $journal"
 }
 
@@ -277,6 +354,7 @@ else:
         lancer_detache cartographie mode:=cartographie "$@"
         ;;
     depart)
+        demarrer_moteurs "$(lire_config c.course.motor_start_service)"
         topic="$(lire_config c.course.start_topic)"
         # Attend que la course écoute (10 s au plus) : le départ n'est pas perdu.
         ros2 topic pub --once -w 1 --max-wait-time-secs 10 \

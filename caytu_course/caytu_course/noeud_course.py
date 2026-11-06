@@ -26,6 +26,7 @@ from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from std_msgs.msg import String
+from std_srvs.srv import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
 import yaml
 
@@ -115,6 +116,7 @@ class NoeudCourse(Node):
             String, self._course.state_topic, qos_statut(1))
         self._publicateur_vitesse = self.create_publisher(
             Twist, self._navigation.securite.topic_entree, 10)
+        self._clients_moteurs = {}
 
         duree = (self._course.preparation.max_duration_sec
                  if self._mode in ('preparation', 'preparation_manuelle')
@@ -230,6 +232,37 @@ class NoeudCourse(Node):
             self.publier_vitesse(0.0, 0.0)
             self.traiter_pendant(0.02)
 
+    def _appeler_moteurs(self, nom):
+        """Appelle un service std_srvs/Empty du bringup, sans bloquer la course."""
+        if not nom:
+            return False
+        client = self._clients_moteurs.get(nom)
+        if client is None:
+            client = self.create_client(Empty, nom)
+            self._clients_moteurs[nom] = client
+        if not client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().warning(
+                f'Service {nom} absent : moteurs non commandés.')
+            return False
+        future = client.call_async(Empty.Request())
+        fin = time.monotonic() + 2.0
+        while rclpy.ok() and not future.done() and time.monotonic() < fin:
+            rclpy.spin_once(self, timeout_sec=0.05)
+        if not future.done() or future.result() is None:
+            self.get_logger().warning(f'Service {nom} sans réponse.')
+            return False
+        return True
+
+    def demarrer_moteurs(self):
+        nom = self._course.motor_start_service
+        if self._appeler_moteurs(nom):
+            self.get_logger().info(f'Moteurs activés ({nom}).')
+
+    def couper_moteurs(self):
+        nom = self._course.motor_stop_service
+        if self._appeler_moteurs(nom):
+            self.get_logger().info(f'Moteurs coupés ({nom}).')
+
     def _temps_ecoule(self):
         # L'arbitre peut terminer la course (FINISHED, TIMED_OUT, TERMINATED) :
         # toutes les boucles d'attente s'arrêtent alors comme sur un temps écoulé.
@@ -259,6 +292,7 @@ class NoeudCourse(Node):
         if self._entrees.arbitre_termine:
             self._terminer(self._entrees.motif_arbitre)
             return
+        self.demarrer_moteurs()
         self._en_attente = False
         self._chrono.demarrer()
         self.publier_etat('DEMARRAGE', detail=self._entrees.source_depart)
@@ -793,6 +827,7 @@ class NoeudCourse(Node):
     def _terminer(self, motif):
         self._navigateur.annuler_but()
         self.arreter_robot(5)
+        self.couper_moteurs()
         resume = (self._sequence.resume() if self._sequence is not None
                   else {'ordre': [], 'visites': [], 'sautes': []})
         resume['temps_ecoule_s'] = round(self._chrono.ecoule(), 1)
@@ -824,6 +859,7 @@ class NoeudCourse(Node):
         self._chrono.demarrer()
         self.evenement('preparation', recit.phrase_preparation(
             dossier, preparation.max_duration_sec))
+        self.demarrer_moteurs()
         self._attendre_nav2()
         tentatives = {}
         while rclpy.ok() and not self._temps_ecoule():
@@ -853,6 +889,7 @@ class NoeudCourse(Node):
             'preparation_manuelle',
             f'Cartographie guidée : vous pilotez le robot. '
             f'La carte et les tags observés seront enregistrés dans {dossier}.')
+        self.demarrer_moteurs()
         while rclpy.ok() and not self._temps_ecoule():
             self._enregistrer_tags()
             self.traiter_pendant(0.5)
@@ -951,6 +988,7 @@ class NoeudCourse(Node):
         """Arrêt sur Ctrl-C ou SIGTERM : plus aucune commande, robot immobile."""
         self._navigateur.annuler_but()
         self.arreter_robot(10)
+        self.couper_moteurs()
 
 
 def _interruption(signum, frame):

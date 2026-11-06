@@ -49,12 +49,12 @@ archiver() {
 }
 
 installer() {
-    if command -v tmux >/dev/null 2>&1 && tmux has-session -t fosa_course 2>/dev/null; then
-        echo "Session tmux « fosa_course » active : ./run.sh arreter avant de déployer." >&2
-        return 1
+    # Arrêter une éventuelle course précédente sans bloquer le déploiement.
+    if [[ -x "$DEPOT/run.sh" ]]; then
+        "$DEPOT/run.sh" arreter || echo "Arrêt précédent incomplet : compilation poursuivie." >&2
     fi
     if pgrep -af '[c]aytu_course/course_parc|[c]ourse\.launch\.py' >/dev/null; then
-        echo "Une course Fosa tourne : l'arrêter avant de remplacer la livraison." >&2
+        echo "Des nœuds Fosa tournent encore : arrêtez-les puis relancez --installer." >&2
         return 1
     fi
     if [[ "$(uname -m)" != aarch64 && "${FOSA_FORCER_PC:-0}" != 1 ]]; then
@@ -128,14 +128,6 @@ set -euo pipefail
 racine="$HOME/$1"
 archive="$racine/entree/$2.zip"
 [[ "$(sha256sum "$archive" | cut -d ' ' -f 1)" == "$2" ]]
-if command -v tmux >/dev/null 2>&1 && tmux has-session -t fosa_course 2>/dev/null; then
-    echo "Session tmux « fosa_course » active : ./run.sh arreter avant de déployer." >&2
-    exit 1
-fi
-if pgrep -af '[c]aytu_course/course_parc|[c]ourse\.launch\.py' >/dev/null; then
-    echo "Une course Fosa tourne : l'arrêter avant de remplacer la livraison." >&2
-    exit 1
-fi
 mkdir -p "$racine/livraisons" "$racine/donnees"
 livraison="$(mktemp -d "$racine/livraisons/${2:0:12}.XXXXXXXX")"
 python3 - "$archive" "$livraison" <<'PYTHON'

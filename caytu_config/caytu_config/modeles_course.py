@@ -390,7 +390,7 @@ _NOMBRES_COURSE = (
     ("unstuck_distance_m", {"positive": True, "maximum": 1.0}),
 )
 _TEXTES_COURSE = ("order_topic", "start_topic", "state_topic", "events_topic",
-                  "map_topic")
+                  "map_topic", "motor_start_service", "motor_stop_service")
 
 
 @dataclass(frozen=True)
@@ -404,6 +404,8 @@ class CourseConfig:
     state_topic: str
     events_topic: str
     map_topic: str
+    motor_start_service: str
+    motor_stop_service: str
     referee: RefereeConfig
     time_limit_sec: float
     stop_margin_sec: float

@@ -155,6 +155,10 @@ course:
   state_topic: /fosa/course/etat
   events_topic: /fosa/course/evenements   # ce que fait le robot, en phrases (./run.sh suivi)
   map_topic: /map                 # carte publiée par slam_toolbox
+  # Services du bringup robot : sans /start_motor, aucune commande ne bouge
+  # les roues. /stop_motor est appelé à chaque arrêt (course, Ctrl-C, run.sh).
+  motor_start_service: /start_motor
+  motor_stop_service: /stop_motor
   # Arbitre officiel (parc_msgs, installé dans l'espace de travail de base du
   # robot) : départ, visites avec image JPEG, fin. Consignes du 04/11.
   referee:

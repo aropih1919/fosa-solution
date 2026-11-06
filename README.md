@@ -27,6 +27,7 @@ source install/setup.bash
 cd ~/teams/fosa/actuel/src/fosa-solution
 ./run.sh course
 ./run.sh depart          # ou dire « allez »
+./run.sh ordre-test '4,9,1,7'   # répétition sans arbitre
 ```
 
 ## Suivre et arrêter
