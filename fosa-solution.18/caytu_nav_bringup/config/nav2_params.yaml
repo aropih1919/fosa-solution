@@ -1,0 +1,170 @@
+# Paramètres Nav2 de la course (ROS 2 Jazzy, Nav2 1.3.x).
+#
+# Base chargée par caytu_nav_solution.parametres_nav2, puis complétée par
+# controller_rpp.yaml et le profil actif. Les repères, topics, empreintes,
+# vitesses et couches d'obstacles sont ensuite imposés depuis caytu_config :
+# ce fichier ne décrit que le comportement commun aux deux plateformes.
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: false
+    global_frame: map
+    robot_base_frame: base_link
+    odom_topic: /botwheel_explorer/odom
+    transform_tolerance: 0.5
+    # default_nav_to_pose_bt_xml est injecté par le lancement (chemin du paquet).
+    always_reload_bt_xml: false
+    navigators: ["navigate_to_pose"]
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+      goal_blackboard_id: goal
+      path_blackboard_id: path
+    bt_loop_duration: 10
+    # 20 ms (valeur Nav2) : sous charge, les serveurs répondent plus lentement
+    # et le BT abandonne le but (« Timed out ... compute_path_to_pose »).
+    default_server_timeout: 200
+    default_cancel_timeout: 20
+    error_code_names:
+      - compute_path_error_code
+      - follow_path_error_code
+      - navigate_to_pose_error_code
+      - spin_error_code
+      - backup_error_code
+
+planner_server:
+  ros__parameters:
+    use_sim_time: false
+    expected_planner_frequency: 2.0
+    costmap_update_timeout: 1.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_smac_planner::SmacPlanner2D"
+      tolerance: 0.25
+      downsample_costmap: false
+      downsampling_factor: 1
+      allow_unknown: true
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      terminal_checking_interval: 5000
+      max_planning_time: 2.0
+      # > 1 : le chemin s'écarte des obstacles au lieu de les longer. Valeur
+      # retenue avec l'inflation globale (0.90 m / 3.0) en simulation.
+      cost_travel_multiplier: 3.0
+      use_final_approach_orientation: true
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+        do_refinement: true
+        refinement_num: 2
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: false
+      global_frame: map
+      robot_base_frame: base_link
+      resolution: 0.05
+      rolling_window: false
+      track_unknown_space: false
+      always_send_full_costmap: true
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      transform_tolerance: 0.5
+      footprint: "[ [0.22, 0.25], [0.22, -0.25], [-0.31, -0.25], [-0.31, 0.25] ]"
+      footprint_padding: 0.02
+      plugins: ["static_layer", "lidar_layer", "inflation_layer"]
+      # static_layer est fourni par parametres_nav2 (carte de slam_toolbox).
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        # Le rayon inscrit du robot vaut 0.24 m ; l'inflation doit le dépasser
+        # nettement pour créer une pente de coût qui éloigne le chemin.
+        inflation_radius: 0.90
+        cost_scaling_factor: 3.0
+        inflate_unknown: false
+        inflate_around_unknown: false
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: false
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true
+      width: 6
+      height: 6
+      resolution: 0.05
+      track_unknown_space: false
+      always_send_full_costmap: true
+      update_frequency: 10.0
+      publish_frequency: 5.0
+      transform_tolerance: 0.5
+      footprint: "[ [0.22, 0.25], [0.22, -0.25], [-0.31, -0.25], [-0.31, 0.25] ]"
+      footprint_padding: 0.02
+      plugins: ["lidar_layer", "inflation_layer"]
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        inflation_radius: 0.55
+        cost_scaling_factor: 4.0
+        inflate_unknown: false
+        inflate_around_unknown: false
+
+# Réglages communs du controller_server. Le plugin FollowPath est défini dans
+# controller_rpp.yaml.
+controller_server:
+  ros__parameters:
+    use_sim_time: false
+    controller_frequency: 20.0
+    costmap_update_timeout: 0.5
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 1.0
+    odom_topic: /botwheel_explorer/odom
+    # Le robot officiel attend un Twist non horodaté.
+    enable_stamped_cmd_vel: false
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.25
+      movement_time_allowance: 15.0
+
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      # Tolerances resserrées par parametres_nav2 (arrivée avant l'alignement
+      # visuel sur le tag).
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 3.2
+      stateful: true
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: false
+    local_costmap_topic: local_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_costmap_topic: global_costmap/costmap_raw
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "wait"]
+    spin:
+      plugin: "nav2_behaviors::Spin"
+    backup:
+      plugin: "nav2_behaviors::BackUp"
+    wait:
+      plugin: "nav2_behaviors::Wait"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_link
+    transform_tolerance: 0.5
+    simulate_ahead_time: 2.0
+    # Le plugin DiffDrive officiel limite la rotation à 1 rad/s.
+    max_rotational_vel: 0.8
+    min_rotational_vel: 0.3
+    rotational_acc_lim: 1.6
+    enable_stamped_cmd_vel: false

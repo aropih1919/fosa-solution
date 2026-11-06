@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CycloneDDS xmlns="https://cdds.io/config">
+  <!-- Surcharge de dépannage, ajoutée APRÈS la configuration du robot.
+       Les interfaces, peers et réglages multicast viennent de cette dernière.
+       Avec les ports DDS standards, 119 est le dernier indice dont les deux
+       ports unicast restent avant ceux du domaine suivant. -->
+  <Domain Id="any">
+    <Discovery>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>119</MaxAutoParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

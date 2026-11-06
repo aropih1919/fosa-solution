@@ -1,0 +1,251 @@
+# Configuration unique de la solution Fosa — PARC 2026.
+# Toute valeur modifiable vit ici. Les nœuds Python ne doivent jamais coder
+# une coordonnée, un seuil, un topic, un modèle ou une durée en dur.
+#
+# Valeurs par défaut = ROBOT RÉEL (inventaire ROS du 02/11, ROS_DOMAIN_ID=0).
+# Simulation Gazebo : FOSA_CONFIG_OVERRIDE=config/profils/simulation.yaml
+# (fait automatiquement par `FOSA_PROFIL=simulation ./run.sh ...`).
+
+system:
+  deployment: robot               # robot | local | remote_pc | simulation
+  use_sim_time: false             # le robot n'a pas d'horloge Gazebo
+  global_frame: map               # publié par slam_toolbox
+  base_frame: base_link           # le robot réel n'a pas de base_footprint
+  ros_domain_id: 0
+  clock_topic: /clock
+
+navigation:
+  profile: balanced               # profil du laboratoire de navigation
+  success_radius: 0.20
+  arrival_recheck_radius: 0.35
+
+  scan_topic: /scan_filtered      # filtre d'auto-détection des organisateurs
+  cmd_vel_topic: /cmd_vel         # Twist, relu par obstacle_avoidance (organisateurs)
+  odom_topic: /botwheel_explorer/odom
+  odom_frame: odom
+
+  # Empreinte dans base_frame (x vers l'avant). Valeurs du URDF simulé :
+  # À MESURER sur le robot réel avant la course.
+  footprint: [[0.22, 0.25], [0.22, -0.25], [-0.31, -0.25], [-0.31, 0.25]]
+  footprint_padding: 0.03
+  center_offset_x: 0.0            # centre géométrique du robot dans base_frame
+  max_linear_speed: 0.30          # m/s, arène de 5 m avec des personnes
+  max_angular_speed: 0.80         # rad/s
+  laser_self_filter: false        # true seulement en simulation (lidar sous le châssis)
+
+  # Scans utilisés par les costmaps. Si les caméras voient le sol comme un
+  # obstacle sur le robot (TF à vérifier), passer leurs sources à false.
+  obstacle_sources:
+    - name: lidar
+      topic: /scan_filtered
+      enabled: true
+      obstacle_min_range: 0.12
+      obstacle_max_range: 3.5
+      raytrace_max_range: 4.0
+      inf_is_valid: false        # pas de retour ≠ espace libre
+      global_costmap: true
+    # Profondeur des caméras (perception.depth_scans) : plateaux de table,
+    # assises, personnes au-dessus du plan du lidar.
+    - name: camera1
+      topic: /fosa/scan_camera1
+      enabled: true
+      obstacle_min_range: 0.25
+      obstacle_max_range: 2.0         # < range_max du scan (2,5 m) : un secteur vide n'est jamais marqué
+      raytrace_max_range: 2.5
+      inf_is_valid: true
+      global_costmap: true
+    - name: camera2
+      topic: /fosa/scan_camera2
+      enabled: true
+      obstacle_min_range: 0.25
+      obstacle_max_range: 2.0         # < range_max du scan (2,5 m) : un secteur vide n'est jamais marqué
+      raytrace_max_range: 2.5
+      inf_is_valid: true
+      global_costmap: true
+  global_costmap_clear_service: /global_costmap/clear_entirely_global_costmap
+  local_costmap_clear_service: /local_costmap/clear_entirely_local_costmap
+
+  # Temporisations de service (secondes réelles).
+  cancel_timeout_sec: 2.0
+  feedback_log_period_sec: 5.0
+
+perception:
+  tags_topic: /perception/tags
+
+  apriltag:
+    family: 36h11
+    size_m: 0.165                 # côté du carré noir (règlement : 16,5 cm)
+    ids: [1, 4, 7, 9]             # aucun autre tag dans l'arène
+    max_distance_m: 4.5
+    # Évite le rejet d'un tag à marge blanche d'un bit posé sur un fond sombre.
+    min_marker_distance_rate: 0.01
+    max_rate_hz: 10.0             # cadence max de détection par caméra
+    detection_image_topic: /perception/tags/image   # image de preuve pour le statut
+    detection_image_rate_hz: 2.0
+    tf_timeout_sec: 0.1
+    # Si l'odométrie arrive après l'image : dernière TF acceptée jusqu'à ce
+    # retard (pose marquée moins fiable). Mesuré en simulation : ~0,3 s.
+    tf_max_lag_sec: 0.5
+    # Les deux RealSense détectent ; la caméra haute est à confirmer sur place.
+    cameras:
+      - name: camera1
+        color_topic: /camera1/camera1/color/image_raw
+        info_topic: /camera1/camera1/color/camera_info
+      - name: camera2
+        color_topic: /camera2/camera2/color/image_raw
+        info_topic: /camera2/camera2/color/camera_info
+
+  # Profondeur -> obstacles entre deux hauteurs du repère du robot -> LaserScan
+  # (le lidar bas ne voit pas les plateaux de table). Une entrée par caméra.
+  depth_scans:
+    - name: camera1
+      input_type: depth_image       # depth_image (robot) | pointcloud (Gazebo)
+      input_topic: /camera1/camera1/depth/image_rect_raw
+      info_topic: /camera1/camera1/depth/camera_info
+      output_topic: /fosa/scan_camera1
+      # Plateaux (~0,75 m), assises, personnes ; le lidar couvre le bas.
+      # Sol vu comme obstacle sur le robot (TF ou inclinaison) : monter
+      # min_height, ou désactiver les sources caméra de navigation.
+      min_height: 0.25
+      max_height: 1.30              # hauteur du robot
+      range_min: 0.25
+      range_max: 2.5
+      angle_min: -0.8
+      angle_max: 0.8
+      angle_increment: 0.0175       # >= pixel_step / fx, sinon secteurs vides (lus libres)
+      pixel_step: 4
+      min_points: 3                 # points par secteur pour un obstacle
+      rate_hz: 10.0
+    - name: camera2
+      input_type: depth_image
+      input_topic: /camera2/camera2/depth/image_rect_raw
+      info_topic: /camera2/camera2/depth/camera_info
+      output_topic: /fosa/scan_camera2
+      min_height: 0.25
+      max_height: 1.30
+      range_min: 0.25
+      range_max: 2.5
+      angle_min: -0.8
+      angle_max: 0.8
+      angle_increment: 0.0175       # >= pixel_step / fx, sinon secteurs vides (lus libres)
+      pixel_step: 4
+      min_points: 3                 # points par secteur pour un obstacle
+      rate_hz: 10.0
+
+# --------------------------------------------------------------------------
+# Course officielle de la phase réelle (guide des équipes PARC 2026).
+course:
+  tag_ids: [1, 4, 7, 9]
+  # Ordre publié par l'arbitre (transient local). auto : type lu sur le graphe
+  # ROS au démarrage ; string ou int32_multi_array pour l'imposer.
+  order_topic: /parc/tag_order
+  order_type: auto                # auto | string | int32_multi_array
+  start_topic: /fosa/course/depart   # départ interne (./run.sh depart ou voix), relayé à l'arbitre
+  state_topic: /fosa/course/etat
+  events_topic: /fosa/course/evenements   # ce que fait le robot, en phrases (./run.sh suivi)
+  map_topic: /map                 # carte publiée par slam_toolbox
+  # Arbitre officiel (parc_msgs, installé dans l'espace de travail de base du
+  # robot) : départ, visites avec image JPEG, fin. Consignes du 04/11.
+  referee:
+    start_topic: /parc/start
+    start_type: parc_msgs/msg/StartSignal
+    start_method_command: 0
+    start_method_voice: 1
+    listen_start: true            # un départ publié sur /parc/start lance aussi la course
+    visit_topic: /parc/tag_visit
+    visit_type: parc_msgs/msg/TagVisit
+    finish_topic: /parc/finish
+    finish_type: parc_msgs/msg/Finish
+    finish_reason: 0              # parc_msgs/Finish : 0 terminé, 1 abandon
+    run_status_topic: /parc/run_status
+    jpeg_quality: 85
+  time_limit_sec: 600.0
+  stop_margin_sec: 5.0
+  nav2_ready_timeout_sec: 60.0
+  visit_distance_m: 0.50          # règlement : centre du robot à 0,5 m du tag
+  approach_distance_m: 0.90       # pré-approche si le tag n'a été vu que de loin
+  distance_tolerance_m: 0.04
+  lateral_tolerance_m: 0.06
+  heading_tolerance_deg: 5.0      # règlement : ±12°
+  stable_cycles: 5                # cycles consécutifs dans les tolérances
+  hold_sec: 5.0                   # maintien après le signalement (À CONFIRMER)
+  detection_max_age_sec: 0.6
+  search_spin_time_sec: 25.0
+  search_grid_step_m: 0.4
+  search_clearance_m: 0.45
+  search_frontier_margin_m: 0.25 # points sûrs près de la frontière connue/inconnue
+  search_fallback_clearance_m: 0.50 # marge supérieure au rayon du robot (~0,43 m)
+  search_fallback_frontier_margin_m: 0.15 # réduire l'inconnu, sans rogner la marge obstacle
+  search_visited_radius_m: 0.8
+  front_guard_m: 0.10
+  goal_xy_tolerance_m: 0.08       # arrivée Nav2 avant l'alignement visuel
+  goal_yaw_tolerance_deg: 7.0
+  tag_lost_timeout_sec: 4.0       # tag invisible pendant l'alignement -> recherche
+  preapproach_margin_m: 0.3       # vu de plus loin que approach + marge : pré-approche
+  search_spin_speed_rps: 0.4      # tour de recherche lent : pas de flou de bougé
+  search_max_radius_m: 5.0        # zone de recherche autour du départ (arène 5 m)
+  # Dégagement : reculer lentement (garde arrière du lidar) après une mesure
+  # de tag, après une visite, ou après plusieurs échecs Nav2 de suite.
+  # Simulation : le robot restait coincé entre un tag et un meuble.
+  unstuck_distance_m: 0.30
+  unstuck_after_failures: 2
+  alignment:
+    linear_gain: 0.6
+    angular_gain: 1.2
+    max_linear_mps: 0.08
+    max_angular_rps: 0.35
+    min_linear_mps: 0.03          # À AJUSTER : seuil de démarrage de la base
+    min_angular_rps: 0.10
+    # Objectif d'arrêt (plus strict que les tolérances d'acceptation ci-dessus).
+    # Distance au point de visite (0,5 m sur la normale). Le robot arrive
+    # toujours de loin : avec 2,5 cm, il s'arrêtait du côté éloigné (simulation).
+    precision_point_m: 0.012
+    precision_heading_deg: 2.0
+    # Nav2 s'arrête à approach_distance_m ; l'asservissement visuel finit.
+    # Au-delà de ces écarts, retour à Nav2 (pas de longue ligne droite).
+    max_distance_error_m: 0.75    # tag vu jusqu'à 1,25 m
+    max_lateral_error_m: 0.30     # tag vu trop de biais
+    timeout_sec: 30.0
+    max_renavigations: 2
+  # Stratégie de visite (caytu_course/strategie.py) : replanification
+  # continue des tags à tenter selon le temps restant. Durées estimées :
+  # À RECALER sur les essais (journal « Plan : ... »).
+  strategy:
+    points_per_tag: 25.0          # règlement : 20 par visite + 5 de navigation sûre
+    travel_speed_mps: 0.15        # vitesse moyenne réelle, virages compris
+    detour_factor: 1.4            # mobilier : trajet ≈ 1,4 x vol d'oiseau
+    visit_time_sec: 45.0          # pré-approche, alignement, maintien
+    search_time_sec: 90.0         # trouver un tag jamais vu
+    unknown_leg_m: 2.5            # trajet moyen depuis une position inconnue
+    time_margin: 0.2              # durées majorées de 20 %
+    success_known: 0.9
+    success_unknown: 0.6
+    failure_decay: 0.6            # probabilité x 0,6 à chaque échec
+    min_skip_gain_points: 5.0     # sauter la cible seulement si cela rapporte 5 points de plus
+    replan_period_sec: 2.0
+  # Préparation avant le match (15 min accordées par les organisateurs) :
+  # `./run.sh preparation` cartographie l'arène, cherche les tags, s'en
+  # approche pour bien les mesurer, puis enregistre carte et tags ici.
+  # `./run.sh course` se localise ensuite sur cette carte et part des tags
+  # enregistrés ; sans préparation, il cartographie en direct.
+  preparation:
+    directory: ~/.ros/fosa/preparation
+    max_duration_sec: 720.0       # 12 min sur 15 : marge pour vérifier et relancer
+    close_view_m: 1.3             # tag vu plus loin : on va le mesurer de près
+    approach_attempts: 2          # rapprochements tentés par tag
+
+# Démarrage vocal hors ligne (bonus de 5 points) : Vosk, grammaire restreinte.
+start_word:
+  enabled: true
+  audio_topic: /speech_audio      # respeaker_node : une phrase par message
+  mode: utterance                 # utterance | stream (ex. /audio)
+  sample_rate: 16000              # À CONFIRMER (format non documenté)
+  channels: 1
+  channel_index: 0
+  sample_width: 2
+  words: [allez]
+  # false : vocabulaire libre puis énoncé exact « allez ». Mesuré hors ligne :
+  # une grammaire restreinte confond « alors », « allô », « Alex » avec « allez ».
+  restricted_grammar: false
+  model_path: models/vosk-model-small-fr-0.22   # relatif à caytu_config/config
+  min_confidence: 0.75            # « allez » reconnu à 0,88 (voix de synthèse) : À AJUSTER

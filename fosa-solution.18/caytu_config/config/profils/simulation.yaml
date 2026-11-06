@@ -1,0 +1,43 @@
+# Profil Gazebo (simulateur officiel PARC 2026) : surcharge de fosa.yaml.
+# Activé par FOSA_CONFIG_OVERRIDE ou `FOSA_PROFIL=simulation ./run.sh ...`.
+# Les listes remplacent celles de fosa.yaml ; les mappings se complètent.
+#
+# Le simulateur officiel publie l'interface du vrai robot (/cmd_vel,
+# /botwheel_explorer/odom, /scan_filtered, camera1/camera2, /parc/*) : seuls
+# les écarts propres à Gazebo restent ici.
+
+system:
+  deployment: simulation
+  use_sim_time: true
+  base_frame: base_footprint      # le pont Gazebo publie odom -> base_footprint
+  ros_domain_id: 42
+
+navigation:
+  # Le simulateur publie déjà /scan_filtered (retours < 0,3 m retirés) :
+  # relancer notre filtre laser écraserait le sien.
+  laser_self_filter: false
+
+perception:
+  apriltag:
+    # Le modèle officiel mappe une texture 10 cases sur une face de 0,15 m :
+    # le carré noir (8 cases) mesure donc 0,12 m. Utiliser 0,15 surestimerait
+    # toutes les distances de 25 %.
+    size_m: 0.12
+    cameras:
+      - name: camera1
+        color_topic: /camera1/camera1/color/image_raw
+        info_topic: /camera1/camera1/color/camera_info
+      - name: camera2
+        color_topic: /camera2/camera2/color/image_raw
+        info_topic: /camera2/camera2/color/camera_info
+
+start_word:
+  enabled: true
+  # Le respeaker simulé publie une phrase complète sur /speech_audio, comme
+  # le ReSpeaker du robot.
+  mode: utterance
+
+course:
+  preparation:
+    # Séparée de celle du robot réel (~/.ros/fosa/preparation).
+    directory: ~/.fosa_simulation/preparation
