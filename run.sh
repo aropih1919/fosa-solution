@@ -3,8 +3,12 @@
 set -euo pipefail
 
 DOSSIER_SCRIPT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ESPACE_TRAVAIL="$(cd -- "$DOSSIER_SCRIPT/../.." && pwd)"
-ROS_DISTRO="jazzy"
+ESPACE_TRAVAIL="${FOSA_WS:-$(cd -- "$DOSSIER_SCRIPT/../.." && pwd)}"
+source "$DOSSIER_SCRIPT/outils/config_exploitation.sh"
+ROS_DISTRO="$(lire_exploitation ros_distro)"
+# Une valeur explicitement demandée par l'opérateur ne doit pas être écrasée
+# par la bascule automatique « aucune préparation -> sans carte ».
+NAVIGATION_DEMANDEE="${FOSA_NAVIGATION:-}"
 
 afficher_aide() {
     cat <<'AIDE'
@@ -15,12 +19,14 @@ Modes (robot réel par défaut) :
                 mesure des 4 tags, enregistrement (exploration autonome)
   preparation-manuelle
                 carte et tags enregistrés pendant que vous guidez le robot
-  course        le match : se localise sur la carte de la préparation (ou
-                cartographie en direct), attend l'ordre puis le départ
+  course        le match : se localise sur la carte de la préparation ;
+                sans préparation valide, bascule automatiquement en sans carte
+  course-sans-carte  match autonome en odom, sans carte enregistrée ni SLAM
   suivi         afficher en phrases ce que fait le robot (tags, plans, sauts…)
-  arreter       arrêter la préparation ou la course
+  arreter       arrêter la préparation, la course et l'ancienne session tmux
   depart        donner le départ par commande (la course doit attendre)
   ordre-test O  publier un ordre de test, ex. "7,1,9,4" (ESSAIS SEULEMENT)
+  test O        alias de ordre-test : publie l'ordre, ne lance pas la course
   etat          état brut de la course
   cartographie  SLAM, Nav2 et perception sans mission (réglages)
   sauver-carte  enregistrer la carte pendant que SLAM tourne, avant l'arrêt
@@ -31,7 +37,7 @@ Modes (robot réel par défaut) :
 
 Profils : FOSA_PROFIL=simulation pour Gazebo (sinon robot réel).
 Espace de travail de base du robot (parc_msgs de l'arbitre) : FOSA_BASE_WS,
-~/ros2_ws par défaut (sourcé avant le nôtre).
+~/parc_ws en priorité puis ~/ros2_ws (sourcé avant le nôtre).
 CycloneDDS saturé : FOSA_DDS_ETENDU=1 active la surcharge de dépannage
 dans caytu_config/config/cyclonedds.xml (voir README, section F.1).
 
@@ -39,6 +45,11 @@ Exemples :
   ./run.sh preparation      puis, une fois terminée :   ./run.sh course
   ./run.sh preparation-manuelle, puis ./run.sh sauver-carte avant ./run.sh arreter
   ./run.sh suivi            (dans un second terminal)
+  ./run.sh depart
+
+Essai local sans arbitre (aucun ranking) :
+  ./run.sh test '7,1,9,4'
+  ./run.sh course-sans-carte
   ./run.sh depart
 AIDE
 }
@@ -65,13 +76,57 @@ if [[ -z "$mode" ]]; then
 fi
 if (($#)); then shift; fi
 
+case "$mode" in
+    help|-h|--help) afficher_aide; exit 0 ;;
+    course-sans-carte) export FOSA_NAVIGATION=sans_carte; mode=course ;;
+    test)
+        echo "Mode test : publication d'un ordre local uniquement (aucun lancement, aucun ranking)." >&2
+        mode=ordre-test ;;
+    preparation|preparation-manuelle|cartographie) export FOSA_NAVIGATION=carte ;;
+esac
+export FOSA_NAVIGATION="${FOSA_NAVIGATION:-carte}"
+if [[ "${FOSA_PROFIL:-robot}" == simulation ]]; then
+    cache="$(lire_exploitation simulation.cache)"
+    export FOSA_DONNEES="${FOSA_DONNEES:-${cache/#\~/$HOME}}"
+else
+    export FOSA_DONNEES="${FOSA_DONNEES:-$HOME/$(lire_exploitation dossier_robot)/donnees}"
+fi
+ETAT_SESSION="$FOSA_DONNEES/sessions/course.json"
+
+# L'ancienne version lançait la course dans tmux. Cette session connue doit
+# être arrêtée avant la nouvelle, sinon deux nœuds publient sur /cmd_vel.
+arreter_ancienne_session() {
+    command -v tmux >/dev/null 2>&1 || return 0
+    tmux has-session -t fosa_course 2>/dev/null || return 0
+    echo "Arrêt de l'ancienne session tmux « fosa_course »." >&2
+    tmux kill-session -t fosa_course
+}
+
+signaler_course_ancienne() {
+    local lignes
+    lignes="$(pgrep -af '[c]aytu_course/course_parc|[c]ourse\.launch\.py' || true)"
+    [[ -z "$lignes" ]] && return 0
+    echo "Une course Fosa tourne encore (ancienne version ou session sans état) :" >&2
+    printf '%s\n' "$lignes" | sed 's/^/  /' >&2
+    echo "Arrêtez-la avant de relancer : ./run.sh arreter puis vérifiez ros2 node list." >&2
+    return 1
+}
+
+# L'arrêt doit rester disponible même si ROS ou le workspace est endommagé.
+if [[ "$mode" == arreter ]]; then
+    arreter_ancienne_session
+    python3 "$DOSSIER_SCRIPT/outils/processus.py" arreter --etat "$ETAT_SESSION"
+    signaler_course_ancienne || true
+    exit 0
+fi
+
 if [[ ! -f "/opt/ros/$ROS_DISTRO/setup.bash" ]]; then
     echo "ROS 2 Jazzy est absent : installez-le avant de lancer la course." >&2
     exit 1
 fi
 if [[ ! -f "$ESPACE_TRAVAIL/install/setup.bash" ]]; then
     echo "Workspace non compilé : $ESPACE_TRAVAIL/install/setup.bash est absent." >&2
-    echo "Lancez ./deployer_robot.sh (robot) ou colcon build --packages-up-to caytu_course." >&2
+    echo "Lancez ./deployer_robot.sh --installer (robot) ou simulation/simulation.sh preparer (PC)." >&2
     exit 1
 fi
 
@@ -79,7 +134,13 @@ set +u
 source "/opt/ros/$ROS_DISTRO/setup.bash"
 # Espace de travail de base du robot (paquets des organisateurs, dont
 # parc_msgs pour l'arbitre) : sourcé avant le nôtre, qui reste prioritaire.
-export FOSA_BASE_WS="${FOSA_BASE_WS:-$HOME/ros2_ws}"
+# Les organisateurs ont annoncé ~/parc_ws ; ~/ros2_ws reste accepté.
+base_ws_defaut="$HOME/parc_ws"
+if [[ ! -f "$base_ws_defaut/install/setup.bash" \
+        && -f "$HOME/ros2_ws/install/setup.bash" ]]; then
+    base_ws_defaut="$HOME/ros2_ws"
+fi
+export FOSA_BASE_WS="${FOSA_BASE_WS:-$base_ws_defaut}"
 if [[ "$(cd "$FOSA_BASE_WS" 2>/dev/null && pwd)" != "$ESPACE_TRAVAIL" ]]; then
     for script in "$FOSA_BASE_WS/install/setup.bash" "$FOSA_BASE_WS/setup.bash"; do
         if [[ -f "$script" ]]; then source "$script"; break; fi
@@ -105,7 +166,7 @@ source "$DOSSIER_SCRIPT/outils/environnement_dds.sh"
 configurer_dds
 
 # Valeur lue dans la configuration active (profil compris) : le robot est sur
-# le domaine 0 ; un ROS_DOMAIN_ID déjà exporté reste prioritaire.
+# le domaine 0 ; le profil impose aussi le domaine aux outils.
 lire_config() {
     python3 -c "from caytu_config import load_config; c = load_config(); print($1)"
 }
@@ -115,48 +176,40 @@ export ROS_DOMAIN_ID="$(lire_config c.system.ros_domain_id)"
 
 verifier_arbitre() {
     if ! python3 -c 'import parc_msgs.msg' 2>/dev/null; then
-        echo "ATTENTION : parc_msgs introuvable (FOSA_BASE_WS=$FOSA_BASE_WS)." >&2
-        echo "Les visites ne seront PAS signalées à l'arbitre." >&2
+        echo "parc_msgs introuvable (FOSA_BASE_WS=$FOSA_BASE_WS)." >&2
+        echo "Chargez le workspace organisateur : source ~/parc_ws/install/setup.bash" >&2
+        exit 1
     fi
 }
 
 # Lance la course (match ou préparation) détachée de la session SSH : une
-# coupure Wi-Fi ne l'arrête pas. Journal conservé dans ~/.ros/fosa.
+# coupure Wi-Fi ne l'arrête pas. Journal conservé dans FOSA_DONNEES.
 lancer_detache() {
     local nom="$1"; shift
-    local donnees="${FOSA_DONNEES:-$HOME/.ros/fosa}" journal
+    local donnees="$FOSA_DONNEES" journal
+    if python3 "$DOSSIER_SCRIPT/outils/processus.py" actif --etat "$ETAT_SESSION" >/dev/null 2>&1; then
+        echo "Une session Fosa est déjà active : ./run.sh arreter, puis relancez." >&2
+        echo "Si vous êtes simplement reconnecté après une coupure SSH, utilisez ./run.sh suivi." >&2
+        exit 1
+    fi
+    if command -v tmux >/dev/null 2>&1 && tmux has-session -t fosa_course 2>/dev/null; then
+        echo "Ancienne session tmux « fosa_course » active : ./run.sh arreter." >&2
+        exit 1
+    fi
+    signaler_course_ancienne || exit 1
     mkdir -p "$donnees"
     journal="$donnees/${nom}_$(date +%Y%m%d_%H%M%S).log"
-    local interne=(env -u RMW_IMPLEMENTATION -u CYCLONEDDS_URI
-        "FOSA_PROFIL=${FOSA_PROFIL:-robot}" "FOSA_BASE_WS=${FOSA_BASE_WS:-}"
-        "ROS_DOMAIN_ID=$ROS_DOMAIN_ID" "FOSA_DDS_ETENDU=${FOSA_DDS_ETENDU:-0}")
-    # Un serveur tmux déjà lancé peut avoir un ancien environnement DDS.
-    # Transmettre aussi les variables absentes, pour effacer cet héritage.
-    local variable
-    for variable in RMW_IMPLEMENTATION CYCLONEDDS_URI; do
-        if [[ -v "$variable" ]]; then
-            interne+=("$variable=${!variable}")
-        fi
-    done
-    interne+=("$DOSSIER_SCRIPT/run.sh" course-premier-plan "$@")
+    local interne=("$DOSSIER_SCRIPT/run.sh" course-premier-plan "$@")
     echo "Suivi lisible dans un autre terminal : ./run.sh suivi"
-    if command -v tmux >/dev/null 2>&1; then
-        tmux new-session -d -s fosa_course "$(printf '%q ' "${interne[@]}") 2>&1 | tee $(printf '%q' "$journal")"
-        echo "Session tmux « fosa_course » (Ctrl-b d pour la quitter sans l'arrêter)."
-        echo "Journal : $journal"
-        if [[ -t 0 ]]; then exec tmux attach -t fosa_course; fi
-    else
-        setsid nohup "${interne[@]}" > "$journal" 2>&1 < /dev/null &
-        echo "Lancé en arrière-plan (PID $!). Journal : $journal"
-        echo "Ctrl-C quitte l'affichage sans arrêter (./run.sh arreter)."
-        if [[ -t 0 ]]; then exec tail -n +1 -f "$journal"; fi
-    fi
+    python3 "$DOSSIER_SCRIPT/outils/processus.py" lancer --etat "$ETAT_SESSION" \
+        --journal "$journal" -- "${interne[@]}"
+    echo "Lancement détaché de SSH. Arrêt : ./run.sh arreter ; journal : $journal"
 }
 
 verifier_paquet() {
     local paquet="$1"
     if ! ros2 pkg prefix "$paquet" >/dev/null 2>&1; then
-        echo "Paquet ROS '$paquet' introuvable. Déployez d'abord la solution (./deployer_robot.sh)." >&2
+        echo "Paquet ROS '$paquet' introuvable. Déployez d'abord avec ./deployer_robot.sh --installer." >&2
         exit 1
     fi
 }
@@ -165,12 +218,24 @@ case "$mode" in
     course)
         verifier_paquet caytu_course
         verifier_arbitre
+        # Sans préparation valide, le mode sans carte est plus sûr que de
+        # construire une carte pendant les 10 minutes du match.
+        if [[ -z "$NAVIGATION_DEMANDEE" && "${FOSA_NAVIGATION:-carte}" == carte ]] \
+                && ! python3 -c "
+from caytu_config import load_config
+from caytu_course.lancement import carte_preparee
+raise SystemExit(0 if carte_preparee(load_config()) is not None else 1)"; then
+            export FOSA_NAVIGATION=sans_carte
+            echo "Aucune préparation valide : bascule automatique en sans carte (odom)."
+        fi
         echo "Match : profil ${FOSA_PROFIL:-robot}, ROS_DOMAIN_ID=$ROS_DOMAIN_ID."
         python3 -c "
 from caytu_config import load_config
 from caytu_course.lancement import carte_preparee, fichier_tags
 c = load_config(); carte = carte_preparee(c)
-if carte is None:
+if c.navigation.mode == 'sans_carte':
+    print('Sans carte : costmaps roulantes en odom ; aucune préparation chargée.')
+elif carte is None:
     print('Aucune préparation : carte construite en direct, tags à chercher.')
 else:
     print(f'Préparation utilisée : {carte}.posegraph et {fichier_tags(c)}.')
@@ -186,7 +251,7 @@ else:
         ;;
     preparation-manuelle)
         verifier_paquet caytu_course
-        echo "Préparation guidée : utilisez un seul moyen de pilotage manuel sur /cmd_vel."
+        echo "Préparation guidée : pilotez sur $(lire_config c.navigation.securite.topic_entree)."
         echo "SLAM enregistre la carte et les caméras mémorisent les tags observés."
         echo "Avant l'arrêt, exécutez ./run.sh sauver-carte pendant que SLAM tourne ; les tags sont écrits en continu."
         echo "Aucun objectif autonome n'est lancé."
@@ -198,17 +263,9 @@ else:
     course-premier-plan)
         ros2 launch caytu_course course.launch.py "$@"
         ;;
-    arreter)
-        if command -v tmux >/dev/null 2>&1 && tmux has-session -t fosa_course 2>/dev/null; then
-            tmux send-keys -t fosa_course C-c
-        else
-            pkill -INT -f "ros2 launch caytu_course course.launch.py" \
-                || echo "Aucune course en cours."
-        fi
-        ;;
     cartographie)
         verifier_paquet caytu_course
-        ros2 launch caytu_course course.launch.py mode:=cartographie "$@"
+        lancer_detache cartographie mode:=cartographie "$@"
         ;;
     depart)
         topic="$(lire_config c.course.start_topic)"
@@ -218,18 +275,19 @@ else:
         ;;
     ordre-test)
         ordre="${1:-}"
-        motif_ordre='^[][0-9 ,]+$'     # chiffres, virgules, espaces, crochets
-        if [[ -z "$ordre" || ! "$ordre" =~ $motif_ordre ]]; then
-            echo "Usage : ./run.sh ordre-test \"7,1,9,4\"  (essais seulement)" >&2
-            exit 2
-        fi
+        liste="$(python3 - "$ordre" <<'PYTHON'
+import sys
+from caytu_config import load_config
+from caytu_course.ordre_tags import lire_ordre
+print(', '.join(map(str, lire_ordre(sys.argv[1], load_config().course.tag_ids))))
+PYTHON
+)"
         echo "ATTENTION : en course, l'ordre vient UNIQUEMENT des organisateurs."
         echo "Ne pas utiliser si l'arbitre tourne : armer la course dans son tableau de bord."
         topic="$(lire_config c.course.order_topic)"
-        liste="${ordre//,/ }"          # 7,1,9,4 -> 7 1 9 4
         ros2 topic pub -t 5 -r 1 --qos-reliability reliable \
             --qos-durability transient_local "$topic" parc_msgs/msg/TagOrder \
-            "{tag_ids: [${liste//[\[\]]/}]}"
+            "{tag_ids: [$liste]}"
         ;;
     etat)
         ros2 topic echo "$(lire_config c.course.state_topic)" std_msgs/msg/String

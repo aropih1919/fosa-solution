@@ -53,6 +53,8 @@ verifier_topic() {
 verifier_topic "$(lire_config c.navigation.scan_topic)" "scan SLAM/costmaps"
 verifier_topic "$(lire_config c.navigation.odom_topic)" "odométrie"
 verifier_topic "$(lire_config c.navigation.cmd_vel_topic)" "commande (doit être geometry_msgs/msg/Twist)"
+verifier_topic /tf "arbres de repères du robot"
+verifier_topic /tf_static "repères fixes des caméras et du lidar"
 verifier_topic "$(lire_config c.start_word.audio_topic)" "audio du mot de départ"
 verifier_topic "$(lire_config c.course.order_topic)" "ordre des organisateurs (souvent publié au départ seulement)"
 for camera in $(lire_config "' '.join(x.color_topic + ',' + x.info_topic for x in c.perception.apriltag.cameras)"); do
@@ -67,7 +69,7 @@ titre "Arbitre (parc_msgs)"
 # Les définitions exactes des messages ne sont pas dans la documentation reçue :
 # elles sont enregistrées ici dans le rapport du premier créneau.
 # Lecture en Python : `ros2 interface` n'est pas toujours installé.
-python3 - <<'PYTHON' || ko "parc_msgs absent : sourcer ~/ros2_ws/install/setup.bash avant l'espace de l'équipe"
+python3 - <<'PYTHON' || ko "parc_msgs absent : sourcer ~/parc_ws/install/setup.bash avant l'espace de l'équipe"
 import parc_msgs.msg as messages
 
 print('  [OK]   parc_msgs installé')
@@ -89,9 +91,52 @@ for topic in "$(lire_config c.course.order_topic)" "$(lire_config c.course.refer
         | sed 's/^/      /'
 done
 
-titre "Type de la commande de vitesse"
-ros2 topic info "$(lire_config c.navigation.cmd_vel_topic)" 2>&1 | sed 's/^/  /'
+titre "Commande de vitesse : une seule source Fosa"
+CMD_TOPIC="$(lire_config c.navigation.cmd_vel_topic)"
+INFO_CMD="$(ros2 topic info -v "$CMD_TOPIC" 2>&1)"
+printf '%s\n' "$INFO_CMD" | sed 's/^/  /'
+if grep -q 'Publisher count: 0' <<<"$INFO_CMD"; then
+    info "Aucun publieur pour l'instant : normal avant le lancement de la course."
+else
+    for nom in course_parc controller_server behavior_server teleop_twist_keyboard; do
+        if grep -q "Node name: /$nom\$" <<<"$INFO_CMD"; then
+            ko "$nom publie directement sur $CMD_TOPIC : conflit de commandes."
+        fi
+    done
+    if grep -q 'Node name: /garde_vitesse$' <<<"$INFO_CMD"; then
+        ok "garde_vitesse est présente sur $CMD_TOPIC."
+    else
+        ko "garde_vitesse absente : les commandes Fosa ne sont pas protégées."
+    fi
+fi
+info "Attendu : Nav2 et l'alignement publient sur /fosa/cmd_vel ; seule la garde publie sur $CMD_TOPIC."
 info "Nav2 publie un Twist non horodaté (enable_stamped_cmd_vel: false)."
+
+titre "Sessions et nœuds Fosa"
+NODES="$(ros2 node list 2>/dev/null || true)"
+for nom in course_parc garde_vitesse; do
+    if grep -qx "/$nom" <<<"$NODES"; then
+        info "nœud /$nom actif"
+    fi
+done
+if grep -qx "/course_parc" <<<"$NODES"; then
+    ko "course_parc tourne : ancienne course ou session sans état. ./run.sh arreter puis vérifier."
+fi
+if command -v tmux >/dev/null 2>&1 && tmux has-session -t fosa_course 2>/dev/null; then
+    ko "ancienne session tmux « fosa_course » active : ./run.sh arreter."
+else
+    ok "aucune ancienne session tmux fosa_course."
+fi
+
+titre "Moteurs du robot"
+SERVICES="$(ros2 service list 2>/dev/null || true)"
+if grep -qx "/start_motor" <<<"$SERVICES"; then
+    info "/start_motor présent : l'appeler avant le premier déplacement, robot posé et dégagé."
+    info "  ros2 service call /start_motor std_srvs/srv/Empty"
+else
+    info "/start_motor absent : le bringup du robot gère peut-être déjà les moteurs."
+fi
+grep -qx "/stop_motor" <<<"$SERVICES" && info "/stop_motor présent : arrêt moteurs disponible."
 
 titre "Mesures (caméras, scans, repères, audio)"
 python3 "$(dirname "$0")/mesures_robot.py"

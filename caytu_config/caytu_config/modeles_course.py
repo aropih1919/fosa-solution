@@ -364,8 +364,9 @@ _NOMBRES_COURSE = (
     ("lateral_tolerance_m", {"positive": True}),
     ("heading_tolerance_deg", {
         "positive": True, "maximum": REGLEMENT_TOLERANCE_CAP_DEG - 1.0}),
-    ("hold_sec", {"minimum": 0.0}),
+    ("hold_sec", {"minimum": 3.0}),  # minimum du protocole parc_msgs/TagVisit
     ("detection_max_age_sec", {"positive": True}),
+    ("image_max_age_sec", {"positive": True}),
     ("search_spin_time_sec", {"positive": True}),
     ("search_grid_step_m", {"positive": True}),
     ("search_clearance_m", {"positive": True}),
@@ -409,6 +410,7 @@ class CourseConfig:
     stable_cycles: int
     hold_sec: float
     detection_max_age_sec: float
+    image_max_age_sec: float
     search_spin_time_sec: float
     search_grid_step_m: float
     search_clearance_m: float

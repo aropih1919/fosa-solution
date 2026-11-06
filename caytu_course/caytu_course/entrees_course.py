@@ -59,7 +59,8 @@ def _qos(fiabilite, durabilite, profondeur):
 
 class EntreesCourse:
 
-    def __init__(self, node, configuration, memoire, memoire_tf, attente_depart):
+    def __init__(self, node, configuration, memoire, memoire_tf, attente_depart,
+                 ecouter_arbitre=True):
         """attente_depart() : vrai tant que la course n'a pas commencé."""
         self._node = node
         self._attente_depart = attente_depart
@@ -67,6 +68,7 @@ class EntreesCourse:
         self._memoire = memoire
         self._memoire_tf = memoire_tf
         self._repere_robot = configuration.system.base_frame
+        self._sans_carte = configuration.navigation.mode == 'sans_carte'
         self.ordre = None
         self.source_depart = None
         self.mot_entendu = ''
@@ -87,7 +89,8 @@ class EntreesCourse:
             self._abonner_ordre(TYPES_ORDRE[self._course.order_type])
         node.create_subscription(
             String, self._course.start_topic, self._recevoir_depart, 10)
-        self._abonner_arbitre(self._course.referee)
+        if ecouter_arbitre:
+            self._abonner_arbitre(self._course.referee)
         node.create_subscription(
             TagDetectionArray, configuration.perception.tags_topic,
             self._recevoir_detections, 20)
@@ -204,6 +207,10 @@ class EntreesCourse:
             self.statut_arbitre = texte
             self._node.get_logger().info(f'Statut de l\'arbitre : {texte[:300]}')
         etat = getattr(message, 'state', None)
+        # La dernière course peut être encore FINISHED quand nous démarrons.
+        # Elle ne doit pas terminer la nouvelle course avant son départ.
+        if self._attente_depart() and self.source_depart is None:
+            return
         for nom, secours in ETATS_TERMINAUX_ARBITRE:
             if etat == getattr(type(message), nom, secours):
                 self.arbitre_interrompt_visite = nom in ('TIMED_OUT', 'TERMINATED')
@@ -216,8 +223,8 @@ class EntreesCourse:
 
     # -------------------------------------------------------------- détections
     def _recevoir_detections(self, message):
-        maintenant = self._maintenant()
         for detection in message.detections:
+            maintenant = Time.from_msg(detection.header.stamp).nanoseconds * 1e-9
             if detection.has_pose_map:
                 pose = detection.pose_map.pose
                 cap = cap_normale(
@@ -238,7 +245,8 @@ class EntreesCourse:
                     self._detections_robot[detection.tag_id] = DetectionRobot(
                         pose.position.x, pose.position.y, cap,
                         detection.distance_m, maintenant)
-            self._stamps_tag[detection.tag_id] = _cle_image(detection.header)
+            self._stamps_tag.setdefault(detection.tag_id, deque(maxlen=IMAGES_GARDEES)).append(
+                _cle_image(detection.header))
 
     def _maintenant(self):
         """Horloge ROS : Gazebo peut tourner bien plus lentement que le temps réel."""
@@ -246,7 +254,7 @@ class EntreesCourse:
 
     def detection_recente(self, tag_id, age_max):
         detection = self._detections_robot.get(tag_id)
-        if detection is None or self._maintenant() - detection.instant > age_max:
+        if detection is None or not 0.0 <= self._maintenant() - detection.instant <= age_max:
             return None
         return detection
 
@@ -254,25 +262,26 @@ class EntreesCourse:
         self._images.append((_cle_image(message.header), message))
 
     def image_preuve(self, tag_id):
-        """Image où le tag a été détecté ; à défaut la plus récente de la même
-        caméra (l'autre caméra ne montre pas forcément le tag)."""
-        cle = self._stamps_tag.get(tag_id)
-        if cle is None:
-            return self._images[-1][1] if self._images else None
+        """Image fraîche où CET identifiant a effectivement été détecté."""
+        cles = self._stamps_tag.get(tag_id, ())
         for cle_image, image in reversed(self._images):
-            if cle_image == cle:
-                return image
-        for cle_image, image in reversed(self._images):
-            if cle_image[2] == cle[2]:
+            age = self._maintenant() - (cle_image[0] + cle_image[1] * 1e-9)
+            if cle_image in cles and 0.0 <= age <= self._course.image_max_age_sec:
                 return image
         return None
 
     # ------------------------------------------------------------- carte/scan
     def _recevoir_carte(self, message):
         info = message.info
+        donnees = list(message.data)
+        if self._sans_carte:
+            # La costmap inclut déjà l'inflation Nav2. La recherche applique
+            # sa propre marge autour des cellules létales, une seule fois.
+            donnees = [-1 if valeur < 0 else (100 if valeur == 100 else 0)
+                       for valeur in donnees]
         self._grille = GrilleOccupation(
             info.width, info.height, info.resolution,
-            info.origin.position.x, info.origin.position.y, list(message.data))
+            info.origin.position.x, info.origin.position.y, donnees)
 
     def grille(self):
         return self._grille

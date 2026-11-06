@@ -23,6 +23,8 @@ def dossier_preparation(configuration):
 
 def carte_preparee(configuration):
     """Chemin de la carte enregistrée (sans extension), ou None."""
+    if configuration.navigation.mode == 'sans_carte':
+        return None
     base = dossier_preparation(configuration) / NOM_CARTE
     if base.with_suffix('.posegraph').is_file() and base.with_suffix('.data').is_file():
         return base

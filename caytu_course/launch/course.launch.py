@@ -19,7 +19,9 @@ from caytu_config import load_config
 from caytu_course.lancement import MODES, executable_slam, parametres_slam
 from caytu_nav_solution.parametres_nav2 import ecrire_parametres_course
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -42,14 +44,16 @@ def _filtre_laser(configuration, dossier_bringup, temps):
 
 def _pile_navigation(configuration, fichier_nav2, dossier_bringup, dossier_course, temps,
                      mode):
-    vitesse = configuration.navigation.cmd_vel_topic
+    vitesse = configuration.navigation.securite.topic_entree
+    sans_carte = configuration.navigation.mode == 'sans_carte'
     arbre = os.path.join(
         dossier_bringup, 'behavior_trees', 'navigate_bounded_recovery.xml')
-    return [
+    noeuds = [] if sans_carte else [
         Node(package='slam_toolbox', executable=executable_slam(configuration, mode),
              name='slam_toolbox', output='screen',
              parameters=[os.path.join(dossier_course, 'config', 'slam_toolbox.yaml'),
-                         parametres_slam(configuration, mode)]),
+                          parametres_slam(configuration, mode)])]
+    noeuds += [
         Node(package='nav2_controller', executable='controller_server',
              output='screen', parameters=[fichier_nav2, temps],
              remappings=[('cmd_vel', vitesse)]),
@@ -65,11 +69,13 @@ def _pile_navigation(configuration, fichier_nav2, dossier_bringup, dossier_cours
              name='lifecycle_manager_course', output='screen',
              parameters=[temps, {
                  'autostart': True,
-                 'node_names': NOEUDS_GERES,
+                  'node_names': [nom for nom in NOEUDS_GERES
+                                 if not (sans_carte and nom == 'slam_toolbox')],
                  # Pas de bond : slam_toolbox n'en publie pas sous ce manager.
                  'bond_timeout': 0.0,
              }]),
     ]
+    return noeuds
 
 
 def _perception_et_course(configuration, temps, mode):
@@ -90,14 +96,20 @@ def _perception_et_course(configuration, temps, mode):
              respawn=True, respawn_delay=2.0,
              parameters=[temps, {'source_name': scan.name}])
         for scan in configuration.perception.depth_scans]
+    noeuds.append(Node(
+        package='caytu_course', executable='garde_vitesse', output='screen',
+        parameters=[temps, {'mode': mode}]))
     if configuration.start_word.enabled and mode == 'course':
         noeuds.append(Node(
             package='caytu_course', executable='mot_depart', output='screen',
             respawn=True, respawn_delay=2.0, parameters=[temps]))
     if mode != 'cartographie':
-        noeuds.append(Node(
+        course = Node(
             package='caytu_course', executable='course_parc', output='screen',
-            emulate_tty=True, parameters=[temps, {'mode': mode}]))
+            emulate_tty=True, parameters=[temps, {'mode': mode}])
+        noeuds += [course, RegisterEventHandler(OnProcessExit(
+            target_action=course,
+            on_exit=[EmitEvent(event=Shutdown(reason='Le nœud de course est arrêté.'))]))]
     return noeuds
 
 
@@ -107,6 +119,8 @@ def _generer(context):
     mode = LaunchConfiguration('mode').perform(context)
     if mode not in MODES:
         raise RuntimeError(f'mode inconnu : {mode} (attendu : {", ".join(MODES)})')
+    if configuration.navigation.mode == 'sans_carte' and mode != 'course':
+        raise RuntimeError('Le mode sans carte sert au match ; préparation : FOSA_NAVIGATION=carte.')
     dossier_bringup = get_package_share_directory('caytu_nav_bringup')
     dossier_course = get_package_share_directory('caytu_course')
     fichier_nav2 = str(ecrire_parametres_course(

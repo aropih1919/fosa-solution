@@ -9,6 +9,7 @@ import time
 
 import numpy as np
 import rclpy
+from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -17,6 +18,7 @@ from sensor_msgs.msg import CameraInfo, Image, LaserScan, PointCloud2
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from caytu_config import load_config
+from caytu_perception.fraicheur_capteurs import horodatage_recent, nanosecondes_stamp
 from caytu_perception.scan_profondeur import (
     points_depuis_profondeur,
     scan_depuis_points,
@@ -39,6 +41,8 @@ class NoeudScanProfondeur(Node):
             raise ValueError(
                 f'source_name « {nom} » absent de perception.depth_scans : {sorted(scans)}')
         self._reglages = scans[nom]
+        self._age_max = configuration.navigation.securite.age_scan_max_sec
+        self._delai_tf = configuration.perception.apriltag.tf_timeout_sec
         self._repere_robot = configuration.system.base_frame
         self._periode = 1.0 / self._reglages.rate_hz
         self._dernier = 0.0
@@ -106,13 +110,23 @@ class NoeudScanProfondeur(Node):
         self._publier(message.header, points[::pas * pas])
 
     def _publier(self, entete, points):
+        # Adaptation du contrôle de b4fae57 : une caméra muette ou une image
+        # périmée ne doit pas effacer les obstacles de la costmap.
+        if (not len(points) or not entete.frame_id or not horodatage_recent(
+                nanosecondes_stamp(entete.stamp), self.get_clock().now().nanoseconds,
+                self._age_max)):
+            return
         try:
             transformation = self._memoire_tf.lookup_transform(
-                self._repere_robot, entete.frame_id, Time())
+                self._repere_robot, entete.frame_id, Time.from_msg(entete.stamp),
+                timeout=Duration(seconds=self._delai_tf))
         except TransformException as erreur:
             self.get_logger().warning(
                 f'TF {self._repere_robot} <- {entete.frame_id} absente : {erreur}',
                 throttle_duration_sec=10.0)
+            return
+        if not horodatage_recent(nanosecondes_stamp(entete.stamp),
+                                 self.get_clock().now().nanoseconds, self._age_max):
             return
         t, q = transformation.transform.translation, transformation.transform.rotation
         reglages = self._reglages

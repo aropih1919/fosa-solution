@@ -1,0 +1,8 @@
+# Appliqué après le profil robot/simulation par FOSA_NAVIGATION=sans_carte.
+# Ni carte enregistrée, ni SLAM, ni coordonnées de tags préchargées.
+system:
+  global_frame: odom
+navigation:
+  mode: sans_carte
+course:
+  map_topic: /global_costmap/costmap

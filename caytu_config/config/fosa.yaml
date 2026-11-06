@@ -15,12 +15,22 @@ system:
   clock_topic: /clock
 
 navigation:
+  mode: carte                    # carte (SLAM) | sans_carte (costmaps roulantes en odom)
+  rolling_window_size_m: 10.0     # fenêtre locale de travail sans carte préalable
   profile: balanced               # profil du laboratoire de navigation
   success_radius: 0.20
   arrival_recheck_radius: 0.35
 
   scan_topic: /scan_filtered      # filtre d'auto-détection des organisateurs
   cmd_vel_topic: /cmd_vel         # Twist, relu par obstacle_avoidance (organisateurs)
+  securite:
+    topic_entree: /fosa/cmd_vel    # toutes nos commandes passent par la même garde
+    age_scan_max_sec: 0.6
+    age_commande_max_sec: 0.5
+    horizon_sec: 1.0              # empreinte balayée par l'avance, le recul et la rotation
+    pas_sec: 0.05
+    periode_sec: 0.05
+    marge_m: 0.05
   odom_topic: /botwheel_explorer/odom
   odom_frame: odom
 
@@ -86,14 +96,15 @@ perception:
     # Si l'odométrie arrive après l'image : dernière TF acceptée jusqu'à ce
     # retard (pose marquée moins fiable). Mesuré en simulation : ~0,3 s.
     tf_max_lag_sec: 0.5
-    # Les deux RealSense détectent ; la caméra haute est à confirmer sur place.
+    # Consigne Evans du 06/11 : camera2 regarde devant, camera1 est en bas.
+    # Chaque preuve garde le frame_id de la caméra ayant vu le tag.
     cameras:
-      - name: camera1
-        color_topic: /camera1/camera1/color/image_raw
-        info_topic: /camera1/camera1/color/camera_info
       - name: camera2
         color_topic: /camera2/camera2/color/image_raw
         info_topic: /camera2/camera2/color/camera_info
+      - name: camera1
+        color_topic: /camera1/camera1/color/image_raw
+        info_topic: /camera1/camera1/color/camera_info
 
   # Profondeur -> obstacles entre deux hauteurs du repère du robot -> LaserScan
   # (le lidar bas ne voit pas les plateaux de table). Une entrée par caméra.
@@ -168,8 +179,9 @@ course:
   lateral_tolerance_m: 0.06
   heading_tolerance_deg: 5.0      # règlement : ±12°
   stable_cycles: 5                # cycles consécutifs dans les tolérances
-  hold_sec: 5.0                   # maintien après le signalement (À CONFIRMER)
+  hold_sec: 5.0                   # parc_msgs/TagVisit : au moins 3 secondes immobile
   detection_max_age_sec: 0.6
+  image_max_age_sec: 1.0          # preuve liée à une détection du bon tag et de la bonne caméra
   search_spin_time_sec: 25.0
   search_grid_step_m: 0.4
   search_clearance_m: 0.45
@@ -211,7 +223,7 @@ course:
   # continue des tags à tenter selon le temps restant. Durées estimées :
   # À RECALER sur les essais (journal « Plan : ... »).
   strategy:
-    points_per_tag: 25.0          # règlement : 20 par visite + 5 de navigation sûre
+    points_per_tag: 20.0          # annonce du 06/11 : visite autonome (10 si hardcodée)
     travel_speed_mps: 0.15        # vitesse moyenne réelle, virages compris
     detour_factor: 1.4            # mobilier : trajet ≈ 1,4 x vol d'oiseau
     visit_time_sec: 45.0          # pré-approche, alignement, maintien
@@ -229,7 +241,7 @@ course:
   # `./run.sh course` se localise ensuite sur cette carte et part des tags
   # enregistrés ; sans préparation, il cartographie en direct.
   preparation:
-    directory: ~/.ros/fosa/preparation
+    directory: ~/teams/fosa/donnees/preparation
     max_duration_sec: 720.0       # 12 min sur 15 : marge pour vérifier et relancer
     close_view_m: 1.3             # tag vu plus loin : on va le mesurer de près
     approach_attempts: 2          # rapprochements tentés par tag

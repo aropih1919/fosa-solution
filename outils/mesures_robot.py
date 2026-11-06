@@ -4,7 +4,7 @@
 Affiche, pour chaque caméra de la configuration, la résolution et le repère ;
 la hauteur et l'orientation des caméras et du lidar dans base_frame (la caméra
 la plus haute voit les tags à 1 m) ; le débit audio et la fréquence
-d'échantillonnage estimée ; la présence de base_footprint.
+d'échantillonnage estimée ; la présence de base_frame et des repères connus.
 """
 
 import math
@@ -73,6 +73,12 @@ class Mesures(Node):
         return (2 * (q.x * q.z + q.w * q.y), 2 * (q.y * q.z - q.w * q.x),
                 1 - 2 * (q.x * q.x + q.y * q.y))
 
+    def reperes(self):
+        """Noms des repères connus du Buffer TF."""
+        return {ligne.strip().rstrip(':') for ligne in
+                self.tf.all_frames_as_yaml().splitlines()
+                if ligne and not ligne.startswith(' ')}
+
 
 def main():
     rclpy.init()
@@ -90,6 +96,8 @@ def main():
         if mesure:
             p, tangage, lacet = mesure
             print(f'     dans {base} : x={p.x:.3f} y={p.y:.3f} z={p.z:.3f}')
+        else:
+            print(f'  [ÉCHEC] TF {base} <- {info.header.frame_id} absente')
         axe = noeud.axe_optique(base, info.header.frame_id)
         if axe:
             pente = math.degrees(math.asin(max(-1.0, min(1.0, axe[2]))))
@@ -97,6 +105,7 @@ def main():
                   f'pente {pente:+.0f}°'
                   + ('' if axe[0] > 0.7 else
                      f'  [À VÉRIFIER] l\'axe x de {base} n\'est pas la direction de visée'))
+        print(f'     contrôle manuel : ros2 run tf2_ros tf2_echo {base} {info.header.frame_id}')
     for camera in noeud.configuration.perception.apriltag.cameras:
         if camera.name not in noeud.infos:
             print(f'  [ÉCHEC] {camera.name} : aucune calibration reçue')
@@ -112,11 +121,21 @@ def main():
             p, tangage, lacet = mesure
             print(f'     dans {base} : x={p.x:.3f} y={p.y:.3f} z={p.z:.3f} '
                   f'tangage={tangage:.1f}° lacet={lacet:.1f}°')
+        else:
+            print(f'  [ÉCHEC] TF {base} <- {scan.header.frame_id} absente')
 
     print('\n== Repères')
+    connus = noeud.reperes()
+    if base not in connus:
+        print(f'  [ÉCHEC] base_frame « {base} » absent de TF. '
+              'Le bringup/robot_state_publisher est-il lancé ?')
+    else:
+        print(f'  [OK] base_frame « {base} » publié.')
     for repere in ('base_footprint', 'odom', 'map'):
         present = noeud.tf.can_transform(base, repere, Time())
         print(f'  {repere} relié à {base} : {"oui" if present else "non"}')
+    if connus:
+        print('  repères reçus : ' + ', '.join(sorted(connus)))
 
     print('\n== Audio')
     for topic, messages in noeud.audio.items():

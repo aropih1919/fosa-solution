@@ -120,3 +120,22 @@ def test_le_temps_simule_suit_le_profil(robot, simulation):
 def test_le_fichier_ecrit_se_relit(robot, tmp_path):
     chemin = ecrire_parametres_course(robot, tmp_path / 'nav2.yaml', CONFIG_NAV2)
     assert yaml.safe_load(chemin.read_text(encoding='utf-8')) == _parametres(robot)
+
+
+@pytest.mark.parametrize('simule', [False, True])
+def test_sans_carte_fonctionne_en_odom_sans_couche_statique(monkeypatch, simule):
+    monkeypatch.setenv('FOSA_NAVIGATION', 'sans_carte')
+    if simule:
+        monkeypatch.setenv('FOSA_CONFIG_OVERRIDE', str(CONFIG_FOSA / 'profils/simulation.yaml'))
+    else:
+        monkeypatch.delenv('FOSA_CONFIG_OVERRIDE', raising=False)
+    configuration = load_config(CONFIG_FOSA)
+    parametres = _parametres(configuration)
+    globale = _costmap(parametres, 'global_costmap')
+    assert globale['global_frame'] == 'odom'
+    assert globale['rolling_window'] is True
+    assert globale['track_unknown_space'] is True
+    assert 'static_layer' not in globale
+    assert configuration.course.map_topic == '/global_costmap/costmap'
+    assert parametres['planner_server']['ros__parameters']['GridBased']['allow_unknown'] is False
+    assert configuration.system.ros_domain_id == (42 if simule else 0)

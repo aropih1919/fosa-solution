@@ -77,6 +77,12 @@ def _charger_fosa(dossier):
     if override:
         fosa = _fusion(fosa, _read_yaml(override))
 
+    mode = os.environ.get("FOSA_NAVIGATION", "carte")
+    if mode not in ("carte", "sans_carte"):
+        raise ConfigurationError("FOSA_NAVIGATION : carte ou sans_carte attendu.")
+    if mode == "sans_carte":
+        fosa = _fusion(fosa, _read_yaml(dossier / "profils" / "sans_carte.yaml"))
+
     deployment = os.environ.get("FOSA_DEPLOYMENT")
     if deployment:
         systeme = fosa.setdefault("system", {})
@@ -112,6 +118,11 @@ def load_config(dossier=None):
         course=CourseConfig.from_mapping(course),
         start_word=StartWordConfig.from_mapping(start_word),
     )
+    if configuration.navigation.securite.topic_entree == configuration.navigation.cmd_vel_topic:
+        raise ConfigurationError("Les topics d'entrée et de sortie de la garde doivent différer.")
+    if (configuration.navigation.mode == "sans_carte"
+            and configuration.system.global_frame != configuration.navigation.odom_frame):
+        raise ConfigurationError("Sans carte : global_frame doit être le repère odom.")
     manquants = set(configuration.course.tag_ids) - set(
         configuration.perception.apriltag.ids)
     if manquants:

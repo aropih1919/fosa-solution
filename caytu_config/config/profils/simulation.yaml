@@ -13,6 +13,8 @@ system:
   ros_domain_id: 42
 
 navigation:
+  securite:
+    age_scan_max_sec: 2.0          # horloge ROS : capteurs plus espacés dans Gazebo
   # Le simulateur publie déjà /scan_filtered (retours < 0,3 m retirés) :
   # relancer notre filtre laser écraserait le sien.
   laser_self_filter: false
@@ -24,6 +26,7 @@ perception:
     # toutes les distances de 25 %.
     size_m: 0.12
     cameras:
+      # Dans Gazebo camera1 regarde devant (inverse du robot réel).
       - name: camera1
         color_topic: /camera1/camera1/color/image_raw
         info_topic: /camera1/camera1/color/camera_info
@@ -39,5 +42,5 @@ start_word:
 
 course:
   preparation:
-    # Séparée de celle du robot réel (~/.ros/fosa/preparation).
+    # Séparée de celle du robot réel (~/teams/fosa/donnees/preparation).
     directory: ~/.fosa_simulation/preparation

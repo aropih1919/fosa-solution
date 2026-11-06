@@ -138,6 +138,7 @@ def _navigateur_sans_ros(chronometre):
     navigateur._chronometre = chronometre
     navigateur._spin = lambda timeout: None
     navigateur._is_ok = lambda: True
+    navigateur._interrompre = lambda: False
     return navigateur
 
 
@@ -195,6 +196,7 @@ def _navigateur_pour_resultat(handle, pose):
     navigateur._pose_robot = lambda: pose
     navigateur._spin = lambda timeout: None
     navigateur._is_ok = lambda: True
+    navigateur._interrompre = lambda: False
     navigateur._but_en_cours = None
     navigateur._dernier_log_feedback = 0.0
     navigateur.message_but = lambda *args: object()
@@ -249,6 +251,14 @@ def test_le_navigateur_s_interrompt_et_annule_le_but():
 
     assert resultat == 'interrompu'
     assert handle.cancelled is True
+
+
+def test_un_arret_arbitre_annule_aussi_une_approche_nav2():
+    poignee = _FakeGoalHandleEnCours()
+    navigateur = _navigateur_pour_resultat(poignee, Pose2D(3.0, 0.0, 0.0))
+    navigateur._interrompre = lambda: True
+    assert navigateur.naviguer_une_fois(0.0, 0.0, 'map', Pose2D(0, 0, 0)) == 'interrompu'
+    assert poignee.cancelled
 
 
 def test_le_navigateur_transmet_le_cap_au_message():

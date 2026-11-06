@@ -80,12 +80,12 @@ def _configuration(order_type='string', listen_start=True):
     return SimpleNamespace(
         course=SimpleNamespace(
             order_topic='/ordre', order_type=order_type, start_topic='/depart',
-            map_topic='/map', tag_ids=(1, 4, 7, 9), referee=arbitre),
+            map_topic='/map', tag_ids=(1, 4, 7, 9), referee=arbitre, image_max_age_sec=1.0),
         system=SimpleNamespace(base_frame='base_link'),
         perception=SimpleNamespace(
             tags_topic='/tags',
             apriltag=SimpleNamespace(detection_image_topic='/tags/image')),
-        navigation=SimpleNamespace(scan_topic='/scan'))
+        navigation=SimpleNamespace(scan_topic='/scan', mode='carte'))
 
 
 class _DepartArbitre:
@@ -199,6 +199,7 @@ def test_l_age_d_une_detection_suit_l_horloge_ros():
     from caytu_interfaces.msg import TagDetection, TagDetectionArray
     noeud, entrees = _entrees({'valeur': True})
     detection = TagDetection(tag_id=7, has_pose_robot=True, distance_m=0.8)
+    detection.header.stamp.sec = 100
     detection.pose_robot.pose.position.x = 0.8
     demi = math.sqrt(0.5)
     detection.pose_robot.pose.orientation.y = demi
@@ -218,3 +219,46 @@ def test_un_etat_terminal_de_l_arbitre_arrete_la_course():
     entrees._recevoir_statut_arbitre(_StatutArbitre(_StatutArbitre.TERMINATED))
     assert entrees.arbitre_termine is True
     assert entrees.motif_arbitre == 'arbitre_termine'
+
+
+def test_une_ancienne_fin_ne_termine_pas_le_prochain_match():
+    _, entrees = _entrees({'valeur': True})
+    entrees._recevoir_statut_arbitre(_StatutArbitre(_StatutArbitre.FINISHED))
+    assert not entrees.arbitre_termine
+
+
+def test_une_image_d_un_autre_tag_ou_perimee_n_est_pas_une_preuve():
+    from caytu_interfaces.msg import TagDetection, TagDetectionArray
+    from sensor_msgs.msg import Image
+    _, entrees = _entrees({'valeur': False})
+    image = Image()
+    image.header.stamp.sec = 100
+    image.header.frame_id = 'camera2'
+    tag = TagDetection(tag_id=4, header=image.header)
+    entrees._recevoir_detections(TagDetectionArray(detections=[tag]))
+    entrees._recevoir_image(image)
+    assert entrees.image_preuve(4) is image
+    assert entrees.image_preuve(9) is None
+    entrees._node.horloge.secondes = 102
+    assert entrees.image_preuve(4) is None
+
+
+def test_une_detection_en_retard_ne_redevient_pas_fraiche():
+    from caytu_interfaces.msg import TagDetection, TagDetectionArray
+    _, entrees = _entrees({'valeur': False})
+    tag = TagDetection(tag_id=4, has_pose_robot=True, distance_m=0.5)
+    tag.header.stamp.sec = 97
+    tag.pose_robot.pose.orientation.y = 2 ** -0.5
+    tag.pose_robot.pose.orientation.w = 2 ** -0.5
+    entrees._recevoir_detections(TagDetectionArray(detections=[tag]))
+    assert entrees.detection_recente(4, 0.6) is None
+
+
+def test_costmap_roulante_ne_double_pas_l_inflation():
+    from nav_msgs.msg import OccupancyGrid
+    _, entrees = _entrees({'valeur': False})
+    entrees._sans_carte = True
+    grille = OccupancyGrid(data=[-1, 0, 30, 99, 100])
+    grille.info.width, grille.info.height, grille.info.resolution = 5, 1, 0.05
+    entrees._recevoir_carte(grille)
+    assert entrees.grille().donnees == [-1, 0, 0, 0, 100]

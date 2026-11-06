@@ -93,6 +93,7 @@ def _empreinte(navigation):
 def _costmap(base, configuration, repere_global, globale):
     """Remplace repères, empreinte et couches d'une costmap de la base."""
     navigation = configuration.navigation
+    carte_statique = globale and navigation.mode == 'carte'
     sources = [
         source for source in navigation.obstacle_sources
         if source.enabled and (source.global_costmap or not globale)]
@@ -104,17 +105,23 @@ def _costmap(base, configuration, repere_global, globale):
         'robot_base_frame': configuration.system.base_frame,
         'footprint': _empreinte(navigation),
         'footprint_padding': navigation.footprint_padding,
-        'plugins': (['static_layer'] if globale else [])
+        'plugins': (['static_layer'] if carte_statique else [])
         + [f'{source.name}_layer' for source in sources] + ['inflation_layer'],
         'inflation_layer': base['inflation_layer'],
     })
-    if globale:
+    if carte_statique:
         # Carte publiée en continu par slam_toolbox (transient local).
         costmap['static_layer'] = {
             'plugin': 'nav2_costmap_2d::StaticLayer',
             'map_subscribe_transient_local': True,
             'subscribe_to_updates': False,
         }
+    elif globale:
+        costmap.update(
+            rolling_window=True, track_unknown_space=True,
+            width=int(navigation.rolling_window_size_m),
+            height=int(navigation.rolling_window_size_m),
+            always_send_full_costmap=True)
     for source in sources:
         costmap[f'{source.name}_layer'] = _couche_obstacles(source)
     return costmap
@@ -184,6 +191,8 @@ def construire_parametres_course(configuration, config_root=None):
     # remplacer par l'orientation du dernier segment du chemin.
     base['planner_server']['ros__parameters']['GridBased'][
         'use_final_approach_orientation'] = False
+    if navigation.mode == 'sans_carte':
+        base['planner_server']['ros__parameters']['GridBased']['allow_unknown'] = False
     bt = base['bt_navigator']['ros__parameters']
     bt.update(global_frame=carte, robot_base_frame=robot,
               odom_topic=navigation.odom_topic)

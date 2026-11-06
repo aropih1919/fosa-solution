@@ -94,6 +94,8 @@ class NoeudCourse(Node):
         self._passages = 0             # parcours complets de la carte
         self._echecs_trajet = 0        # trajets de recherche ratés de suite
         self._preparation_enregistree = False
+        self._origine_recherche = None
+        self._debut_ros = self.get_clock().now()
         self._publicateur_evenements = self.create_publisher(
             String, self._course.events_topic, qos_evenements())
 
@@ -106,20 +108,23 @@ class NoeudCourse(Node):
         self.create_timer(0.5, self._annoncer_tags_reperes)
         self._entrees = EntreesCourse(
             self, configuration, self._memoire, self._memoire_tf,
-            lambda: self._en_attente)
+            lambda: self._en_attente, ecouter_arbitre=self._mode == 'course')
         self._statut = PublicateurArbitre(self, self._course.referee)
         self._publicateur_etat = self.create_publisher(
             String, self._course.state_topic, qos_statut(1))
         self._publicateur_vitesse = self.create_publisher(
-            Twist, self._navigation.cmd_vel_topic, 10)
+            Twist, self._navigation.securite.topic_entree, 10)
 
         duree = (self._course.preparation.max_duration_sec
                  if self._mode in ('preparation', 'preparation_manuelle')
                  else self._course.time_limit_sec)
         self._chrono = ChronometreCourse(
-            self.get_clock().now, duree, self._course.stop_margin_sec)
+            # L'arbitre officiel utilise le temps réel, même dans Gazebo.
+            lambda: Time(nanoseconds=time.monotonic_ns()),
+            duree, self._course.stop_margin_sec)
         self._navigateur = NavigateurNav2(
-            self, self._navigation, self._chrono, self.pose_robot)
+            self, self._navigation, self._chrono, self.pose_robot,
+            interrompre=self._temps_ecoule)
         self._reglages = self._reglages_alignement()
         self._sequence = None
 
@@ -198,6 +203,9 @@ class NoeudCourse(Node):
                 self._configuration.system.base_frame, Time())
         except TransformException:
             return None
+        age = (self.get_clock().now() - Time.from_msg(tf.header.stamp)).nanoseconds * 1e-9
+        if not 0.0 <= age <= self._navigation.securite.age_scan_max_sec:
+            return None
         q = tf.transform.rotation
         return Pose2D(tf.transform.translation.x, tf.transform.translation.y,
                       lacet_depuis_quaternion(q.x, q.y, q.z, q.w))
@@ -227,8 +235,8 @@ class NoeudCourse(Node):
         return self._chrono.expire() or self._entrees.arbitre_termine
 
     def _temps(self):
-        """Secondes depuis le départ, sur l'horloge ROS (comme le chrono)."""
-        return self._chrono.ecoule()
+        """Horloge physique pour l'asservissement ; le budget du match est réel."""
+        return (self.get_clock().now() - self._debut_ros).nanoseconds * 1e-9
 
     # ------------------------------------------------------------- course
     def executer(self):
@@ -238,8 +246,12 @@ class NoeudCourse(Node):
         if self._mode == 'preparation_manuelle':
             self.preparer_en_guidage()
             return
-        self.evenement('donnees', recit.phrase_donnees_match(
-            carte_preparee(self._configuration), self._memoire.ids()))
+        if not self._statut.pret():
+            raise RuntimeError('parc_msgs absent : impossible de signaler la course.')
+        self.evenement('donnees', (
+            'Navigation sans carte : obstacles mesurés en odom, tags découverts en direct.'
+            if self._navigation.mode == 'sans_carte' else recit.phrase_donnees_match(
+                carte_preparee(self._configuration), self._memoire.ids())))
         self._attendre_ordre_et_depart()
         if not rclpy.ok():
             return
@@ -305,11 +317,14 @@ class NoeudCourse(Node):
 
     def _attendre_nav2(self):
         while rclpy.ok() and not self._temps_ecoule():
-            self.publier_etat('DEMARRAGE', detail='attente de Nav2 et de la carte')
+            self.publier_etat('DEMARRAGE', detail='attente de Nav2 et des repères')
             if self._navigateur.attendre_pret(
                     self._course.nav2_ready_timeout_sec):
+                pose = self.pose_robot()
+                if pose is not None:
+                    self._origine_recherche = (pose.x, pose.y)
                 return
-            self.get_logger().error('Nav2 ou la localisation SLAM ne répond pas.')
+            self.get_logger().error('Nav2 ou les transformations du robot ne répondent pas.')
 
     def _traiter_tag(self, tag_id):
         if tag_id not in self._debut_cible:
@@ -477,12 +492,13 @@ class NoeudCourse(Node):
         grille = self._entrees.grille()
         if grille is None:
             return None
-        # Le repère map part du point de départ : la zone autorisée est un
-        # cercle autour de l'origine.
+        # L'odométrie du robot partagé ne démarre pas nécessairement à zéro.
+        if self._origine_recherche is None:
+            self._origine_recherche = (pose.x, pose.y)
         points = points_recherche(
             grille, self._course.search_clearance_m, self._course.search_grid_step_m,
             self._tours + self._points_essayes, self._course.search_visited_radius_m,
-            (pose.x, pose.y), centre=(0.0, 0.0),
+            (pose.x, pose.y), centre=self._origine_recherche,
             rayon_max=self._course.search_max_radius_m,
             clairance_inconnu_m=self._course.search_frontier_margin_m)
         if not points:
@@ -494,7 +510,7 @@ class NoeudCourse(Node):
                 grille, self._course.search_fallback_clearance_m, pas_secours,
                 self._tours + self._points_essayes,
                 self._course.search_visited_radius_m, (pose.x, pose.y),
-                centre=(0.0, 0.0), rayon_max=self._course.search_max_radius_m,
+                centre=self._origine_recherche, rayon_max=self._course.search_max_radius_m,
                 clairance_inconnu_m=self._course.search_fallback_frontier_margin_m)
         return points[0] if points else None
 
@@ -593,7 +609,7 @@ class NoeudCourse(Node):
         # caméra a jusqu'à une seconde pour le détecter après l'arrêt.
         portee = course.approach_distance_m + course.preapproach_margin_m
         fin = self._temps() + 1.0      # horloge ROS : Gazebo peut être lent
-        while rclpy.ok() and self._temps() < fin:
+        while rclpy.ok() and self._temps() < fin and not self._temps_ecoule():
             vue = self._entrees.detection_recente(tag_id, course.detection_max_age_sec)
             if vue is not None and vue.distance <= portee:
                 return 'arrive'   # même si Nav2 a abandonné : le tag est à portée
@@ -681,7 +697,8 @@ class NoeudCourse(Node):
         if depart is None:
             return
         self.evenement('degagement', f'Recul de {distance * 100:.0f} cm pour se dégager '
-                       f'({raison}).')
+                        f'({raison}).')
+        self.publier_etat('DEGAGEMENT', detail=raison)
         fin = self._temps() + 3.0 * distance / vitesse
         while rclpy.ok() and self._temps() < fin and not self._temps_ecoule():
             pose = self.pose_robot()
@@ -740,19 +757,32 @@ class NoeudCourse(Node):
 
     def _valider_visite(self, tag_id):
         self.arreter_robot()
-        self._statut.signaler_visite(tag_id, self._entrees.image_preuve(tag_id))
-        erreurs = self._dernieres_erreurs
+        if self._temps_ecoule() or self._chrono.restant() < self._course.hold_sec:
+            return 'temps_ecoule'
+        vue = self._entrees.detection_recente(tag_id, self._course.detection_max_age_sec)
+        if vue is None:
+            return 'perdu'
+        erreurs = erreurs_visite(vue.x, vue.y, vue.cap, self._navigation.center_offset_x,
+                                self._course.visit_distance_m)
+        if not visite_valide(erreurs, self._course.distance_tolerance_m,
+                             self._course.lateral_tolerance_m,
+                             math.radians(self._course.heading_tolerance_deg)):
+            return 'echec'
+        if not self._statut.signaler_visite(tag_id, self._entrees.image_preuve(tag_id)):
+            self._raison_echec = 'image_absente'
+            return 'echec'
+        self._dernieres_erreurs = erreurs
         if erreurs is not None:
             self.evenement('visite', recit.phrase_visite(
                 tag_id, len(self._sequence.visites) + 1, len(self._sequence.ordre),
                 self._course.visit_distance_m + erreurs.distance,
                 math.degrees(erreurs.cap)), tag=tag_id)
         self.publier_etat('VISITE', tag_id, f'maintien {self._course.hold_sec:.0f} s')
-        fin = self._temps() + self._course.hold_sec
+        fin = time.monotonic() + self._course.hold_sec
         # FINISHED arrive dès le signalement du dernier tag. Garder la pose
         # pendant le délai réglementaire ; seul un timeout ou un arrêt du juge
         # interrompt ce maintien.
-        while (rclpy.ok() and self._temps() < fin
+        while (rclpy.ok() and time.monotonic() < fin
                and not self._entrees.arbitre_interrompt_visite):
             self.publier_vitesse(0.0, 0.0)
             self.traiter_pendant(0.2)

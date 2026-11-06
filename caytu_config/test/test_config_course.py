@@ -42,7 +42,7 @@ def _course_minimale(**surcharges):
         "visit_distance_m": 0.5, "approach_distance_m": 0.9,
         "distance_tolerance_m": 0.04, "lateral_tolerance_m": 0.06,
         "heading_tolerance_deg": 5.0, "stable_cycles": 5, "hold_sec": 5.0,
-        "detection_max_age_sec": 0.6,
+        "detection_max_age_sec": 0.6, "image_max_age_sec": 1.0,
         "search_spin_time_sec": 25.0, "search_grid_step_m": 0.4,
         "search_clearance_m": 0.45, "search_frontier_margin_m": 0.25,
         "search_fallback_clearance_m": 0.50,
@@ -90,8 +90,8 @@ def test_les_tags_officiels_sont_configures(robot):
     assert tag.family == "36h11"
     assert tag.size_m == pytest.approx(0.165)
     assert tag.ids == (1, 4, 7, 9)
-    assert [camera.name for camera in tag.cameras] == ["camera1", "camera2"]
-    assert tag.cameras[0].color_topic == "/camera1/camera1/color/image_raw"
+    assert [camera.name for camera in tag.cameras] == ["camera2", "camera1"]
+    assert tag.cameras[0].color_topic == "/camera2/camera2/color/image_raw"
 
 
 def test_la_course_suit_le_reglement(robot):

@@ -1,59 +1,48 @@
 #!/usr/bin/env bash
-# Prépare un workspace ROS 2 Jazzy de simulation dans Docker, sans toucher aux sources.
+# Validation Jazzy isolée : les sources officielles sont celles du workspace PC.
 set -euo pipefail
-
 depot="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-racine_ros="$(cd -- "$depot/../.." && pwd)"
-sources_parc="$racine_ros/src"
-workspace="${FOSA_SIM_WORKSPACE:-$depot/results/docker/workspace-simulation}"
-image="fosa-simulation:jazzy"
-
-paquets_parc=(parc_robot_bringup parc_robot_description)
-for paquet in "${paquets_parc[@]}"; do
-    if [[ ! -f "$sources_parc/$paquet/package.xml" ]]; then
-        echo "Paquet PARC absent : $sources_parc/$paquet" >&2
-        exit 1
-    fi
+racine_ros="${FOSA_WS:-$(cd -- "$depot/../.." && pwd)}"
+sources_parc="${FOSA_PARC_SRC:-$racine_ros/src}"
+workspace="${FOSA_SIM_WORKSPACE:-$depot/results/validation-$(date +%Y%m%d_%H%M%S)}"
+image="${FOSA_IMAGE_TESTS:-fosa-finale:jazzy}"
+for paquet in parc_msgs parc_referee parc_robot_bringup parc_robot_description; do
+    [[ -f "$sources_parc/$paquet/package.xml" ]] || {
+        echo "Paquet officiel absent : $sources_parc/$paquet" >&2; exit 1;
+    }
 done
-
-if [[ -d "$workspace/src" ]] && find "$workspace/src" -mindepth 1 -print -quit | grep -q .; then
-    echo "Le workspace existe déjà : $workspace/src" >&2
-    echo "Pour le réutiliser, relancez avec FOSA_SIM_WORKSPACE vers un dossier vide." >&2
-    exit 1
+[[ ! -e "$workspace/src" ]] || { echo "Workspace déjà utilisé : $workspace" >&2; exit 1; }
+mkdir -p "$workspace"
+if [[ "${FOSA_IMAGE_PRETE:-0}" != 1 ]]; then
+    docker build -f "$depot/docker/simulation/Dockerfile" -t "$image" "$depot/docker/simulation"
 fi
-mkdir -p "$workspace/src"
-echo "Workspace : $workspace"
-
-docker build --file "$depot/docker/simulation/Dockerfile" --tag "$image" "$depot"
-
-docker run --rm --network bridge \
-    --mount "type=bind,source=$depot,target=/depot,readonly" \
-    --mount "type=bind,source=$sources_parc,target=/parc,readonly" \
-    --mount "type=bind,source=$workspace,target=/workspace" \
-    "$image" bash -lc '
-        set -euo pipefail
-        set +u
-        source /opt/ros/jazzy/setup.bash
-        set -u
-        mkdir -p /workspace/src
-        paquets=(caytu_config caytu_course caytu_interfaces caytu_nav_bringup
-                 caytu_nav_solution caytu_perception)
-        for paquet in "${paquets[@]}"; do
-            cp -a "/depot/$paquet" /workspace/src/
-        done
-        cp -a /depot/simulation/parc_msgs /workspace/src/
-        cp -a /parc/parc_robot_bringup /parc/parc_robot_description /workspace/src/
-
-        if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
-            rosdep init
-        fi
-        apt-get update -qq
-        rosdep update --rosdistro jazzy
-        rosdep install --from-paths /workspace/src --ignore-src \
-            --rosdistro jazzy --skip-keys ament_python -r -y
-        colcon build --symlink-install --executor sequential \
-            --base-paths /workspace/src --event-handlers console_direct+
-    '
-
-echo "Workspace ROS préparé et compilé : $workspace"
-echo "Pour l’utiliser dans un conteneur : source /opt/ros/jazzy/setup.bash && source $workspace/install/setup.bash"
+docker run --rm --network none --shm-size=1g --user "$(id -u):$(id -g)" \
+    --entrypoint bash -e HOME=/workspace/.maison -e FOSA_TEST_DDS_ISOLE=1 \
+    -e FOSA_TEST_ROS_ISOLE=1 -e FOSA_SIM_GUI=0 -e LIBGL_ALWAYS_SOFTWARE=1 \
+    --mount "type=bind,src=$depot,dst=/depot,readonly" \
+    --mount "type=bind,src=$sources_parc,dst=/parc,readonly" \
+    --mount "type=bind,src=$workspace,dst=/workspace" \
+    -w /workspace "$image" -c '
+set -eo pipefail
+mkdir -p "$HOME" /workspace/src
+python3 /depot/outils/livraison.py creer /workspace/fosa.zip
+python3 -m zipfile -e /workspace/fosa.zip /workspace
+python3 - <<"PYTHON"
+from pathlib import Path
+import zipfile
+with zipfile.ZipFile("/workspace/fosa.zip") as archive:
+    for info in archive.infolist():
+        Path("/workspace", info.filename).chmod((info.external_attr >> 16) & 0o777)
+PYTHON
+for paquet in parc_msgs parc_referee parc_robot_bringup parc_robot_description; do
+    cp -r "/parc/$paquet" /workspace/src/
+done
+source /opt/ros/jazzy/setup.bash
+bash /workspace/src/fosa-solution/simulation/simulation.sh preparer
+source /workspace/install/setup.bash
+bash /workspace/src/fosa-solution/outils/verifier.sh
+if [[ "${1:-}" == --simulation ]]; then
+    bash /workspace/src/fosa-solution/simulation/simulation.sh course-sans-carte
+fi
+' bash "${1:---tests}"
+echo "Validation et journaux : $workspace"

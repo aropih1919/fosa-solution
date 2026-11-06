@@ -1,1 +1,0 @@
-scp diagnostic_mouvement.sh sitoe@192.168.1.126:~/teams/fosa/ && ssh -t sitoe@192.168.1.126 'bash ~/teams/fosa/diagnostic_mouvement.sh --arreter-autres'

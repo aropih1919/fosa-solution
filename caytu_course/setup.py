@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'course_parc = caytu_course.noeud_course:main',
+            'garde_vitesse = caytu_course.noeud_garde_vitesse:main',
             'mot_depart = caytu_course.noeud_mot_depart:main',
             'suivi_course = caytu_course.suivi:main',
         ],

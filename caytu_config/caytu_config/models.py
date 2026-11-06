@@ -93,7 +93,38 @@ def _as_obstacle_sources(value, path):
 
 
 @dataclass(frozen=True)
+class ConfigurationSecurite:
+    """Garde commune aux commandes Nav2 et à l'asservissement visuel."""
+
+    topic_entree: str
+    age_scan_max_sec: float
+    age_commande_max_sec: float
+    horizon_sec: float
+    pas_sec: float
+    periode_sec: float
+    marge_m: float
+
+    @classmethod
+    def from_mapping(cls, donnees, chemin="navigation.securite"):
+        donnees = _section(donnees, chemin)
+        nombres = ("age_scan_max_sec", "age_commande_max_sec", "horizon_sec",
+                   "pas_sec", "periode_sec", "marge_m")
+        _check_keys(donnees, ("topic_entree",) + nombres, chemin)
+        securite = cls(
+            topic_entree=_as_str(_get(donnees, "topic_entree", chemin),
+                                f"{chemin}.topic_entree"),
+            **{cle: _as_number(_get(donnees, cle, chemin), f"{chemin}.{cle}",
+                               positive=True) for cle in nombres})
+        if securite.pas_sec > securite.horizon_sec:
+            raise ConfigurationError(f"{chemin}: pas_sec dépasse horizon_sec.")
+        return securite
+
+
+@dataclass(frozen=True)
 class NavigationConfig:
+    mode: str
+    rolling_window_size_m: float
+    securite: ConfigurationSecurite
     profile: str
     success_radius: float
     arrival_recheck_radius: float
@@ -117,6 +148,7 @@ class NavigationConfig:
     def from_mapping(cls, data, path="navigation"):
         data = _section(data, path)
         _check_keys(data, (
+            "mode", "rolling_window_size_m", "securite",
             "profile", "success_radius", "arrival_recheck_radius",
             "scan_topic", "cmd_vel_topic", "odom_topic", "odom_frame",
             "footprint", "footprint_padding", "center_offset_x",
@@ -125,6 +157,13 @@ class NavigationConfig:
             "local_costmap_clear_service", "cancel_timeout_sec",
             "feedback_log_period_sec"), path)
         return cls(
+            mode=_choice(_get(data, "mode", path), ("carte", "sans_carte"),
+                         f"{path}.mode"),
+            rolling_window_size_m=_as_number(
+                _get(data, "rolling_window_size_m", path),
+                f"{path}.rolling_window_size_m", positive=True),
+            securite=ConfigurationSecurite.from_mapping(
+                _get(data, "securite", path), f"{path}.securite"),
             profile=_as_str(_get(data, "profile", path), f"{path}.profile"),
             success_radius=_as_number(
                 _get(data, "success_radius", path), f"{path}.success_radius",

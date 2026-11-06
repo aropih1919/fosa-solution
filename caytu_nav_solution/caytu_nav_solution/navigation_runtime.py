@@ -1,6 +1,6 @@
 """Chronomètre et client Nav2 de la course.
 
-- `ChronometreCourse` : temps officiel sur l'horloge ROS, marge de sécurité ;
+- `ChronometreCourse` : budget sur l'horloge fournie, marge de sécurité ;
 - `NavigateurNav2` : envoi de buts, rotation sur place, retour d'état,
   annulation, interruption et nettoyage des costmaps.
 
@@ -21,7 +21,7 @@ from rclpy.action import ActionClient
 
 
 class ChronometreCourse:
-    """Chronomètre de la course, basé sur l'horloge ROS (simulée ou réelle)."""
+    """Budget sur l'horloge fournie ; la course injecte le temps réel monotone."""
 
     def __init__(self, now, time_limit_sec, stop_margin_sec):
         self._now = now
@@ -79,8 +79,8 @@ class NavigateurNav2:
     """Client Nav2 réutilisable : envoi de but, suivi, annulation, costmaps."""
 
     def __init__(self, node, navigation, chronometre, pose_robot,
-                 spin_once=None, is_ok=None, success_radius=None,
-                 arrival_recheck_radius=None):
+                  spin_once=None, is_ok=None, success_radius=None,
+                  arrival_recheck_radius=None, interrompre=None):
         self._node = node
         self._navigation = navigation
         self._chronometre = chronometre
@@ -96,6 +96,7 @@ class NavigateurNav2:
         self._spin = spin_once or (
             lambda timeout: rclpy.spin_once(node, timeout_sec=timeout))
         self._is_ok = is_ok or rclpy.ok
+        self._interrompre = interrompre or (lambda: False)
 
         self._client = ActionClient(node, NavigateToPose, 'navigate_to_pose')
         self._client_rotation = ActionClient(node, Spin, 'spin')
@@ -140,6 +141,7 @@ class NavigateurNav2:
                 return True
 
             if (self._chronometre.restant() <= 0.0
+                    or self._interrompre()
                     or time.monotonic() - debut > timeout_sec):
                 self._node.get_logger().error(
                     "Nav2 n'est pas devenu disponible à temps.")
@@ -215,6 +217,8 @@ class NavigateurNav2:
             self._spin(0.05)
             if self._chronometre.restant() <= 0.0:
                 return 'temps_ecoule'
+            if self._interrompre():
+                return 'interrompu'
             if interrompre is not None and interrompre():
                 return 'interrompu'
         return 'ok'
