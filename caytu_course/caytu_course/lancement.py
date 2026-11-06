@@ -10,7 +10,10 @@ Trois modes :
   - `cartographie` : SLAM, Nav2 et perception sans mission (réglages).
 """
 
+import os
 from pathlib import Path
+
+from caytu_config import config_directory
 
 MODES = ('course', 'preparation', 'preparation_manuelle', 'cartographie')
 NOM_CARTE = 'carte'            # carte.posegraph + carte.data (slam_toolbox)
@@ -21,18 +24,59 @@ def dossier_preparation(configuration):
     return Path(configuration.course.preparation.directory).expanduser()
 
 
+def _base_carte(chemin):
+    """Dossier ou fichier de carte -> préfixe sans extension."""
+    base = Path(chemin).expanduser()
+    if base.is_dir():
+        base = base / NOM_CARTE
+    if base.suffix in ('.posegraph', '.data', '.yaml', '.pgm'):
+        base = base.with_suffix('')
+    return base
+
+
+def _carte_valide(base):
+    return (base.with_suffix('.posegraph').is_file()
+            and base.with_suffix('.data').is_file())
+
+
+def _carte_embarquee(configuration):
+    """Carte forcée par FOSA_CARTE, sinon carte livrée avec la solution."""
+    forcee = os.environ.get('FOSA_CARTE')
+    chemin = forcee or configuration.course.preparation.carte_embarquee
+    if not chemin:
+        return None
+    base = _base_carte(chemin)
+    if not base.is_absolute():
+        base = (Path.cwd() if forcee else config_directory()) / base
+    return base if _carte_valide(base) else None
+
+
 def carte_preparee(configuration):
-    """Chemin de la carte enregistrée (sans extension), ou None."""
+    """Chemin de la carte utilisée pour le match (sans extension), ou None.
+
+    Une préparation enregistrée sur le robot est prioritaire : elle correspond
+    à l'arène du jour. Sinon, la carte embarquée dans la livraison est utilisée.
+    `FOSA_CARTE` force une carte précise (simulation ou autre arène).
+    """
     if configuration.navigation.mode == 'sans_carte':
         return None
+    if os.environ.get('FOSA_CARTE'):
+        return _carte_embarquee(configuration)
     base = dossier_preparation(configuration) / NOM_CARTE
-    if base.with_suffix('.posegraph').is_file() and base.with_suffix('.data').is_file():
+    if _carte_valide(base):
         return base
-    return None
+    return _carte_embarquee(configuration)
 
 
 def fichier_tags(configuration):
+    """Fichier écrit pendant une préparation (dossier modifiable du robot)."""
     return dossier_preparation(configuration) / NOM_TAGS
+
+
+def fichier_tags_match(configuration):
+    """Tags associés à la carte réellement utilisée pour le match."""
+    carte = carte_preparee(configuration)
+    return (carte.parent if carte is not None else dossier_preparation(configuration)) / NOM_TAGS
 
 
 def _localiser(configuration, mode):

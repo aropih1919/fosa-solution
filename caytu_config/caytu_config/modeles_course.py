@@ -331,6 +331,7 @@ class PreparationConfig:
     """Période de préparation avant le match : carte et tags enregistrés."""
 
     directory: str
+    carte_embarquee: str
     max_duration_sec: float
     close_view_m: float
     approach_attempts: int
@@ -338,10 +339,15 @@ class PreparationConfig:
     @classmethod
     def from_mapping(cls, data, path="course.preparation"):
         data = _section(data, path)
-        _check_keys(data, ("directory", "max_duration_sec", "close_view_m",
-                           "approach_attempts"), path)
+        _check_keys(data, ("directory", "carte_embarquee", "max_duration_sec",
+                           "close_view_m", "approach_attempts"), path)
         return cls(
             directory=_as_str(_get(data, "directory", path), f"{path}.directory"),
+            # Dossier ou préfixe de carte livré avec la solution. Vide : aucune
+            # carte embarquée, le match utilise la préparation locale.
+            carte_embarquee=_as_str(
+                _get(data, "carte_embarquee", path, ""),
+                f"{path}.carte_embarquee", allow_empty=True),
             max_duration_sec=_as_number(
                 _get(data, "max_duration_sec", path), f"{path}.max_duration_sec",
                 positive=True),

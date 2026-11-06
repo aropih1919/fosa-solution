@@ -21,3 +21,4 @@ livraison/
 .venv/
 *.zip
 donnees/
+rosbag2_*/

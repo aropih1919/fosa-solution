@@ -36,6 +36,7 @@ Modes (robot réel par défaut) :
                     et lidar (robot dégagé, course arrêtée, ~1 min)
 
 Profils : FOSA_PROFIL=simulation pour Gazebo (sinon robot réel).
+Carte : celle de la livraison, ou FOSA_CARTE=/chemin/carte pour forcer.
 Espace de travail de base du robot (parc_msgs de l'arbitre) : FOSA_BASE_WS,
 ~/parc_ws en priorité puis ~/ros2_ws (sourcé avant le nôtre).
 CycloneDDS saturé : FOSA_DDS_ETENDU=1 active la surcharge de dépannage
@@ -218,7 +219,15 @@ case "$mode" in
     course)
         verifier_paquet caytu_course
         verifier_arbitre
-        # Sans préparation valide, le mode sans carte est plus sûr que de
+        if [[ -n "${FOSA_CARTE:-}" && "${FOSA_NAVIGATION:-carte}" == carte ]] \
+                && ! python3 -c "
+from caytu_config import load_config
+from caytu_course.lancement import carte_preparee
+raise SystemExit(0 if carte_preparee(load_config()) is not None else 1)"; then
+            echo "Carte introuvable : FOSA_CARTE=$FOSA_CARTE" >&2
+            exit 1
+        fi
+        # Sans carte valide, le mode sans carte est plus sûr que de
         # construire une carte pendant les 10 minutes du match.
         if [[ -z "$NAVIGATION_DEMANDEE" && "${FOSA_NAVIGATION:-carte}" == carte ]] \
                 && ! python3 -c "
@@ -226,20 +235,20 @@ from caytu_config import load_config
 from caytu_course.lancement import carte_preparee
 raise SystemExit(0 if carte_preparee(load_config()) is not None else 1)"; then
             export FOSA_NAVIGATION=sans_carte
-            echo "Aucune préparation valide : bascule automatique en sans carte (odom)."
+            echo "Aucune carte valide : bascule automatique en sans carte (odom)."
         fi
         echo "Match : profil ${FOSA_PROFIL:-robot}, ROS_DOMAIN_ID=$ROS_DOMAIN_ID."
         python3 -c "
 from caytu_config import load_config
-from caytu_course.lancement import carte_preparee, fichier_tags
+from caytu_course.lancement import carte_preparee, fichier_tags_match
 c = load_config(); carte = carte_preparee(c)
 if c.navigation.mode == 'sans_carte':
-    print('Sans carte : costmaps roulantes en odom ; aucune préparation chargée.')
+    print('Sans carte : costmaps roulantes en odom ; aucune carte chargée.')
 elif carte is None:
-    print('Aucune préparation : carte construite en direct, tags à chercher.')
+    print('Aucune carte : cartographie en direct, tags à chercher.')
 else:
-    print(f'Préparation utilisée : {carte}.posegraph et {fichier_tags(c)}.')
-    print('Le robot doit partir de la position où la préparation a commencé.')"
+    print(f'Carte utilisée : {carte}.posegraph et {fichier_tags_match(c)}.')
+    print('Placer le robot à la position de départ de la carte avant le match.')"
         echo "Le robot attend l'ordre puis le départ (./run.sh depart ou « allez »)."
         lancer_detache course "$@"
         ;;

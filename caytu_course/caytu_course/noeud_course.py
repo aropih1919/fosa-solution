@@ -44,6 +44,7 @@ from caytu_course.lancement import (
     carte_preparee,
     dossier_preparation,
     fichier_tags,
+    fichier_tags_match,
 )
 from caytu_course.memoire_tags import MemoireTags
 from caytu_course.recherche import points_recherche
@@ -130,10 +131,10 @@ class NoeudCourse(Node):
 
     # -------------------------------------------------------------- outils
     def _charger_memoire(self):
-        """Match sur la carte de la préparation : les tags enregistrés sont
-        dans le même repère. Sinon (préparation, carte en direct) : vide."""
+        """Match sur la carte active : les tags enregistrés sont dans le même
+        repère. Sinon (préparation, carte en direct) : vide."""
         distance_max = self._configuration.perception.apriltag.max_distance_m
-        chemin = fichier_tags(self._configuration)
+        chemin = fichier_tags_match(self._configuration)
         if (self._mode != 'course' or carte_preparee(self._configuration) is None
                 or not chemin.is_file()):
             return MemoireTags(distance_max)

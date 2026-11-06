@@ -67,8 +67,9 @@ def _course_minimale(**surcharges):
             "success_known": 0.9, "success_unknown": 0.6, "failure_decay": 0.6,
             "min_skip_gain_points": 5.0, "replan_period_sec": 2.0},
         "preparation": {
-            "directory": "~/.ros/fosa/preparation", "max_duration_sec": 720.0,
-            "close_view_m": 1.3, "approach_attempts": 2},
+            "directory": "~/.ros/fosa/preparation", "carte_embarquee": "",
+            "max_duration_sec": 720.0, "close_view_m": 1.3,
+            "approach_attempts": 2},
     }
     base.update(surcharges)
     return base
@@ -78,6 +79,7 @@ def test_le_profil_par_defaut_est_le_robot_reel(robot):
     assert robot.system.deployment == "robot"
     assert robot.system.use_sim_time is False
     assert robot.system.base_frame == "base_link"
+    assert robot.course.preparation.carte_embarquee == "cartes/arene_2026_11_06"
     assert robot.system.ros_domain_id == 0
     assert robot.navigation.odom_topic == "/botwheel_explorer/odom"
     assert robot.navigation.cmd_vel_topic == "/cmd_vel"

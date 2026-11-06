@@ -263,9 +263,11 @@ case "$mode" in
     preparation) phase preparation '' "$graine" ;;
     essai) phase preparation '' "$graine"; phase course "$ordre" "$graine" ;;
     course)
-        [[ -f "$CACHE/graine_preparation" && "$(cat "$CACHE/graine_preparation")" == "$graine" ]] || {
-            echo 'Préparation absente ou graine différente. Utilisez preparation ou course-sans-carte.' >&2; exit 1;
-        }
+        if [[ -z "${FOSA_CARTE:-}" ]]; then
+            [[ -f "$CACHE/graine_preparation" && "$(cat "$CACHE/graine_preparation")" == "$graine" ]] || {
+                echo 'Préparation absente ou graine différente. Utilisez preparation, course-sans-carte ou FOSA_CARTE.' >&2; exit 1;
+            }
+        fi
         phase course "$ordre" "$graine" ;;
     monde)
         demarrer_monde "$graine"

@@ -79,10 +79,23 @@ installer() {
         echo "Paquets manquants à demander aux organisateurs : ${manquants[*]}" >&2
         return 1
     fi
-    python3 -c 'import cv2; assert hasattr(cv2.aruco, "DICT_APRILTAG_36h11")'
+    if ! python3 - <<'PYTHON'
+import cv2
+import numpy
+import yaml
+assert hasattr(cv2.aruco, "DICT_APRILTAG_36h11")
+PYTHON
+    then
+        echo "Dépendances Python manquantes : installer python3-opencv python3-yaml python3-numpy." >&2
+        return 1
+    fi
     mapfile -t paquets < <(lire_exploitation paquets_fosa)
     (cd "$ESPACE_TRAVAIL" && colcon build --base-paths "$DEPOT" \
         --packages-select "${paquets[@]}" --executor sequential)
+    if [[ ! -f "$ESPACE_TRAVAIL/install/setup.bash" ]]; then
+        echo "Compilation incomplète : $ESPACE_TRAVAIL/install/setup.bash absent." >&2
+        return 1
+    fi
     if [[ -d "$LIVRAISON/roues" && -f "$LIVRAISON/$MODELE.zip" ]]; then
         # Installation hors ligne, sans venv et sans téléchargement sur le robot.
         mkdir -p "$ESPACE_TRAVAIL/.fosa_python" "$DEPOT/caytu_config/config/models"
@@ -148,7 +161,7 @@ mv -Tf "$racine/.actuel-$2" "$racine/actuel"
 echo "Livraison active : $livraison"
 ROBOT
     echo "Déploiement terminé : ssh $UTILISATEUR@$hote"
-    echo "Puis : cd ~/$DOSSIER_ROBOT/actuel/src/fosa-solution && ./run.sh diagnostic-robot"
+    echo "Puis : cd ~/$DOSSIER_ROBOT/actuel/src/fosa-solution && ./run.sh course"
 }
 
 case "${1:---help}" in

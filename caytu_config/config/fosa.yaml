@@ -242,6 +242,10 @@ course:
   # enregistrés ; sans préparation, il cartographie en direct.
   preparation:
     directory: ~/teams/fosa/donnees/preparation
+    # Carte livrée avec la solution (relative à caytu_config/config). Une
+    # préparation faite sur le robot reste prioritaire ; FOSA_CARTE force
+    # une autre carte (simulation ou autre arène).
+    carte_embarquee: cartes/arene_2026_11_06
     max_duration_sec: 720.0       # 12 min sur 15 : marge pour vérifier et relancer
     close_view_m: 1.3             # tag vu plus loin : on va le mesurer de près
     approach_attempts: 2          # rapprochements tentés par tag

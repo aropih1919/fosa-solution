@@ -44,3 +44,6 @@ course:
   preparation:
     # Séparée de celle du robot réel (~/teams/fosa/donnees/preparation).
     directory: ~/.fosa_simulation/preparation
+    # La carte du robot réel n'est pas celle du monde Gazebo ; FOSA_CARTE
+    # permet de la choisir explicitement pour une répétition.
+    carte_embarquee: ""
