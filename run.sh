@@ -25,12 +25,15 @@ Modes (robot réel par défaut) :
   cartographie  SLAM, Nav2 et perception sans mission (réglages)
   sauver-carte  enregistrer la carte pendant que SLAM tourne, avant l'arrêt
   diagnostic-robot  vérifier topics, TF, caméras, audio, arbitre (1er créneau)
+  diagnostic-dds    vérifier les imports et la création d'un nœud ROS
   mesure-rotation   deux tours lents sur place : odométrie contre gyromètre
                     et lidar (robot dégagé, course arrêtée, ~1 min)
 
 Profils : FOSA_PROFIL=simulation pour Gazebo (sinon robot réel).
 Espace de travail de base du robot (parc_msgs de l'arbitre) : FOSA_BASE_WS,
 ~/ros2_ws par défaut (sourcé avant le nôtre).
+CycloneDDS saturé : FOSA_DDS_ETENDU=1 active la surcharge de dépannage
+dans caytu_config/config/cyclonedds.xml (voir README, section F.1).
 
 Exemples :
   ./run.sh preparation      puis, une fois terminée :   ./run.sh course
@@ -98,6 +101,9 @@ if [[ -d "$ESPACE_TRAVAIL/.fosa_python" ]]; then
 fi
 set -u
 
+source "$DOSSIER_SCRIPT/outils/environnement_dds.sh"
+configurer_dds
+
 # Valeur lue dans la configuration active (profil compris) : le robot est sur
 # le domaine 0 ; un ROS_DOMAIN_ID déjà exporté reste prioritaire.
 lire_config() {
@@ -121,8 +127,18 @@ lancer_detache() {
     local donnees="${FOSA_DONNEES:-$HOME/.ros/fosa}" journal
     mkdir -p "$donnees"
     journal="$donnees/${nom}_$(date +%Y%m%d_%H%M%S).log"
-    local interne=(env "FOSA_PROFIL=${FOSA_PROFIL:-robot}" "FOSA_BASE_WS=${FOSA_BASE_WS:-}"
-        "ROS_DOMAIN_ID=$ROS_DOMAIN_ID" "$DOSSIER_SCRIPT/run.sh" course-premier-plan "$@")
+    local interne=(env -u RMW_IMPLEMENTATION -u CYCLONEDDS_URI
+        "FOSA_PROFIL=${FOSA_PROFIL:-robot}" "FOSA_BASE_WS=${FOSA_BASE_WS:-}"
+        "ROS_DOMAIN_ID=$ROS_DOMAIN_ID" "FOSA_DDS_ETENDU=${FOSA_DDS_ETENDU:-0}")
+    # Un serveur tmux déjà lancé peut avoir un ancien environnement DDS.
+    # Transmettre aussi les variables absentes, pour effacer cet héritage.
+    local variable
+    for variable in RMW_IMPLEMENTATION CYCLONEDDS_URI; do
+        if [[ -v "$variable" ]]; then
+            interne+=("$variable=${!variable}")
+        fi
+    done
+    interne+=("$DOSSIER_SCRIPT/run.sh" course-premier-plan "$@")
     echo "Suivi lisible dans un autre terminal : ./run.sh suivi"
     if command -v tmux >/dev/null 2>&1; then
         tmux new-session -d -s fosa_course "$(printf '%q ' "${interne[@]}") 2>&1 | tee $(printf '%q' "$journal")"
@@ -243,6 +259,9 @@ else:
         ;;
     diagnostic-robot)
         "$DOSSIER_SCRIPT/outils/diagnostic_robot.sh" "$@"
+        ;;
+    diagnostic-dds)
+        python3 "$DOSSIER_SCRIPT/outils/diagnostic_dds.py"
         ;;
     mesure-rotation)
         if pgrep -f "[c]aytu_course/course_parc|[c]ourse.launch.py" >/dev/null; then

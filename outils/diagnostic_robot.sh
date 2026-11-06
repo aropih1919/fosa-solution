@@ -27,6 +27,11 @@ lire_config() {
 
 titre "Environnement"
 info "ROS_DISTRO=${ROS_DISTRO:-?} ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-?} RMW=${RMW_IMPLEMENTATION:-défaut}"
+if ! python3 "$(dirname "$0")/diagnostic_dds.py"; then
+    ko "Création du nœud impossible ; les mesures ROS ne peuvent pas démarrer."
+    info "Rapport enregistré : $RAPPORT"
+    exit 1
+fi
 info "OpenCV : $(python3 -c 'import cv2; print(cv2.__version__)' 2>&1)"
 python3 -c 'import vosk' 2>/dev/null && ok "Vosk importable" || ko "Vosk absent (départ vocal impossible)"
 for paquet in nav2_bt_navigator nav2_controller nav2_smac_planner \

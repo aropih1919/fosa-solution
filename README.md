@@ -517,6 +517,7 @@ Ne jamais lancer `./run.sh ordre-test` ou `./run.sh arreter` pendant le match.
 | « Une course ou Gazebo tourne déjà » (simulation) | `simulation/simulation.sh arreter`. |
 | « Le robot simulé n'a pas démarré » alors que Gazebo s'ouvre | Le script attend la découverte du topic `/botwheel_explorer/odom`, puis un message d'odométrie. Si le délai expire, lire `~/.fosa_simulation/journaux/monde_*.log`. |
 | « Paquets ROS absents » au déploiement | Demander aux organisateurs d'installer Nav2 et slam_toolbox. |
+| `Failed to find a free participant index for domain 0` puis `rclpy...RCLError` | CycloneDDS ne peut pas créer de participant : suivre F.1 ci-dessous. Les imports `rclpy` ont réussi. |
 | « parc_msgs introuvable » au lancement | Le dépôt officiel n'est pas construit : `cd ~/ros2_ws && colcon build --symlink-install`. |
 | Rien sur la page de l'arbitre | L'arbitre n'a pas démarré : lire `~/.fosa_simulation/journaux/arbitre_*.log` (port 8080 occupé ?). |
 | « No image » sur la page de l'arbitre | Vérifier que la caméra a détecté le tag à la visite et que la JPEG n'est pas vide dans le journal de la course. |
@@ -537,6 +538,58 @@ officiels fixent déjà `StartSignal.method` (0 = commande, 1 = voix),
 `TagVisit.image` (`sensor_msgs/CompressedImage`) et `Finish.reason`
 (0 = terminé, 1 = abandon).
 
+### F.1 CycloneDDS : aucun indice de participant libre
+
+Depuis le dossier de la solution **sur le robot**, enregistrer d'abord le
+diagnostic. Il importe `rclpy`, crée un nœud temporaire puis le détruit :
+
+```bash
+./run.sh diagnostic-dds 2>&1 | tee diagnostic-dds.log
+```
+
+Si le journal contient `Failed to find a free participant index`, essayer :
+
+```bash
+FOSA_DDS_ETENDU=1 ./run.sh diagnostic-dds 2>&1 | tee diagnostic-dds-etendu.log
+```
+
+Cette option ajoute `caytu_config/config/cyclonedds.xml` après le contenu
+existant de `CYCLONEDDS_URI`. Elle sélectionne automatiquement un indice libre
+entre **0 et 119**, en conservant les interfaces réseau, peers et réglages
+multicast hérités. Elle s'applique uniquement à CycloneDDS et ne change pas
+le domaine ROS. Avec les ports DDS standards, dépasser 119 ferait empiéter
+les ports unicast sur le domaine suivant. Une configuration de ports
+personnalisée doit être examinée séparément.
+
+Si le diagnostic affiche **`[OK] Nœud ROS créé`**, reprendre les commandes
+habituelles avec cette option dans **chaque terminal SSH**, par exemple :
+
+```bash
+export FOSA_DDS_ETENDU=1
+./run.sh suivi
+```
+
+Dans le terminal de lancement, exporter également cette variable avant
+`./run.sh course` ou `./run.sh preparation-manuelle`. Le lancement détaché
+transmet explicitement la configuration DDS à ses processus. Les processus
+déjà démarrés conservent leur ancienne configuration. Le diagnostic valide
+la création d'un nœud, pas la réception des capteurs : vérifier ensuite
+`./run.sh diagnostic-robot` et le suivi.
+
+Si l'échec persiste, relever les processus et ports **sans arrêter les services
+des organisateurs** :
+
+```bash
+ps -eo user,pid,ppid,args > processus-dds.txt
+ss -lunp > ports-dds.txt
+printf '%s\n' "${CYCLONEDDS_URI:-}" > configuration-dds.txt
+```
+
+Transmettre ces fichiers et les deux diagnostics. Il faut alors identifier
+les processus accumulés, les ports occupés ou une configuration réseau
+incompatible ; élargir une plage déjà entièrement occupée ne suffit pas.
+Pour désactiver la surcharge dans un terminal : `unset FOSA_DDS_ETENDU`.
+
 ---
 
 ## Référence rapide des commandes
@@ -556,6 +609,7 @@ Les commandes `./run.sh` se lancent depuis `~/teams/fosa/src/fosa-solution` sur 
 | `./run.sh arreter` | Arrête la préparation ou la course. |
 | `./run.sh cartographie` | Lance SLAM, Nav2 et la perception sans démarrer une préparation complète. |
 | `./run.sh diagnostic-robot` | Vérifie les interfaces et périphériques au premier créneau. |
+| `./run.sh diagnostic-dds` | Vérifie les imports et crée un nœud temporaire pour diagnostiquer DDS. |
 | `./run.sh mesure-rotation` | Mesure la rotation du robot ; course arrêtée et robot dégagé. |
 | `./run.sh etat` | Affiche le topic d’état brut de la course. |
 | `./run.sh ordre-test "7,1,9,4"` | Publie un faux ordre pour les essais uniquement ; jamais au ranking match. |

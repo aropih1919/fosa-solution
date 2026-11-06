@@ -14,7 +14,7 @@ setup(
          ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "config"),
-         glob("config/*.yaml")),
+         glob("config/*.yaml") + glob("config/*.xml")),
         (os.path.join("share", package_name, "config", "profils"),
          glob("config/profils/*.yaml")),
     ],
