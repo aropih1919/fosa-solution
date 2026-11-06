@@ -13,11 +13,18 @@ Ce guide donne les commandes et procédures dans l’ordre : préparation du PC,
 | Besoin | Section |
 |---|---|
 | Préparer le PC une fois | A. Préparer mon PC |
+| Tester le correctif DDS sans robot | A.1 et A.2 |
 | Simuler sur le PC | B. Simulation sur PC |
 | Installer et vérifier le robot | C. Préparer le robot |
 | S’entraîner sur le robot | D. Essai réel |
 | Participer au match noté | E. Ranking match |
 | Résoudre un problème | F. Dépannage |
+
+**Ordre des vérifications :** tests logiciels → diagnostic de création d'un
+nœud ROS → simulation ou diagnostic des capteurs du robot → essai de mission.
+Un build réussi ou un diagnostic DDS réussi ne valide pas à lui seul la course.
+Dans les exemples SSH, exécuter d'abord `ssh sitoe@ROBOT_IP`, attendre l'invite
+`sitoe@…`, puis saisir les commandes suivantes **sur le robot**.
 
 Où sont les fichiers :
 
@@ -27,9 +34,10 @@ fosa-solution/
 ├── run.sh                 ← toutes les commandes de la course (robot et simulation)
 ├── deployer_robot.sh      ← transfère src/ et compile avec --envoyer ROBOT_IP
 ├── caytu_*/               ← les six paquets ROS 2
-├── caytu_config/config/fosa.yaml   ← TOUS les réglages
-├── outils/                ← diagnostic du robot, mesure de rotation
-├── simulation/            ← Gazebo, sur le PC uniquement (jamais envoyé au robot)
+├── caytu_config/config/fosa.yaml   ← réglages de la solution
+├── caytu_config/config/cyclonedds.xml ← surcharge DDS facultative
+├── outils/                ← diagnostics DDS/robot, tests DDS, mesure de rotation
+├── simulation/            ← Gazebo, utilisé sur le PC uniquement
 ├── docs/README-SOLUTION.md       ← architecture et fonctionnement de la solution
 └── docs/parc-phase-finale-docs/  ← documents officiels des organisateurs
 ```
@@ -45,7 +53,8 @@ But : pouvoir construire la solution, lancer les tests et la simulation.
    ```bash
    sudo apt install ros-jazzy-navigation2 ros-jazzy-slam-toolbox \
        ros-jazzy-laser-filters ros-jazzy-ros-gz ros-jazzy-depthimage-to-laserscan \
-       ros-jazzy-audio-common-msgs ros-jazzy-teleop-twist-keyboard python3-opencv zip
+       ros-jazzy-audio-common-msgs ros-jazzy-teleop-twist-keyboard \
+       python3-opencv python3-pytest zip
    ```
 
 2. **Placer les dépôts** dans `~/ros2_ws/src` : notre dépôt
@@ -66,6 +75,7 @@ But : pouvoir construire la solution, lancer les tests et la simulation.
    cd ~/ros2_ws
    source /opt/ros/jazzy/setup.bash
    colcon build --symlink-install
+   source install/setup.bash
    ```
 
 4. **Préparer la simulation** (construit les paquets officiels et vérifie les
@@ -80,12 +90,16 @@ But : pouvoir construire la solution, lancer les tests et la simulation.
 
    ```bash
    cd ~/ros2_ws
+   source /opt/ros/jazzy/setup.bash
+   source install/setup.bash
    colcon test --packages-select caytu_config caytu_perception caytu_course caytu_nav_solution
    colcon test-result --verbose          # vérifier que 0 test échoue
    ```
 
 **Après chaque modification du code** : `cd ~/ros2_ws && colcon build
 --packages-up-to caytu_course`, puis relancer les tests.
+Pour une modification DDS, exécuter aussi A.1 et A.2 : les tests dans
+`outils/test/` ne sont pas exécutés par la commande `colcon test` ci-dessus.
 
 `run.sh` charge toujours la configuration de ce checkout et choisit le domaine
 ROS d'après le profil actif. Il ignore les anciennes surcharges de profil
@@ -100,6 +114,61 @@ restées dans le terminal : profil normal `robot`, profil de simulation
 - **ne jamais lancer `./run.sh ...` sans `FOSA_PROFIL=simulation`** : sans lui,
   c'est le profil du robot réel (domaine ROS 0), qui peut perturber le robot
   si le PC est sur son Wi-Fi.
+
+### A.1 Tests rapides du réglage DDS, sans simulateur
+
+Depuis le PC :
+
+```bash
+cd ~/ros2_ws/src/fosa-solution
+python3 -m pytest -q outils/test/test_dds.py
+```
+
+Résultat attendu hors conteneur : **2 tests réussis, 2 ignorés**. Les deux
+premiers vérifient l'activation facultative, l'absence d'ajout en double et
+le refus d'appliquer ce réglage à un autre RMW. Les deux tests réseau sont
+réservés à A.2. Cette étape ne nécessite pas ROS installé sur le PC, mais
+nécessite Python et `pytest`.
+
+### A.2 Reproduire la saturation DDS dans Docker, sans robot ni Gazebo
+
+Prérequis : Docker installé et utilisable sur le PC. Construire une image de
+test une seule fois ; le téléchargement initial nécessite Internet :
+
+```bash
+cd ~/ros2_ws/src/fosa-solution
+docker build -t fosa-diagnostic-cyclone:jazzy - <<'DOCKER'
+FROM ros:jazzy-ros-base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pytest ros-jazzy-rmw-cyclonedds-cpp \
+    && rm -rf /var/lib/apt/lists/*
+ENTRYPOINT ["/bin/bash"]
+DOCKER
+```
+
+Puis lancer les quatre tests :
+
+```bash
+docker run --rm --network none \
+    -e FOSA_TEST_DDS_ISOLE=1 \
+    --mount "type=bind,src=$PWD,dst=/depot,readonly" \
+    fosa-diagnostic-cyclone:jazzy \
+    -c 'source /opt/ros/jazzy/setup.bash && python3 -m pytest -q -p no:cacheprovider /depot/outils/test/test_dds.py'
+```
+
+Résultat attendu : **4 tests réussis**. La régression réserve les ports des
+indices 0–99, reproduit `Failed to find a free participant index`, puis
+vérifie qu'un nœud démarre avec la plage 0–119. Elle vérifie également que
+l'échec reste signalé lorsque les 120 indices sont occupés et que la
+configuration réseau héritée est toujours appliquée.
+
+`FOSA_TEST_DDS_ISOLE=1` sert uniquement à ces tests dans le conteneur
+`--network none` : ne pas l'exporter sur l'hôte ou le robot, ni utiliser
+`--network host` pour ce scénario qui occupe volontairement les ports DDS.
+
+**Validation déjà réalisée :** ces quatre tests ont réussi dans Docker Jazzy,
+Python 3.12, x86_64. Cela valide le scénario DDS reproduit ; la disponibilité
+des indices et les communications avec le robot ARM se vérifient en C.2.
 
 ---
 
@@ -122,6 +191,48 @@ Le script donne à chaque lancement Gazebo une partition dédiée
 détourne les topics `/odom`, `/clock` ou les services du monde. Pour la
 personnaliser :
 `FOSA_SIM_GZ_PARTITION=mon_essai simulation/simulation.sh essai`.
+
+### B.0 Vérifier DDS avant de démarrer Gazebo
+
+Après la préparation du workspace en A, depuis un terminal neuf sur le PC :
+
+```bash
+cd ~/ros2_ws/src/fosa-solution
+FOSA_PROFIL=simulation ./run.sh diagnostic-dds
+```
+
+Attendre `[OK] Nœud ROS créé`. Le diagnostic utilise le domaine du profil
+simulation (**42** par défaut) et ne nécessite pas que Gazebo tourne.
+En cas d'erreur d'import, consulter F. Si le message est
+`Failed to find a free participant index`, comparer avec :
+
+```bash
+FOSA_PROFIL=simulation FOSA_DDS_ETENDU=1 ./run.sh diagnostic-dds
+```
+
+**Seulement si cette seconde commande réussit et que le RMW est CycloneDDS**,
+préparer chaque terminal utilisé pour la simulation avec :
+
+```bash
+cd ~/ros2_ws/src/fosa-solution
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+export FOSA_CONFIG_DIR="$PWD/caytu_config/config"
+export FOSA_DDS_ETENDU=1
+source outils/environnement_dds.sh
+configurer_dds
+```
+
+Si `configurer_dds` signale une erreur, la résoudre avant de poursuivre.
+Le chargement explicite est nécessaire ici : `simulation/simulation.sh` lance
+aussi directement Gazebo, l'arbitre et le moniteur, et n'applique pas lui-même
+`FOSA_DDS_ETENDU`. Le `CYCLONEDDS_URI` exporté par `configurer_dds` est hérité
+par ces processus ainsi que par les commandes `ros2` du terminal.
+Un simple préfixe sur `./run.sh diagnostic-dds` ne modifie pas le terminal parent.
+
+Après cette vérification, choisir B.1 pour une répétition autonome ou B.6 pour
+la préparation guidée. La partition Gazebo isole les mondes ; elle ne libère
+pas les indices DDS. Utiliser B.5 pour arrêter une ancienne simulation.
 
 ### B.1 La répétition complète, automatique
 
@@ -175,6 +286,13 @@ Ce que je regarde dans le terminal :
 - `[juge simulé] VISITE tag N mesurée dans Gazebo : centre à 0.5xx m, erreur
   de cap ±x° -> VALIDE` ;
 - `[juge simulé] arbitre : visite du tag N reçue, photo jpeg (... octets)`.
+
+Pour valider l'essai, vérifier aussi que les chronomètres de la solution et
+de l'arbitre sont cohérents et que les visites sont mesurées. Un message
+`pose Gazebo inconnue` ne valide pas la géométrie d'une visite. Si l'arbitre
+expire à 600 s alors que la solution n'affiche qu'environ 2 min, conserver
+les journaux et vérifier l'utilisation de `/clock` / `use_sim_time` ; le
+correctif DDS ne résout pas cet écart d'horloges.
 
 ### B.2 Choisir et reproduire une arène
 
@@ -252,6 +370,8 @@ Cette méthode vérifie le scénario que nous utiliserons pendant les essais :
 tu guides le robot pour la préparation, les caméras enregistrent les tags,
 puis un monde neuf reprend la même graine et utilise la carte sauvegardée.
 Lance les étapes dans l'ordre et laisse chaque terminal ouvert.
+Si la surcharge DDS a été nécessaire en B.0, appliquer le bloc de préparation
+de B.0 dans **chacun** de ces terminaux, y compris celui du téléop.
 
 1. **Terminal 1 — monde Gazebo** :
 
@@ -320,10 +440,25 @@ Le transfert et la compilation sont automatisés par `deployer_robot.sh`. Le scr
 
 ### C.1 Depuis le PC : envoyer et compiler
 
-Depuis un terminal PC, aller dans le dépôt, puis lancer une seule commande :
+Depuis un terminal PC, sélectionner la branche du correctif, puis envoyer
+les sources. Si la branche n'est pas encore présente localement, `git fetch`
+permet de récupérer sa référence depuis le dépôt distant :
 
 ```bash
 cd ~/ros2_ws/src/fosa-solution
+git fetch origin
+git switch fix/diagnostic-cyclonedds
+git pull --ff-only
+git status --short --branch
+```
+
+Vérifier la branche et les éventuelles modifications locales : l'archive
+contient les fichiers présents sur le PC, y compris ceux non commités.
+Pour ce correctif, les fichiers `outils/diagnostic_dds.py`,
+`outils/environnement_dds.sh` et `caytu_config/config/cyclonedds.xml` doivent
+être présents. Puis lancer :
+
+```bash
 ./deployer_robot.sh --envoyer ROBOT_IP
 ```
 
@@ -333,11 +468,11 @@ Cette seule commande enchaîne les étapes organisateurs :
 3. remplace `~/teams/fosa/src` sur le robot ;
 4. extrait le ZIP, charge `~/ros2_ws/install/setup.bash`, lance `colcon build`, puis charge `install/setup.bash`.
 
-Attendre `Déploiement terminé`. Si le script s’arrête sur une erreur, ne pas passer à la préparation : lire le message affiché. Aucun dossier `build/` ou `install/` du PC n’est envoyé.
+Attendre `Déploiement terminé`. Si le script s’arrête sur une erreur, ne pas passer à la préparation : lire le message affiché. Les dossiers `build/` et `install/` à la racine du workspace PC ne sont pas envoyés. L'archive contient tout `src/` : ne pas y placer de copies de ces dossiers ni d'environnement virtuel du PC.
 
 **Départ vocal facultatif :** avant l’envoi, lancer `./deployer_robot.sh --preparer` sur le PC, puis refaire `./deployer_robot.sh --envoyer ROBOT_IP`. Après la connexion SSH de C.2 et le `cd` dans le dépôt, lancer `./deployer_robot.sh` pour installer Vosk et son modèle. Si tu sautes ces étapes, le départ par commande reste disponible.
 
-### C.2 Depuis le robot : vérifier les interfaces
+### C.2 Depuis le robot : vérifier DDS, puis les interfaces
 
 Après le message de déploiement réussi, ouvrir un terminal PC vers le robot :
 
@@ -347,15 +482,64 @@ cd ~/teams/fosa/src/fosa-solution
 ```
 
 Si le départ vocal a été préparé, lancer maintenant `./deployer_robot.sh`.
-Puis vérifier les périphériques :
+Le déploiement n'active pas automatiquement la surcharge DDS.
+
+**1. Tester la création d'un nœud avec les réglages habituels :**
+
+```bash
+mkdir -p ~/.ros/fosa
+set -o pipefail
+FOSA_DDS_ETENDU=0 ./run.sh diagnostic-dds 2>&1 | tee ~/.ros/fosa/diagnostic-dds.log
+```
+
+- Si `[OK] Nœud ROS créé` apparaît, passer à l'étape 3 avec les réglages
+  habituels (`unset FOSA_DDS_ETENDU`).
+- Si `[ÉCHEC IMPORT]` apparaît, résoudre le chargement Python/ROS (section F).
+- Si les imports réussissent mais que le journal contient
+  `Failed to find a free participant index`, passer à l'étape 2.
+- Pour une autre erreur de création, conserver la trace complète : elle ne
+  prouve pas une saturation des indices.
+
+**2. Comparer avec la plage d'indices étendue :**
+
+```bash
+FOSA_DDS_ETENDU=1 ./run.sh diagnostic-dds 2>&1 | tee ~/.ros/fosa/diagnostic-dds-etendu.log
+```
+
+Si cette commande affiche `[OK] Nœud ROS créé`, activer le réglage pour les
+commandes suivantes du terminal :
+
+```bash
+export FOSA_DDS_ETENDU=1
+```
+
+Si elle échoue, suivre F.1 et transmettre les diagnostics avant de poursuivre.
+**Retenir le choix validé :** il faudra réexporter la variable dans chaque
+nouveau terminal SSH de D et E. Elle est perdue à la fermeture du terminal.
+
+**3. Vérifier les périphériques avec le réglage DDS retenu :**
 
 ```bash
 ./run.sh diagnostic-robot
 ```
 
-Il vérifie les topics, les caméras, le lidar, les repères, l'audio, et note la
-définition exacte des messages de l'arbitre. L'audit des interfaces signale
-que l'inventaire des TF de caméra pourrait être incomplet. Compare aussi le
+Il commence par créer un nœud de diagnostic et s'arrête si cela échoue, puis
+vérifie les topics, les caméras, le lidar, les repères, l'audio, et note la
+définition exacte des messages de l'arbitre. Un nœud créé ne prouve pas que
+les capteurs communiquent : lire les résultats des mesures.
+
+- `camera2 : aucune calibration reçue` signifie qu'aucun message n'a été
+  reçu pendant la mesure, même si le topic existe.
+- `/speech_audio` absent ou muet : le départ vocal reste à valider ; utiliser
+  le départ par commande pour l'essai si l'audio n'est pas disponible.
+- Les scans `/fosa/scan_camera*` peuvent être absents avant le lancement des
+  nœuds de la solution ou si ces sources sont désactivées.
+- La transformation `map → base_link` se vérifie après lancement du SLAM ou
+  de la localisation. Son absence avant ce lancement n'est pas un échec DDS.
+
+L'audit des interfaces signale que l'inventaire des TF de caméra pourrait
+être incomplet. Pour les commandes `ros2` directes ci-dessous, préparer le
+terminal selon C.3 ; `run.sh` ne modifie pas son terminal parent. Compare le
 `header.frame_id` d'une image à sa transformation vers `base_link` :
 
 ```bash
@@ -369,6 +553,7 @@ pour camera2. Pour rapatrier le rapport, ouvrir un terminal sur le PC et lancer 
 ```bash
 # sur le PC
 scp sitoe@ROBOT_IP:'~/.ros/fosa/diagnostic_*.txt' .
+scp sitoe@ROBOT_IP:'~/.ros/fosa/diagnostic-dds*.log' .
 ```
 
 Après le `scp`, revenir au terminal SSH du robot pour les mesures ci-dessous.
@@ -383,8 +568,9 @@ quelques centimètres : un tag imprimé un peu plus grand ou plus petit que
 1. `./run.sh cartographie` (caméras et carte, sans mission).
 2. Poser un tag face à une caméra, à exactement 1,00 m de l'objectif, au
    mètre ruban.
-3. Dans un autre terminal :
-   `source ~/ros2_ws/install/setup.bash && ros2 topic echo /perception/tags --field detections`.
+3. Dans un autre terminal SSH, préparer l'environnement selon C.3, y compris
+   le bloc pour les commandes `ros2` directes, puis lancer
+   `ros2 topic echo /perception/tags --field detections`.
 4. Lire `distance_m`. Si l'écart dépasse 2 cm, corriger dans `fosa.yaml` :
    `size_m = 0,165 × 1,00 ÷ distance lue` (exemple : 0,97 lu → `size_m: 0.170`).
 5. `./run.sh arreter`.
@@ -392,11 +578,59 @@ quelques centimètres : un tag imprimé un peu plus grand ou plus petit que
 **La rotation** (1 minute, robot dégagé, rien d'autre lancé) :
 `./run.sh mesure-rotation`.
 
+### C.3 Ouvrir un nouveau terminal robot pendant les essais
+
+Sur le PC, ouvrir la connexion :
+
+```bash
+ssh sitoe@ROBOT_IP
+```
+
+Puis, **sur le robot** :
+
+```bash
+cd ~/teams/fosa/src/fosa-solution
+```
+
+**Si C.2 a validé le correctif DDS**, exécuter avant toute commande `./run.sh` :
+
+```bash
+export FOSA_DDS_ETENDU=1
+```
+
+Sinon, utiliser `unset FOSA_DDS_ETENDU`. Cela s'applique à tous les terminaux :
+lancement, suivi, sauvegarde, départ et diagnostic. Le réglage est transmis
+aux processus détachés par `run.sh`, y compris via un serveur tmux existant.
+Il n'est pas transmis aux autres connexions SSH ni aux processus déjà lancés.
+
+**Pour une commande `ros2` directe** (TF, topics, téléop), charger aussi
+l'environnement dans ce même terminal :
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+source ~/teams/fosa/install/setup.bash
+export ROS_DOMAIN_ID=0
+export FOSA_CONFIG_DIR="$PWD/caytu_config/config"
+source outils/environnement_dds.sh
+configurer_dds
+```
+
+Vérifier que `configurer_dds` termine sans erreur, puis lancer la commande
+`ros2` souhaitée. Avec `FOSA_DDS_ETENDU` absent, cette fonction ne modifie
+pas la configuration DDS. Les commandes `./run.sh` font ce chargement
+automatiquement.
+
 ---
 
 ## D. Essai réel sur le robot (créneaux d’essai, avant le ranking match)
 
 Ce parcours suppose C.1 et C.2 terminés. Garde le terminal SSH de C.2 ouvert : il devient le **terminal 1** du robot. Le robot doit repartir du même point que celui où la préparation commence.
+
+Pour **chaque nouveau terminal SSH**, suivre C.3 : si le diagnostic a réussi
+grâce à la surcharge, exécuter `export FOSA_DDS_ETENDU=1` avant les commandes
+du terminal. Cette activation concerne aussi `suivi`, `sauver-carte` et
+`depart`, qui créent leurs propres participants DDS.
 
 ### D.1 Enregistrer la carte et les tags
 
@@ -414,6 +648,8 @@ Ce parcours suppose C.1 et C.2 terminés. Garde le terminal SSH de C.2 ouvert : 
    ```bash
    ssh sitoe@ROBOT_IP
    cd ~/teams/fosa/src/fosa-solution
+   # Si le correctif a été validé en C.2, décommenter :
+   # export FOSA_DDS_ETENDU=1
    ./run.sh suivi
    ```
 
@@ -430,6 +666,8 @@ Ce parcours suppose C.1 et C.2 terminés. Garde le terminal SSH de C.2 ouvert : 
    ```bash
    ssh sitoe@ROBOT_IP
    cd ~/teams/fosa/src/fosa-solution
+   # Si le correctif a été validé en C.2, décommenter :
+   # export FOSA_DDS_ETENDU=1
    ./run.sh sauver-carte
    ```
 
@@ -448,7 +686,8 @@ Ce parcours suppose C.1 et C.2 terminés. Garde le terminal SSH de C.2 ouvert : 
 2. Demander à un organisateur d’armer une course d’essai et de publier l’ordre.
 3. Le **terminal 2** de suivi, démarré en D.1, affiche l’ordre et le récit.
 4. Quand l’ordre est reçu, donner le départ : dire « allez » près du robot,
-   ou lancer `./run.sh depart` dans un **terminal 4**.
+   ou ouvrir un **terminal 4** selon C.3, activer le réglage DDS validé, puis
+   lancer `./run.sh depart`.
 5. Observer le récit et la page `http://IP_DU_ROBOT:8080/` depuis le PC.
 6. Après le signal de fin, dans le terminal 4, lancer `./run.sh arreter` si la
    course est encore active.
@@ -460,12 +699,18 @@ Rapatrier les journaux et la carte pour les étudier :
 
 ```bash
 scp sitoe@ROBOT_IP:'~/.ros/fosa/*.log' .
+scp sitoe@ROBOT_IP:'~/.ros/fosa/diagnostic_*.txt' .
 scp -r sitoe@ROBOT_IP:'~/.ros/fosa/preparation' .   # carte.pgm à regarder
 ```
 
 Si les durées annoncées par les plans sont loin de la réalité, je recale
 `course.strategy` dans `fosa.yaml`, puis je refais C.1 au créneau
 suivant.
+
+En cas de nouvel échec DDS, refaire C.2 dans un terminal SSH et joindre les
+deux fichiers `diagnostic-dds*.log`, les relevés de F.1 et la commande exacte
+ayant échoué. Les fichiers `*.log` ci-dessus incluent les diagnostics DDS
+enregistrés en C.2.
 
 Outils utiles pendant un créneau :
 
@@ -474,6 +719,7 @@ Outils utiles pendant un créneau :
 | `./run.sh cartographie` | Afficher SLAM, Nav2 et les capteurs sans enregistrer une préparation complète. |
 | `./run.sh sauver-carte` | Pendant une préparation active, sauvegarder la carte et afficher les tags mémorisés; exécuter avant `./run.sh arreter`. |
 | `./run.sh etat` | État brut de la course. |
+| `./run.sh diagnostic-dds` | Vérifier la création d'un nœud avec le réglage DDS actif. |
 | `./run.sh ordre-test "7,1,9,4"` | Publier un faux ordre si aucun organisateur ne peut armer. **Essais seulement.** |
 
 ---
@@ -481,6 +727,12 @@ Outils utiles pendant un créneau :
 ## E. Le ranking match (le match noté devant le jury)
 
 Même robot, même point de départ et même carte que pendant la préparation. Les 15 minutes de préparation et les 10 minutes de match sont distinctes.
+
+Avant la préparation, reprendre C.2 après un redémarrage du robot et garder le
+réglage DDS validé pendant l'essai. Dans chaque nouvelle connexion SSH, suivre
+C.3 ; si nécessaire, `export FOSA_DDS_ETENDU=1` doit être fait avant de lancer
+la préparation, le suivi et le départ. Le test de saturation Docker de A.2
+se fait sur le PC, en amont, et ne fait pas partie de la procédure du match.
 
 **Préparation (15 minutes)**
 
@@ -499,11 +751,13 @@ Même robot, même point de départ et même carte que pendant la préparation. 
    ```bash
    ssh sitoe@ROBOT_IP
    cd ~/teams/fosa/src/fosa-solution
+   # Si le correctif a été validé en C.2, décommenter :
+   # export FOSA_DDS_ETENDU=1
    ./run.sh suivi
    ```
 
 3. Attendre que les organisateurs publient l’ordre. Au signal, dire « allez »
-   ou lancer `./run.sh depart` dans un troisième terminal.
+   ou lancer `./run.sh depart` dans un troisième terminal préparé selon C.3.
 4. Dès le départ, ne plus toucher le robot, le clavier ou la session SSH.
    Le robot s’arrête et signale seul la fin à l’arbitre.
 
@@ -517,8 +771,12 @@ Ne jamais lancer `./run.sh ordre-test` ou `./run.sh arreter` pendant le match.
 | « Une course ou Gazebo tourne déjà » (simulation) | `simulation/simulation.sh arreter`. |
 | « Le robot simulé n'a pas démarré » alors que Gazebo s'ouvre | Le script attend la découverte du topic `/botwheel_explorer/odom`, puis un message d'odométrie. Si le délai expire, lire `~/.fosa_simulation/journaux/monde_*.log`. |
 | « Paquets ROS absents » au déploiement | Demander aux organisateurs d'installer Nav2 et slam_toolbox. |
-| `Failed to find a free participant index for domain 0` puis `rclpy...RCLError` | CycloneDDS ne peut pas créer de participant : suivre F.1 ci-dessous. Les imports `rclpy` ont réussi. |
-| « parc_msgs introuvable » au lancement | Le dépôt officiel n'est pas construit : `cd ~/ros2_ws && colcon build --symlink-install`. |
+| `[ÉCHEC IMPORT]` / `No module named 'rclpy'` | Vérifier le Python affiché et le chargement de `/opt/ros/jazzy/setup.bash`. Les binaires Jazzy Ubuntu 24.04 utilisent Python 3.12 ; sortir d'un venv incompatible. La surcharge DDS ne corrige pas un import. |
+| `Failed to find a free participant index for domain ...` puis `rclpy...RCLError` | Les imports ont réussi. Sur le robot : comparer les diagnostics en C.2, puis F.1 si nécessaire. Sur le PC : B.0, avec le profil simulation. |
+| `FOSA_DDS_ETENDU concerne CycloneDDS ; RMW actif : ...` | Le réglage a été demandé avec un autre RMW. Désactiver l'option avec `unset FOSA_DDS_ETENDU` ; conserver le RMW utilisé par l'installation. |
+| Le diagnostic réussit mais `suivi` échoue dans un autre terminal | Reprendre C.3 et réexporter le réglage validé dans cette connexion SSH. Un export dans un terminal ne configure pas les autres. |
+| `diagnostic-dds` est un mode inconnu | Le correctif n'est pas déployé : vérifier la branche et reprendre C.1. |
+| « parc_msgs introuvable » au lancement | Sur le PC, construire les paquets officiels selon A. Sur le robot, vérifier le chargement du workspace organisateur selon C.3 et prévenir un organisateur si le paquet y manque. |
 | Rien sur la page de l'arbitre | L'arbitre n'a pas démarré : lire `~/.fosa_simulation/journaux/arbitre_*.log` (port 8080 occupé ?). |
 | « No image » sur la page de l'arbitre | Vérifier que la caméra a détecté le tag à la visite et que la JPEG n'est pas vide dans le journal de la course. |
 | « Aucune préparation » au lancement du match | La carte et les tags n'ont pas été enregistrés : relancer `./run.sh preparation-manuelle` pour guider le robot, ou `./run.sh preparation` pour l'exploration autonome. |
@@ -528,6 +786,8 @@ Ne jamais lancer `./run.sh ordre-test` ou `./run.sh arreter` pendant le match.
 | Le tag est visible mais aucune pose n'est mémorisée | Afficher `header.frame_id` de l'image et vérifier `tf2_echo base_link FRAME_ID`; la chaîne TF des caméras reste à confirmer sur le robot. |
 | Le robot ne bouge pas après le départ | Lire le journal : Nav2 pas prêt, carte absente, topic `/cmd_vel` différent. |
 | Le départ vocal ne marche pas | voix absente (vérifier la préparation de Vosk), format audio, seuil `min_confidence`. Départ par commande en attendant. |
+| Arbitre à 600 s, solution à environ 2 min en simulation | Vérifier les horloges `/clock` / `use_sim_time` de la solution et de l'arbitre ; conserver les journaux de B.1. |
+| `[juge simulé] VISITE ... : pose Gazebo inconnue` | La photo reçue ne suffit pas à confirmer la géométrie ; vérifier les données du moniteur et les journaux de simulation. |
 | Le robot dérive en tournant | `./run.sh mesure-rotation`. |
 | Tags sautés trop tôt ou trop tard | Recaler `course.strategy` dans `fosa.yaml` à partir des plans du récit. |
 
@@ -540,21 +800,29 @@ officiels fixent déjà `StartSignal.method` (0 = commande, 1 = voix),
 
 ### F.1 CycloneDDS : aucun indice de participant libre
 
-Depuis le dossier de la solution **sur le robot**, enregistrer d'abord le
-diagnostic. Il importe `rclpy`, crée un nœud temporaire puis le détruit :
+Le message `Failed to find a free participant index` précède généralement
+`rmw_create_node: failed to create domain`, puis une exception `rclpy`.
+L'import a fonctionné : l'échec survient à la création du nœud. La surcharge
+est **facultative et désactivée par défaut**.
+
+Après déploiement en C.1, comparer les deux diagnostics **sur le robot**, dans
+un terminal neuf si `configurer_dds` avait déjà été sourcé manuellement :
 
 ```bash
-./run.sh diagnostic-dds 2>&1 | tee diagnostic-dds.log
+cd ~/teams/fosa/src/fosa-solution
+mkdir -p ~/.ros/fosa
+set -o pipefail
+FOSA_DDS_ETENDU=0 ./run.sh diagnostic-dds 2>&1 | tee ~/.ros/fosa/diagnostic-dds.log
 ```
 
 Si le journal contient `Failed to find a free participant index`, essayer :
 
 ```bash
-FOSA_DDS_ETENDU=1 ./run.sh diagnostic-dds 2>&1 | tee diagnostic-dds-etendu.log
+FOSA_DDS_ETENDU=1 ./run.sh diagnostic-dds 2>&1 | tee ~/.ros/fosa/diagnostic-dds-etendu.log
 ```
 
 Cette option ajoute `caytu_config/config/cyclonedds.xml` après le contenu
-existant de `CYCLONEDDS_URI`. Elle sélectionne automatiquement un indice libre
+existant de `CYCLONEDDS_URI`. Elle cherche automatiquement un indice libre
 entre **0 et 119**, en conservant les interfaces réseau, peers et réglages
 multicast hérités. Elle s'applique uniquement à CycloneDDS et ne change pas
 le domaine ROS. Avec les ports DDS standards, dépasser 119 ferait empiéter
@@ -563,6 +831,13 @@ personnalisée doit être examinée séparément.
 
 Si le diagnostic affiche **`[OK] Nœud ROS créé`**, reprendre les commandes
 habituelles avec cette option dans **chaque terminal SSH**, par exemple :
+
+```bash
+export FOSA_DDS_ETENDU=1
+./run.sh diagnostic-robot
+```
+
+Puis, dans le terminal de suivi préparé selon C.3 :
 
 ```bash
 export FOSA_DDS_ETENDU=1
@@ -580,21 +855,41 @@ Si l'échec persiste, relever les processus et ports **sans arrêter les service
 des organisateurs** :
 
 ```bash
-ps -eo user,pid,ppid,args > processus-dds.txt
-ss -lunp > ports-dds.txt
-printf '%s\n' "${CYCLONEDDS_URI:-}" > configuration-dds.txt
+ps -eo user,pid,ppid,args > ~/.ros/fosa/processus-dds.txt
+ss -lunp > ~/.ros/fosa/ports-dds.txt
+printf '%s\n' "${CYCLONEDDS_URI:-}" > ~/.ros/fosa/configuration-dds.txt
 ```
 
-Transmettre ces fichiers et les deux diagnostics. Il faut alors identifier
-les processus accumulés, les ports occupés ou une configuration réseau
+La dernière commande conserve la valeur du terminal ; les diagnostics
+contiennent celle effectivement utilisée par `run.sh`, surcharge comprise.
+Pour récupérer ces fichiers, **sur le PC** :
+
+```bash
+scp sitoe@ROBOT_IP:'~/.ros/fosa/diagnostic-dds*.log' .
+scp sitoe@ROBOT_IP:'~/.ros/fosa/*-dds.txt' .
+```
+
+Transmettre ces fichiers, la commande en échec et les deux diagnostics.
+Il faut alors identifier les processus accumulés, les ports occupés ou une configuration réseau
 incompatible ; élargir une plage déjà entièrement occupée ne suffit pas.
-Pour désactiver la surcharge dans un terminal : `unset FOSA_DDS_ETENDU`.
+Pour désactiver l'option de `run.sh` : `unset FOSA_DDS_ETENDU`. Si la surcharge
+a été exportée manuellement avec `configurer_dds` (B.0 ou C.3), ouvrir un
+terminal neuf pour retrouver la configuration initiale ; désactiver le
+drapeau seul ne retire pas une surcharge déjà présente dans `CYCLONEDDS_URI`.
+
+Sur le PC, suivre B.0 pour diagnostiquer le domaine de simulation. La
+reproduction automatique de l'erreur et la vérification du correctif se
+font en A.2 ; elles ne nécessitent pas de lancer une mission Gazebo.
 
 ---
 
 ## Référence rapide des commandes
 
 Les commandes `./run.sh` se lancent depuis `~/teams/fosa/src/fosa-solution` sur le robot. Pour les lancer sur Gazebo, préfixer par `FOSA_PROFIL=simulation`. `./run.sh help` affiche l’aide intégrée.
+
+Si le correctif a été validé en C.2, exporter `FOSA_DDS_ETENDU=1` dans chaque
+terminal robot avant ces commandes (C.3). En simulation, suivre B.0 pour
+appliquer le réglage également aux processus lancés directement.
 
 ### Commandes Fosa
 
@@ -610,6 +905,7 @@ Les commandes `./run.sh` se lancent depuis `~/teams/fosa/src/fosa-solution` sur 
 | `./run.sh cartographie` | Lance SLAM, Nav2 et la perception sans démarrer une préparation complète. |
 | `./run.sh diagnostic-robot` | Vérifie les interfaces et périphériques au premier créneau. |
 | `./run.sh diagnostic-dds` | Vérifie les imports et crée un nœud temporaire pour diagnostiquer DDS. |
+| `FOSA_DDS_ETENDU=1 ./run.sh diagnostic-dds` | Compare avec la surcharge CycloneDDS pour cette commande seulement. |
 | `./run.sh mesure-rotation` | Mesure la rotation du robot ; course arrêtée et robot dégagé. |
 | `./run.sh etat` | Affiche le topic d’état brut de la course. |
 | `./run.sh ordre-test "7,1,9,4"` | Publie un faux ordre pour les essais uniquement ; jamais au ranking match. |
@@ -629,3 +925,12 @@ Les commandes `./run.sh` se lancent depuis `~/teams/fosa/src/fosa-solution` sur 
 | `simulation/simulation.sh micro` | Publie le microphone du PC vers les topics audio de simulation. |
 
 Sans ordre fourni, l’arbitre tire l’ordre au hasard. La graine par défaut est 7. Options courantes : `FOSA_SIM_GUI=0` masque Gazebo ; `FOSA_SIM_VOIX=1` teste le départ vocal ; `FOSA_SIM_DUREE_MAX` règle la limite de temps réel d’une phase (7 200 s par défaut).
+
+### Diagnostics et tests sur PC
+
+| Commande ou procédure | Résultat attendu |
+|---|---|
+| `FOSA_PROFIL=simulation ./run.sh diagnostic-dds` | `[OK] Nœud ROS créé`, sans Gazebo. |
+| `python3 -m pytest -q outils/test/test_dds.py` | 2 réussis, 2 ignorés hors conteneur (A.1). |
+| Test Docker isolé de A.2 | 4 réussis, y compris la saturation DDS reproduite. |
+| Tests des paquets ROS de A, étape 5 | Aucun échec ; examiner aussi les éventuels tests ignorés. |
