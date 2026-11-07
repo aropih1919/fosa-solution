@@ -50,8 +50,8 @@ Retour au terminal 1, après le guidage :
 
 ```bash
 ./simulation/simulation.sh preparer              # 1. compile une fois
-./simulation/simulation.sh essai                 # 2. préparation + match
-./simulation/simulation.sh course '4,9,1,7' 42   # 3. rejoue un match
+./simulation/simulation.sh essai                 # 2. préparation + match (graine 7)
+./simulation/simulation.sh course '4,9,1,7' 7    # 3. rejoue un match sur la graine 7
 ./simulation/simulation.sh arreter               # 4. si une session reste bloquée
 FOSA_SIM_GUI=0 ./simulation/simulation.sh essai  # sans fenêtre
 ```

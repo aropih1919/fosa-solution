@@ -512,8 +512,9 @@ reconnue.
   workspace (cwd, environnement ou exécutable sous `build`/`install`), et
   `deployer_robot.sh --installer` utilise la même liste. Les processus des
   autres équipes ne sont jamais arrêtés. Tests de régression ajoutés dans
-  `outils/test/test_processus.py` ; `./outils/verifier.sh` passe à 283 tests
-  réussis, 4 sautés.
+  `outils/test/test_processus.py`, dont l'arrêt d'un enfant orphelin placé
+  dans une autre session ; `./outils/verifier.sh` passe à 284 tests réussis,
+  4 sautés.
 - **7 novembre 2026** : README réorganisé en ordre chronologique (déploiement,
   robot, cartographie manuelle, simulation, aide). Chaque commande tient sur
   une ligne avec un commentaire court à droite.
