@@ -46,9 +46,15 @@ def _base_carte(chemin, racine=None):
     return base
 
 
-def _fichier_non_vide(chemin):
+# Taille minimale d'une carte SLAM valide (octets). Une préparation
+# interrompue laisse des fichiers partiels non vides mais trop petits pour
+# être une carte exploitable : on les rejette pour basculer en sans carte.
+TAILLE_MIN_CARTE_OCTETS = 100 * 1024
+
+
+def _fichier_non_vide(chemin, taille_min=TAILLE_MIN_CARTE_OCTETS):
     try:
-        return chemin.is_file() and chemin.stat().st_size > 0
+        return chemin.is_file() and chemin.stat().st_size >= taille_min
     except OSError:
         return False
 

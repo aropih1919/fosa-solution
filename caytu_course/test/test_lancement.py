@@ -29,7 +29,7 @@ def robot(monkeypatch, tmp_path):
 
 def _enregistrer_carte(dossier):
     for extension in ('.posegraph', '.data'):
-        (Path(dossier) / f'carte{extension}').write_bytes(b'x')
+        (Path(dossier) / f'carte{extension}').write_bytes(b'x' * 200000)
 
 
 def test_sans_preparation_le_match_cartographie_en_direct(robot):
@@ -125,7 +125,7 @@ def test_un_dossier_avec_un_seul_posegraph_est_accepte(robot, tmp_path):
     dossier = tmp_path / 'arene'
     dossier.mkdir()
     for extension in ('.posegraph', '.data'):
-        (dossier / f'map{extension}').write_bytes(b'x')
+        (dossier / f'map{extension}').write_bytes(b'x' * 200000)
     preparation = replace(robot.course.preparation, directory=str(dossier))
     configuration = replace(
         robot, course=replace(robot.course, preparation=preparation))
@@ -148,7 +148,7 @@ def test_fosa_carte_relative_est_resolue_depuis_le_courant(
     dossier = tmp_path / 'arene'
     dossier.mkdir()
     for extension in ('.posegraph', '.data'):
-        (dossier / f'carte{extension}').write_bytes(b'x')
+        (dossier / f'carte{extension}').write_bytes(b'x' * 200000)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv('FOSA_CARTE', 'arene')
     assert carte_preparee(robot) == dossier / 'carte'
