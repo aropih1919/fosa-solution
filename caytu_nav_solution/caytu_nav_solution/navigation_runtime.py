@@ -431,6 +431,13 @@ class SurveillanceBut:
         """Retourne 'immobile', 'duree' ou None."""
         maintenant = self._now()
         pose = self._pose_robot()
+        # Pas de localisation : on ne conclut pas à l'immobilité (le robot
+        # peut bouger sans que la pose soit disponible). On réarme le compteur.
+        if pose is None:
+            self._dernier_mouvement = maintenant
+            if maintenant - self._depart >= self._duree_max_sec:
+                return 'duree'
+            return None
         if self._a_bouge(pose):
             self._reference = pose
             self._dernier_mouvement = maintenant
