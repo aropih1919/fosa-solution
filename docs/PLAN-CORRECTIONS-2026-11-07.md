@@ -506,3 +506,14 @@ reconnue.
   sur les sources `required` / optionnelles. `./simulation/simulation.sh
   preparer` reconstruit les dix paquets sans erreur. La validation physique
   sur le robot reste seule ouverte.
+- **7 novembre 2026** : `./run.sh course` remplace toujours sa propre session
+  Fosa, mais ne confond plus un `ros2 launch ... course.launch.py` homonyme
+  d'une autre équipe avec les nôtres. La détection exige un marqueur du
+  workspace (cwd, environnement ou exécutable sous `build`/`install`), et
+  `deployer_robot.sh --installer` utilise la même liste. Les processus des
+  autres équipes ne sont jamais arrêtés. Tests de régression ajoutés dans
+  `outils/test/test_processus.py` ; `./outils/verifier.sh` passe à 283 tests
+  réussis, 4 sautés.
+- **7 novembre 2026** : README réorganisé en ordre chronologique (déploiement,
+  robot, cartographie manuelle, simulation, aide). Chaque commande tient sur
+  une ligne avec un commentaire court à droite.
