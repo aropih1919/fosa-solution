@@ -140,8 +140,10 @@ def test_garde_blocage_capteurs_et_fin_arbitre(banc):
     commandes = pilote.create_publisher(Twist, securite.topic_entree, 10)
     etats = pilote.create_publisher(String, configuration.course.state_topic, qos_statut(1))
     arbitre = pilote.create_publisher(RunStatus, configuration.course.referee.run_status_topic, qos_statut(1))
-    scans = [pilote.create_publisher(LaserScan, source.topic, 10)
-             for source in navigation.obstacle_sources if source.enabled]
+    sources = [source for source in navigation.obstacle_sources if source.enabled]
+    scans = [pilote.create_publisher(LaserScan, source.topic, 10) for source in sources]
+    obligatoires = [scan for source, scan in zip(sources, scans) if source.required]
+    optionnelles = [scan for source, scan in zip(sources, scans) if not source.required]
     attendre(lambda: commandes.get_subscription_count() > 0 and etats.get_subscription_count() > 0)
     commande = Twist()
     commande.linear.x = 0.2
@@ -166,8 +168,14 @@ def test_garde_blocage_capteurs_et_fin_arbitre(banc):
     attendre(lambda: sorties[-1].linear.x == 0.0, publier=publier)  # obstacle sur la trajectoire
     distance = 3.0
     attendre(lambda: sorties[-1].linear.x > 0.0, publier=publier)
-    sources_actives = scans[:-1]
-    attendre(lambda: sorties[-1].linear.x == 0.0, publier=publier)  # une caméra se tait
+    # Une caméra optionnelle peut se taire : le lidar frais suffit.
+    sources_actives = obligatoires + optionnelles[:-1]
+    depart = len(sorties)
+    attendre(lambda: len(sorties) >= depart + 4, publier=publier)
+    assert sorties[-1].linear.x > 0.0
+    # Le lidar est obligatoire : sans lui, la garde immobilise le robot.
+    sources_actives = optionnelles
+    attendre(lambda: sorties[-1].linear.x == 0.0, publier=publier)
     sources_actives = scans
     attendre(lambda: sorties[-1].linear.x > 0.0, publier=publier)
     attendre(lambda: sorties[-1].linear.x == 0.0)  # commande abandonnée
