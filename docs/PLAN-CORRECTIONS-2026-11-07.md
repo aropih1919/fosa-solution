@@ -459,6 +459,10 @@ reconnue.
    « allez » après réception de l’ordre. Vérifier le champ `heard` et le bonus.
 8. **Obstacles déplacés** : déplacer un meuble entre la préparation et le
    match, vérifier que la costmap se met à jour et que le robot contourne.
+9. **Absence de recul après un tag** : visiter un tag puis vérifier que le
+   robot repart vers le suivant sans reculer systématiquement. En préparation,
+   contrôler qu'après une mesure de près il reste sur place pendant les
+   dernières observations avant de repartir.
 
 ---
 
@@ -469,3 +473,8 @@ reconnue.
   la garde et la mémoire des tags, puis la voix et les confirmations.
 - **7 novembre 2026** : ajout de ce document de reprise pour permettre à une
   autre session de continuer sans relire tout l’historique.
+- **7 novembre 2026** : reprise de la branche `fix/sans-recul-apres-tag`
+  (commit `36a1570`). Le recul n'est plus déclenché après une visite ni après
+  la mesure d'un tag ; le robot s'arrête pendant les dernières observations.
+  Seul le commit utile a été repris, sans le merge qui supprimait
+  `laser_filter_params.yaml`. Tests purs : 238 passés, 6 sautés.

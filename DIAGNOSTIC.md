@@ -268,7 +268,8 @@ corrections correspondantes sont détaillées dans
   but, au lieu de la seule présence des serveurs d'action.
 - **Récupération** : après des échecs d'approche répétés, les costmaps sont
   vidées puis le robot recule lentement, dans la limite
-  `max_unstuck_attempts` par tag.
+  `max_unstuck_attempts` par tag. Aucun recul systématique n'est déclenché
+  après une visite réussie ou après la mesure d'un tag en préparation.
 - **Visites** : `tags_reported` est suivi, la confirmation attend
   `referee_confirmation_sec` sans bloquer la course, et le résumé final
   distingue les visites confirmées, non confirmées et sautées.
