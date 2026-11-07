@@ -34,6 +34,8 @@ Modes (robot réel par défaut) :
   diagnostic-dds    vérifier les imports et la création d'un nœud ROS
   mesure-rotation   deux tours lents sur place : odométrie contre gyromètre
                     et lidar (robot dégagé, course arrêtée, ~1 min)
+  installer         compiler les paquets Fosa et vérifier les dépendances
+  teleop            piloter le robot au clavier (cartographie manuelle)
 
 Un lancement remplace automatiquement la session Fosa précédente.
 Après le lancement, Ctrl+C arrête la session ; fermer le terminal la laisse
@@ -166,6 +168,11 @@ annuler_vitesse() {
     ((publie)) && echo "Vitesse nulle publiée sur la commande du robot."
     return 0
 }
+
+# L'installation doit fonctionner même sans workspace compilé ni ROS sourcé.
+if [[ "$mode" == installer ]]; then
+    exec "$DOSSIER_SCRIPT/deployer_robot.sh" --installer
+fi
 
 # L'arrêt doit rester disponible même si ROS ou le workspace est endommagé.
 if [[ "$mode" == arreter ]]; then
@@ -508,6 +515,14 @@ PYTHON
         ;;
     diagnostic-dds)
         python3 "$DOSSIER_SCRIPT/outils/diagnostic_dds.py"
+        ;;
+    teleop)
+        if ! ros2 pkg prefix teleop_twist_keyboard >/dev/null 2>&1; then
+            echo "teleop_twist_keyboard absent : installez ros-$ROS_DISTRO-teleop-twist-keyboard." >&2
+            exit 1
+        fi
+        ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+            --ros-args -r cmd_vel:="$(lire_config c.navigation.securite.topic_entree)"
         ;;
     mesure-rotation)
         if python3 "$DOSSIER_SCRIPT/outils/processus.py" actif \
