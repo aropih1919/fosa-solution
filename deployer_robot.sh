@@ -16,7 +16,8 @@ aide() {
     cat <<'AIDE'
 Usage : ./deployer_robot.sh MODE
   --archive [fichier.zip]  sources Fosa seules + manifeste SHA-256 (sans robot)
-  --envoyer ROBOT_IP      transfère, compile, active actuel (prépare la voix si absente)
+  --envoyer ROBOT_IP      transfère, compile et remplace l'installation du robot
+                          (prépare la voix si absente)
   --preparer              télécharge Vosk ARM/Python et son modèle depuis le PC
   --installer            sur le Jetson : vérifie les dépendances, compile, installe la voix préparée
   --help                 affiche cette aide
@@ -24,7 +25,8 @@ Usage : ./deployer_robot.sh MODE
 FOSA_SANS_VOIX=1 avec --envoyer déploie sans préparer la voix (départ par commande).
 
 Sur le robot : ~/teams/fosa/actuel/src/fosa-solution/run.sh
-Les anciennes livraisons restent dans ~/teams/fosa/livraisons ; precedent pointe sur l'ancienne.
+Ce déploiement remplace toute l'installation précédente de ~/teams/fosa ;
+seul le dossier donnees/ (cartes, tags, sessions) est conservé.
 AIDE
 }
 
@@ -150,7 +152,12 @@ racine="$HOME/$1"
 archive="$racine/entree/$2.zip"
 [[ "$(sha256sum "$archive" | cut -d ' ' -f 1)" == "$2" ]]
 mkdir -p "$racine/livraisons" "$racine/donnees"
-livraison="$(mktemp -d "$racine/livraisons/${2:0:12}.XXXXXXXX")"
+
+# Extraire la nouvelle livraison à part : l'ancienne reste active jusqu'au
+# succès de la compilation.
+livraison="$racine/livraisons/${2:0:12}"
+rm -rf "$livraison"
+mkdir -p "$livraison"
 python3 - "$archive" "$livraison" <<'PYTHON'
 import pathlib
 import sys
@@ -165,12 +172,26 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
         pathlib.Path(sys.argv[2], info.filename).chmod((info.external_attr >> 16) & 0o777)
 PYTHON
 python3 "$livraison/src/fosa-solution/outils/livraison.py" verifier "$livraison"
-bash "$livraison/src/fosa-solution/deployer_robot.sh" --installer
-if [[ -L "$racine/actuel" ]]; then
-    ln -sfn "$(readlink "$racine/actuel")" "$racine/precedent"
+
+# Arrêter la session précédente avec la nouvelle version des outils : elle
+# couvre toutes les livraisons Fosa du robot, jamais celles des autres équipes.
+"$livraison/src/fosa-solution/run.sh" arreter || true
+restes="$(python3 "$livraison/src/fosa-solution/outils/processus.py" lister \
+    --etat "$racine/donnees/sessions/course.json" --portee "$racine" 2>/dev/null || true)"
+if [[ -n "$restes" ]]; then
+    echo "Processus Fosa encore actifs :" >&2
+    printf '%s\n' "$restes" | sed 's/^/  /' >&2
+    echo "Ancienne installation conservée : relancez l'arrêt puis --envoyer." >&2
+    exit 1
 fi
-ln -s "$livraison" "$racine/.actuel-$2"
-mv -Tf "$racine/.actuel-$2" "$racine/actuel"
+
+# Compiler et installer la nouvelle livraison.
+bash "$livraison/src/fosa-solution/deployer_robot.sh" --installer
+
+# Remplacer toute l'installation précédente ; seules les données sont gardées.
+python3 "$livraison/src/fosa-solution/outils/livraison.py" activer \
+    "$racine" "$livraison"
+rm -f "$racine/entree"/*.zip
 echo "Livraison active : $livraison"
 ROBOT
     echo "Déploiement terminé : ssh $UTILISATEUR@$hote"

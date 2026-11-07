@@ -5,7 +5,9 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import zipfile
 
@@ -68,15 +70,56 @@ def verifier(dossier):
     return manifeste
 
 
+def activer(racine, livraison):
+    """Remplace toute l'installation précédente ; seules les données restent.
+
+    La nouvelle livraison doit déjà être extraite et compilée dans
+    `racine/livraisons`. Les autres livraisons et les liens `actuel` /
+    `precedent` sont supprimés, puis `actuel` pointe sur la nouvelle.
+    """
+    racine = Path(racine).resolve()
+    livraison = Path(livraison).resolve()
+    dossier = racine / 'livraisons'
+    if racine not in livraison.parents or dossier not in livraison.parents:
+        raise ValueError(f'Livraison hors de {dossier} : {livraison}')
+    if not livraison.is_dir():
+        raise ValueError(f'Livraison absente : {livraison}')
+    # Vérifier tous les chemins avant de supprimer quoi que ce soit : un dossier
+    # inattendu doit bloquer l'activation sans détruire l'ancienne livraison.
+    liens = [racine / nom for nom in ('actuel', 'precedent')]
+    temporaire = racine / f'.actuel-{livraison.name}'
+    for chemin in liens + [temporaire]:
+        if chemin.exists() and not (chemin.is_symlink() or chemin.is_file()):
+            raise ValueError(f'Refus de supprimer le dossier {chemin}')
+    for entree in sorted(dossier.iterdir()):
+        if entree.resolve() == livraison:
+            continue
+        if entree.is_symlink() or not entree.is_dir():
+            entree.unlink()
+        else:
+            shutil.rmtree(entree)
+    for chemin in liens + [temporaire]:
+        if chemin.is_symlink() or chemin.is_file():
+            chemin.unlink()
+    temporaire.symlink_to(livraison)
+    os.replace(temporaire, racine / 'actuel')
+
+
 def main():
     analyseur = argparse.ArgumentParser(description=__doc__)
-    analyseur.add_argument('action', choices=('creer', 'verifier'))
-    analyseur.add_argument('chemin', type=Path)
+    analyseur.add_argument('action', choices=('creer', 'verifier', 'activer'))
+    analyseur.add_argument('chemin', type=Path, nargs='+')
     args = analyseur.parse_args()
     if args.action == 'creer':
-        manifeste = creer_archive(Path(__file__).resolve().parents[1], args.chemin)
+        manifeste = creer_archive(Path(__file__).resolve().parents[1], args.chemin[0])
+    elif args.action == 'verifier':
+        manifeste = verifier(args.chemin[0])
     else:
-        manifeste = verifier(args.chemin)
+        if len(args.chemin) != 2:
+            analyseur.error('activer attend : RACINE LIVRAISON')
+        activer(args.chemin[0], args.chemin[1])
+        print(f'Installation remplacée ; actuel -> {args.chemin[1]}')
+        return 0
     print(f'{len(manifeste["fichiers"])} fichiers ; révision {manifeste["revision"]} ; '
           f'modifications locales : {manifeste["modifications_locales"]}')
 

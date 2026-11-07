@@ -60,3 +60,45 @@ def test_un_lien_vers_l_exterieur_est_refuse(tmp_path):
     (config / 'fuite').symlink_to('/etc/passwd')
     with pytest.raises(ValueError, match='Lien symbolique'):
         livraison.creer_archive(tmp_path, tmp_path / 'archive.zip')
+
+
+def _racine_robot(tmp_path):
+    racine = tmp_path / 'fosa'
+    ancienne = racine / 'livraisons/ancienne'
+    nouvelle = racine / 'livraisons/nouvelle'
+    (ancienne / 'src').mkdir(parents=True)
+    (nouvelle / 'src').mkdir(parents=True)
+    (racine / 'donnees/sessions').mkdir(parents=True)
+    (racine / 'donnees/sessions/course.json').write_text('{}')
+    (racine / 'actuel').symlink_to(ancienne)
+    (racine / 'precedent').symlink_to(ancienne)
+    return racine, ancienne, nouvelle
+
+
+def test_activation_remplace_tout_sauf_les_donnees(tmp_path):
+    racine, ancienne, nouvelle = _racine_robot(tmp_path)
+    livraison.activer(racine, nouvelle)
+    assert not ancienne.exists()
+    assert (nouvelle / 'src').is_dir()
+    assert (racine / 'actuel').resolve() == nouvelle.resolve()
+    assert not (racine / 'precedent').exists()
+    assert (racine / 'donnees/sessions/course.json').read_text() == '{}'
+
+
+def test_activation_refuse_une_livraison_hors_du_dossier(tmp_path):
+    racine, _, _ = _racine_robot(tmp_path)
+    dehors = tmp_path / 'dehors'
+    dehors.mkdir()
+    with pytest.raises(ValueError, match='hors de'):
+        livraison.activer(racine, dehors)
+    assert (racine / 'actuel').is_symlink()
+
+
+def test_activation_refuse_de_supprimer_un_dossier_actuel(tmp_path):
+    racine, _, nouvelle = _racine_robot(tmp_path)
+    (racine / 'actuel').unlink()
+    (racine / 'actuel').mkdir()
+    with pytest.raises(ValueError, match='Refus'):
+        livraison.activer(racine, nouvelle)
+    assert (racine / 'actuel').is_dir()
+    assert (racine / 'livraisons/ancienne').is_dir()

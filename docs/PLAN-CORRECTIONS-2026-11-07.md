@@ -518,3 +518,12 @@ reconnue.
 - **7 novembre 2026** : README réorganisé en ordre chronologique (déploiement,
   robot, cartographie manuelle, simulation, aide). Chaque commande tient sur
   une ligne avec un commentaire court à droite.
+- **7 novembre 2026** : `deployer_robot.sh --envoyer` remplace désormais toute
+  l'installation du robot au lieu d'empiler les livraisons. La nouvelle
+  livraison est extraite et compilée à part ; l'ancienne reste active en cas
+  d'échec d'arrêt ou de compilation. Après succès, `livraisons/` ne contient
+  plus que la nouvelle et `donnees/` (cartes, tags, sessions) est conservé.
+  `outils/livraison.py activer` effectue le remplacement, refuse tout chemin
+  hors de `livraisons/` et tout dossier inattendu à la place de `actuel`.
+  Trois tests ajoutés ; `./outils/verifier.sh` passe à 287 tests réussis,
+  4 sautés.
