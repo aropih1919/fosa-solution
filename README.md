@@ -52,6 +52,17 @@ Placez le robot à la position et orientation de départ de la carte.
 ./run.sh arreter
 ```
 
+## Simuler sur le PC
+
+Avec ROS 2 Jazzy et les paquets officiels PARC dans le workspace :
+
+```bash
+./simulation/simulation.sh preparer
+./simulation/simulation.sh essai   # préparation puis match
+```
+
+Sans fenêtre Gazebo : préfixer la commande par `FOSA_SIM_GUI=0`.
+
 La carte des organisateurs est utilisée par défaut. Pour la forcer :
 
 ```bash
