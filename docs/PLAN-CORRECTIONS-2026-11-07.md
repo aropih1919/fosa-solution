@@ -12,7 +12,8 @@
   réel, sans dégrader la simulation.
 - **État** : volets A à H terminés (processus, carte, garde, lifecycle Nav2,
   mémoire des tags, récupération, voix, confirmations). Volet I : documentation
-  mise à jour, tests purs passants ; validation robot restant à exécuter.
+  mise à jour, tests purs et ROS 2 natifs passants ; validation robot restant
+  à exécuter.
 
 ---
 
@@ -432,8 +433,10 @@ reconnue.
 - [x] `README.md` mis à jour.
 - [x] `DIAGNOSTIC.md` mis à jour.
 - [x] Tests purs complets passants.
+- [x] Tests ROS 2 natifs exécutés : 280 passés, 4 sautés.
+- [x] Tests d'intégration ROS exécutés en isolation locale : 2 passés.
 - [x] Procédure de validation robot écrite.
-- [ ] Validation exécutée sur le robot (ROS/Nav2/Gazebo indisponibles ici).
+- [ ] Validation exécutée sur le robot (matériel et capteurs réels indisponibles ici).
 
 ---
 
@@ -478,3 +481,9 @@ reconnue.
   la mesure d'un tag ; le robot s'arrête pendant les dernières observations.
   Seul le commit utile a été repris, sans le merge qui supprimait
   `laser_filter_params.yaml`. Tests purs : 238 passés, 6 sautés.
+- **7 novembre 2026** : validation locale sur ROS 2 Jazzy natif avec
+  `./outils/verifier.sh` : 280 tests passés, 4 sautés (DDS et intégration
+  réservés au conteneur). Les deux tests de `test_ros_integration.py` ont été
+  exécutés en domaine isolé et passent après alignement du test de la garde
+  sur les sources `required` / optionnelles. La validation physique sur le
+  robot reste seule ouverte.
