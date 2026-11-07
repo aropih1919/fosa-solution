@@ -55,8 +55,16 @@ installer() {
     if [[ -x "$DEPOT/run.sh" ]]; then
         "$DEPOT/run.sh" arreter || echo "Arrêt précédent incomplet : compilation poursuivie." >&2
     fi
-    if pgrep -af '[c]aytu_course/course_parc|[c]ourse\.launch\.py' >/dev/null; then
-        echo "Des nœuds Fosa tournent encore : arrêtez-les puis relancez --installer." >&2
+    # Ne regarder que nos processus : un lancement homonyme d'une autre équipe
+    # ne doit ni bloquer l'installation ni être arrêté.
+    local etat="${FOSA_DONNEES:-$HOME/$DOSSIER_ROBOT/donnees}/sessions/course.json"
+    local restes
+    restes="$(python3 "$DEPOT/outils/processus.py" lister --etat "$etat" \
+        --portee "$ESPACE_TRAVAIL" --portee "$HOME/$DOSSIER_ROBOT" 2>/dev/null || true)"
+    if [[ -n "$restes" ]]; then
+        echo "Des nœuds Fosa tournent encore :" >&2
+        printf '%s\n' "$restes" | sed 's/^/  /' >&2
+        echo "Arrêtez-les puis relancez --installer." >&2
         return 1
     fi
     if [[ "$(uname -m)" != aarch64 && "${FOSA_FORCER_PC:-0}" != 1 ]]; then

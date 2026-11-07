@@ -46,7 +46,7 @@ Carte : celle de la livraison, ou FOSA_CARTE=/chemin/carte pour forcer.
 Espace de travail de base du robot (parc_msgs de l'arbitre) : FOSA_BASE_WS,
 ~/parc_ws en priorité puis ~/ros2_ws (sourcé avant le nôtre).
 CycloneDDS saturé : FOSA_DDS_ETENDU=1 active la surcharge de dépannage
-dans caytu_config/config/cyclonedds.xml (voir README, section F.1).
+dans caytu_config/config/cyclonedds.xml (dépannage : ./run.sh diagnostic-dds).
 
 Exemples :
   ./run.sh preparation      puis, une fois terminée :   ./run.sh course

@@ -256,7 +256,10 @@ corrections correspondantes sont détaillées dans
 - **Arrêt et relance** : `run.sh` surveille la session au premier plan ;
   `Ctrl+C` l'arrête, `SIGHUP` la laisse continuer. Les PID sont identifiés par
   jeton et empreinte `starttime`. Un nouveau lancement remplace l'ancienne
-  session au lieu de la refuser.
+  session au lieu de la refuser. La détection exige un marqueur de notre
+  workspace (répertoire courant, environnement ou exécutable sous
+  `build`/`install`) : un `ros2 launch ... course.launch.py` homonyme d'une
+  autre équipe n'est ni compté ni arrêté.
 - **Carte et tags** : chemins relatifs résolus, dossier avec un seul
   `*.posegraph` accepté, fichiers vides refusés. Les tags sont exportés dans
   `map` via la TF finale `map → odom`, pour rester cohérents après une

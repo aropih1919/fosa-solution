@@ -37,6 +37,52 @@ def _arreter_processus(pid):
         pass
 
 
+def _faux_ros2(dossier):
+    """Faux binaire nommé `ros2`, lancé dans son propre groupe de processus."""
+    binaire = dossier / 'bin' / 'ros2'
+    binaire.parent.mkdir(parents=True)
+    binaire.write_text('#!/usr/bin/env bash\nsleep 60\n', encoding='utf-8')
+    binaire.chmod(0o755)
+    return binaire
+
+
+def _lancer_faux_launch(binaire, dossier, env=None):
+    processus = subprocess.Popen(
+        [str(binaire), 'launch', 'caytu_course', 'course.launch.py'],
+        cwd=str(dossier), env=env, start_new_session=True)
+    fin = time.monotonic() + 5.0
+    while time.monotonic() < fin:
+        try:
+            ligne = Path(f'/proc/{processus.pid}/cmdline').read_bytes()
+        except OSError:
+            ligne = b''
+        if b'course.launch.py' in ligne:
+            return processus
+        time.sleep(0.05)
+    _terminer(processus)
+    raise AssertionError('Le faux lancement ROS ne démarre pas')
+
+
+def _terminer(processus):
+    """Arrête aussi les enfants du faux lancement, sans toucher au reste."""
+    try:
+        os.killpg(processus.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        processus.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        os.killpg(processus.pid, signal.SIGKILL)
+        processus.wait(timeout=5)
+
+
+def _lister(tmp_path, portee):
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), 'lister',
+         '--etat', str(tmp_path / 'absent.json'), '--portee', str(portee)],
+        capture_output=True, text=True)
+
+
 def test_arret_cible_et_pid_reutilise(tmp_path):
     etat, journal = tmp_path / 'session.json', tmp_path / 'session.log'
     autre = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
@@ -136,7 +182,8 @@ def test_lister_reconnait_le_lanceur_du_workspace(tmp_path):
     """Le lanceur `run.sh course-premier-plan` est reconnu par sa portée."""
     lanceur = tmp_path / 'run.sh'
     lanceur.write_text('#!/usr/bin/env bash\nsleep 60\n', encoding='utf-8')
-    processus = subprocess.Popen(['bash', str(lanceur), 'course-premier-plan'])
+    processus = subprocess.Popen(['bash', str(lanceur), 'course-premier-plan'],
+                                 start_new_session=True)
     try:
         resultat = subprocess.run(
             [sys.executable, str(SCRIPT), 'lister',
@@ -145,8 +192,7 @@ def test_lister_reconnait_le_lanceur_du_workspace(tmp_path):
         assert resultat.returncode == 0
         assert str(processus.pid) in resultat.stdout
     finally:
-        processus.terminate()
-        processus.wait(timeout=5)
+        _terminer(processus)
 
 
 def test_lister_ignore_un_editeur_ouvert_sur_le_lancement(tmp_path):
@@ -165,3 +211,45 @@ def test_lister_ignore_un_editeur_ouvert_sur_le_lancement(tmp_path):
     finally:
         processus.terminate()
         processus.wait(timeout=5)
+
+
+def test_lister_reconnait_notre_ros2_launch(tmp_path):
+    """Un `ros2 launch course.launch.py` lancé depuis notre workspace est nôtre."""
+    notre = tmp_path / 'notre'
+    notre.mkdir()
+    processus = _lancer_faux_launch(_faux_ros2(notre), notre)
+    try:
+        resultat = _lister(tmp_path, notre)
+        assert resultat.returncode == 0
+        assert str(processus.pid) in resultat.stdout
+    finally:
+        _terminer(processus)
+
+
+def test_lister_ignore_un_ros2_launch_homonyme_hors_portee(tmp_path):
+    """Le lancement homonyme d'une autre équipe ne doit jamais être arrêté."""
+    notre, autre = tmp_path / 'notre', tmp_path / 'autre'
+    notre.mkdir()
+    autre.mkdir()
+    processus = _lancer_faux_launch(_faux_ros2(autre), autre)
+    try:
+        resultat = _lister(tmp_path, notre)
+        assert resultat.returncode == 1
+        assert str(processus.pid) not in resultat.stdout
+    finally:
+        _terminer(processus)
+
+
+def test_lister_reconnait_un_noeud_avec_environnement_de_notre_workspace(tmp_path):
+    """Les nœuds lancés ailleurs restent nôtres via l'environnement exporté."""
+    notre, autre = tmp_path / 'notre', tmp_path / 'autre'
+    notre.mkdir()
+    autre.mkdir()
+    env = {**os.environ, 'PYTHONPATH': f'{notre}/caytu_config'}
+    processus = _lancer_faux_launch(_faux_ros2(autre), autre, env=env)
+    try:
+        resultat = _lister(tmp_path, notre)
+        assert resultat.returncode == 0
+        assert str(processus.pid) in resultat.stdout
+    finally:
+        _terminer(processus)

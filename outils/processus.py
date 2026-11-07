@@ -95,6 +95,32 @@ def _environ(pid):
         return []
 
 
+def _cwd(pid):
+    try:
+        return Path(f'/proc/{pid}/cwd').resolve()
+    except OSError:
+        return None
+
+
+def _sous_portee(pid, portee):
+    """Le répertoire courant du processus est-il dans notre workspace ?"""
+    cwd = _cwd(pid)
+    if cwd is None:
+        return False
+    racine = Path(portee).resolve()
+    return cwd == racine or racine in cwd.parents
+
+
+def _environ_sous_portee(pid, portee):
+    """Une variable d'environnement référence-t-elle notre workspace ?
+
+    `run.sh` exporte FOSA_CONFIG_DIR et le jeton de session ; ces valeurs
+    restent dans l'environnement des nœuds lancés par `ros2 launch`.
+    """
+    marqueur = f'{str(Path(portee).resolve()).rstrip("/")}/'.encode()
+    return any(marqueur in variable for variable in _environ(pid))
+
+
 def _ancetres():
     """Le shell d'arrêt ne doit jamais se tuer lui-même."""
     vus = set()
@@ -117,6 +143,14 @@ def _descendants(racine, parents):
                 resultat.add(enfant)
                 pile.append(enfant)
     return resultat
+
+
+def _est_ros2_launch(argv):
+    """Reconnaît `ros2 launch`, même lancé via l'interpréteur Python."""
+    for index in (0, 1):
+        if index < len(argv) and Path(argv[index]).name == 'ros2':
+            return index + 1 < len(argv) and argv[index + 1] == 'launch'
+    return False
 
 
 def _dans_portee(pid, portees):
@@ -143,9 +177,13 @@ def _dans_portee(pid, portees):
                 return True
     # `ros2 launch` ne contient pas forcément le chemin du workspace dans sa
     # ligne de commande ; ses nœuds enfants, eux, sont sous install/build.
-    if (Path(argv[0]).name == 'ros2' and len(argv) >= 3
-            and argv[1] == 'launch' and 'course.launch.py' in argv[2:]):
-        return True
+    # Sans marqueur de notre workspace (cwd ou environnement), un lancement
+    # homonyme peut appartenir à une autre équipe : ne jamais le tuer.
+    if (_est_ros2_launch(argv)
+            and any(Path(argument).name == 'course.launch.py'
+                    for argument in argv)):
+        return any(_sous_portee(pid, portee) or _environ_sous_portee(pid, portee)
+                   for portee in racines)
     return False
 
 

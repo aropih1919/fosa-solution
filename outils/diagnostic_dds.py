@@ -37,7 +37,7 @@ def main():
             'Si le journal indique « Failed to find a free participant index »,\n'
             'essayer FOSA_DDS_ETENDU=1 ./run.sh diagnostic-dds.\n'
             'Si cet essai échoue aussi, examiner les processus, ports et la\n'
-            'configuration CycloneDDS du robot (README, section F.1).',
+            'configuration CycloneDDS du robot (voir DIAGNOSTIC.md).',
             file=sys.stderr)
         return 1
     finally:
