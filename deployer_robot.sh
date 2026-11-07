@@ -110,17 +110,41 @@ PYTHON
     fi
     if [[ -d "$LIVRAISON/roues" && -f "$LIVRAISON/$MODELE.zip" ]]; then
         # Installation hors ligne, sans venv et sans téléchargement sur le robot.
+        # La voix est optionnelle : un échec ici ne bloque pas le déploiement.
         mkdir -p "$ESPACE_TRAVAIL/.fosa_python" "$DEPOT/caytu_config/config/models"
-        local fichier
+        local fichier voix_ok=true
         for fichier in "$LIVRAISON/roues/"*.whl; do
-            python3 -m zipfile -e "$fichier" "$ESPACE_TRAVAIL/.fosa_python"
+            [[ -f "$fichier" ]] || continue
+            python3 -m zipfile -e "$fichier" "$ESPACE_TRAVAIL/.fosa_python" || {
+                echo "Avertissement : roue illisible ($fichier), ignorée." >&2
+                voix_ok=false
+            }
         done
         for fichier in "$LIVRAISON/roues/"srt-*.tar.gz; do
-            tar -xzf "$fichier" -C "$ESPACE_TRAVAIL/.fosa_python" --wildcards --strip-components=1 '*/srt.py'
+            [[ -f "$fichier" ]] || continue
+            tar -xzf "$fichier" -C "$ESPACE_TRAVAIL/.fosa_python" \
+                --wildcards --strip-components=1 '*/srt.py' 2>/dev/null || true
         done
-        python3 -m zipfile -e "$LIVRAISON/$MODELE.zip" "$DEPOT/caytu_config/config/models"
-        PYTHONPATH="$ESPACE_TRAVAIL/.fosa_python${PYTHONPATH:+:$PYTHONPATH}" \
-            python3 -c 'import vosk; print("Vosk hors ligne installé.")'
+        if ! python3 -m zipfile -t "$LIVRAISON/$MODELE.zip" >/dev/null 2>&1; then
+            echo "Avertissement : modèle Vosk illisible ou absent, voix désactivée." >&2
+            voix_ok=false
+        else
+            python3 -m zipfile -e "$LIVRAISON/$MODELE.zip" \
+                "$DEPOT/caytu_config/config/models" || {
+                echo "Avertissement : extraction du modèle Vosk échouée, voix désactivée." >&2
+                voix_ok=false
+            }
+        fi
+        if [[ "$voix_ok" == true ]]; then
+            PYTHONPATH="$ESPACE_TRAVAIL/.fosa_python${PYTHONPATH:+:$PYTHONPATH}" \
+                python3 -c 'import vosk; print("Vosk hors ligne installé.")' || {
+                echo "Avertissement : Vosk importable mais défectueux, voix désactivée." >&2
+                voix_ok=false
+            }
+        fi
+        if [[ "$voix_ok" != true ]]; then
+            echo "Voix non disponible ; départ par commande uniquement." >&2
+        fi
     else
         echo "Voix non préparée ; départ par commande disponible."
     fi
@@ -141,6 +165,11 @@ envoyer() {
             echo "Préparation de la voix impossible ; déploiement sans voix." >&2
             echo "Relancez ./deployer_robot.sh --preparer, ou utilisez FOSA_SANS_VOIX=1 pour ignorer." >&2
         fi
+    fi
+    # Sans voix demandée : ne pas embarquer les artefacts vocaux (roues, modèle)
+    # pour que l'installation sur le robot saute proprement l'étape voix.
+    if [[ "${FOSA_SANS_VOIX:-0}" == 1 ]]; then
+        rm -rf "$LIVRAISON/roues" "$LIVRAISON/$MODELE.zip"
     fi
     archiver "$archive"
     empreinte="$(sha256sum "$archive" | cut -d ' ' -f 1)"
