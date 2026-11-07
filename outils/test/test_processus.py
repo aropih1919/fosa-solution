@@ -165,6 +165,38 @@ def test_pid_reutilise_ne_suit_pas_ses_descendants(tmp_path):
         subprocess.run(commande + ['arreter', '--etat', str(etat)], check=True)
 
 
+def test_arret_termine_un_enfant_orphelin_dans_une_autre_session(tmp_path):
+    """Un enfant qui survit au lanceur (nouvelle session) doit être arrêté."""
+    etat, journal = tmp_path / 'session.json', tmp_path / 'session.log'
+    trace = tmp_path / 'enfant.pid'
+    programme = tmp_path / 'lanceur.py'
+    programme.write_text(
+        'import subprocess, sys\n'
+        'enfant = subprocess.Popen(\n'
+        "    [sys.executable, '-c', 'import time; time.sleep(60)'],\n"
+        '    start_new_session=True)\n'
+        'open(sys.argv[1], "w", encoding="utf-8").write(str(enfant.pid))\n',
+        encoding='utf-8')
+    commande = [sys.executable, str(SCRIPT)]
+    enfant = None
+    try:
+        subprocess.run(
+            commande + ['lancer', '--etat', str(etat), '--journal', str(journal),
+                        '--', sys.executable, str(programme), str(trace)],
+            check=True)
+        fin = time.monotonic() + 5.0
+        while not trace.is_file() and time.monotonic() < fin:
+            time.sleep(0.05)
+        enfant = int(trace.read_text(encoding='utf-8'))
+        assert _vivant(enfant)
+        subprocess.run(commande + ['arreter', '--etat', str(etat)], check=True)
+        assert _attendre_mort(enfant)
+    finally:
+        if enfant is not None:
+            _arreter_processus(enfant)
+        subprocess.run(commande + ['arreter', '--etat', str(etat)], check=True)
+
+
 def test_etat_perime_est_supprime(tmp_path):
     etat = tmp_path / 'session.json'
     fini = subprocess.Popen([sys.executable, '-c', 'pass'])
