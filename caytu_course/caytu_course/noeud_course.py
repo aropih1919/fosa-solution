@@ -329,8 +329,6 @@ class NoeudCourse(Node):
                 continue
             if resultat == 'visite':
                 self._sequence.marquer_visite(cible)
-                if not self._sequence.terminee():
-                    self._degager('laisser la place devant le tag avant le suivant')
             elif resultat == 'saute':
                 self._sequence.sauter()
             self._plan_instant = None   # nouvelle cible : replanifier
@@ -721,8 +719,8 @@ class NoeudCourse(Node):
     def _degager(self, raison):
         """Recule lentement de `unstuck_distance_m`, garde arrière active.
 
-        Sert à quitter un endroit étroit (devant un tag, contre un meuble) où
-        Nav2 n'arrive plus à repartir.
+        Sert après plusieurs trajets de recherche ratés à quitter un endroit
+        étroit où Nav2 n'arrive plus à repartir.
         """
         distance = self._course.unstuck_distance_m
         vitesse = self._course.alignment.max_linear_mps
@@ -911,6 +909,8 @@ class NoeudCourse(Node):
                        'on s\'en approche pour mesurer précisément sa position.', tag=tag_id)
         resultat = self._approcher(
             tag_id, (pose.x, pose.y, pose.cap, pose.distance_min), self._temps_ecoule)
+        # Conserver la position pendant les dernières observations du tag.
+        self.arreter_robot()
         self.traiter_pendant(1.0)
         nouvelle = self._memoire.pose(tag_id)
         if nouvelle is not None and nouvelle.distance_min <= self._course.preparation.close_view_m:
@@ -920,7 +920,6 @@ class NoeudCourse(Node):
             self.evenement('mesure', f'Tag {tag_id} pas revu de près ({recit.RESULTATS_APPROCHE.get(resultat, resultat)}) : '
                            f'meilleure vue à {nouvelle.distance_min:.1f} m, nouvelle tentative plus tard.',
                            tag=tag_id)
-        self._degager('quitter les abords du tag avant la suite')
 
     def _nouveau_dossier_preparation(self):
         """Archive la préparation précédente : la carte de mardi peut être fausse
