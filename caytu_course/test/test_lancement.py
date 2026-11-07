@@ -12,6 +12,7 @@ from caytu_course.lancement import (
     executable_slam,
     fichier_tags_match,
     parametres_slam,
+    pose_depart,
 )
 
 CONFIG_FOSA = Path(__file__).resolve().parents[2] / 'caytu_config' / 'config'
@@ -22,7 +23,7 @@ def robot(monkeypatch, tmp_path):
     monkeypatch.delenv('FOSA_CONFIG_OVERRIDE', raising=False)
     configuration = load_config(CONFIG_FOSA)
     preparation = replace(configuration.course.preparation, directory=str(tmp_path),
-                          carte_embarquee='')
+                          carte_embarquee='', map_start_pose=(0.0, 0.0, 0.0))
     return replace(configuration, course=replace(configuration.course, preparation=preparation))
 
 
@@ -107,3 +108,68 @@ def test_la_carte_livree_est_complete():
     base = CONFIG_FOSA / 'cartes' / 'arene_2026_11_06' / 'carte'
     for extension in ('.posegraph', '.data', '.yaml', '.pgm'):
         assert base.with_suffix(extension).is_file(), extension
+
+
+def test_la_carte_embarquee_relative_est_resolue(robot, monkeypatch):
+    """Depuis la racine du dépôt, `cartes/...` doit être résolu avant is_dir."""
+    monkeypatch.setenv('FOSA_CONFIG_DIR', str(CONFIG_FOSA))
+    preparation = replace(
+        robot.course.preparation, carte_embarquee='cartes/arene_2026_11_06')
+    configuration = replace(
+        robot, course=replace(robot.course, preparation=preparation))
+    assert carte_preparee(configuration) == (
+        CONFIG_FOSA / 'cartes' / 'arene_2026_11_06' / 'carte')
+
+
+def test_un_dossier_avec_un_seul_posegraph_est_accepte(robot, tmp_path):
+    dossier = tmp_path / 'arene'
+    dossier.mkdir()
+    for extension in ('.posegraph', '.data'):
+        (dossier / f'map{extension}').write_bytes(b'x')
+    preparation = replace(robot.course.preparation, directory=str(dossier))
+    configuration = replace(
+        robot, course=replace(robot.course, preparation=preparation))
+    assert carte_preparee(configuration) == dossier / 'map'
+
+
+def test_des_fichiers_de_carte_vides_sont_refuses(robot, tmp_path):
+    dossier = tmp_path / 'arene'
+    dossier.mkdir()
+    (dossier / 'carte.posegraph').write_bytes(b'')
+    (dossier / 'carte.data').write_bytes(b'x')
+    preparation = replace(robot.course.preparation, directory=str(dossier))
+    configuration = replace(
+        robot, course=replace(robot.course, preparation=preparation))
+    assert carte_preparee(configuration) is None
+
+
+def test_fosa_carte_relative_est_resolue_depuis_le_courant(
+        robot, tmp_path, monkeypatch):
+    dossier = tmp_path / 'arene'
+    dossier.mkdir()
+    for extension in ('.posegraph', '.data'):
+        (dossier / f'carte{extension}').write_bytes(b'x')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('FOSA_CARTE', 'arene')
+    assert carte_preparee(robot) == dossier / 'carte'
+
+
+def test_la_pose_de_depart_vient_de_la_configuration(robot):
+    preparation = replace(robot.course.preparation,
+                          map_start_pose=(1.0, -2.0, 0.5))
+    configuration = replace(
+        robot, course=replace(robot.course, preparation=preparation))
+    assert pose_depart(configuration) == [1.0, -2.0, 0.5]
+    _enregistrer_carte(configuration.course.preparation.directory)
+    assert parametres_slam(configuration)['map_start_pose'] == [1.0, -2.0, 0.5]
+
+
+def test_fosa_pose_depart_surcharge_la_configuration(robot, monkeypatch):
+    monkeypatch.setenv('FOSA_POSE_DEPART', '1,2,0.5')
+    assert pose_depart(robot) == [1.0, 2.0, 0.5]
+    monkeypatch.setenv('FOSA_POSE_DEPART', '1 2')
+    with pytest.raises(ValueError):
+        pose_depart(robot)
+    monkeypatch.setenv('FOSA_POSE_DEPART', 'x y z')
+    with pytest.raises(ValueError):
+        pose_depart(robot)

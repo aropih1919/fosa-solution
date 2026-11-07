@@ -13,6 +13,7 @@ from caytu_config.validation import (
     _as_int,
     _as_list,
     _as_number,
+    _as_numbers,
     _as_str,
     _check_keys,
     _choice,
@@ -38,6 +39,15 @@ def _as_int_list(value, path, minimum=0):
     return entiers
 
 
+def _as_pose(value, path):
+    """Pose [x, y, lacet] : exactement trois nombres."""
+    nombres = _as_numbers(value, path)
+    if len(nombres) != 3:
+        raise ConfigurationError(
+            f"{path} doit contenir exactement trois nombres (x, y, lacet).")
+    return nombres
+
+
 def _as_str_list(value, path):
     textes = tuple(
         _as_str(element, f"{path}[{index}]")
@@ -54,6 +64,7 @@ class ObstacleSourceConfig:
     name: str
     topic: str
     enabled: bool
+    required: bool
     obstacle_min_range: float
     obstacle_max_range: float
     raytrace_max_range: float
@@ -64,13 +75,15 @@ class ObstacleSourceConfig:
     def from_mapping(cls, data, path="navigation.obstacle_sources[]"):
         data = _section(data, path)
         _check_keys(data, (
-            "name", "topic", "enabled", "obstacle_min_range",
+            "name", "topic", "enabled", "required", "obstacle_min_range",
             "obstacle_max_range", "raytrace_max_range", "inf_is_valid",
             "global_costmap"), path)
         source = cls(
             name=_as_str(_get(data, "name", path), f"{path}.name"),
             topic=_as_str(_get(data, "topic", path), f"{path}.topic"),
             enabled=_as_bool(_get(data, "enabled", path), f"{path}.enabled"),
+            required=_as_bool(
+                _get(data, "required", path), f"{path}.required"),
             obstacle_min_range=_as_number(
                 _get(data, "obstacle_min_range", path),
                 f"{path}.obstacle_min_range", minimum=0.0),
@@ -332,6 +345,7 @@ class PreparationConfig:
 
     directory: str
     carte_embarquee: str
+    map_start_pose: tuple
     max_duration_sec: float
     close_view_m: float
     approach_attempts: int
@@ -339,8 +353,9 @@ class PreparationConfig:
     @classmethod
     def from_mapping(cls, data, path="course.preparation"):
         data = _section(data, path)
-        _check_keys(data, ("directory", "carte_embarquee", "max_duration_sec",
-                           "close_view_m", "approach_attempts"), path)
+        _check_keys(data, ("directory", "carte_embarquee", "map_start_pose",
+                           "max_duration_sec", "close_view_m",
+                           "approach_attempts"), path)
         return cls(
             directory=_as_str(_get(data, "directory", path), f"{path}.directory"),
             # Dossier ou préfixe de carte livré avec la solution. Vide : aucune
@@ -348,6 +363,9 @@ class PreparationConfig:
             carte_embarquee=_as_str(
                 _get(data, "carte_embarquee", path, ""),
                 f"{path}.carte_embarquee", allow_empty=True),
+            # Position [x, y, lacet] où le robot est posé au début de la carte.
+            map_start_pose=_as_pose(
+                _get(data, "map_start_pose", path), f"{path}.map_start_pose"),
             max_duration_sec=_as_number(
                 _get(data, "max_duration_sec", path), f"{path}.max_duration_sec",
                 positive=True),
@@ -388,6 +406,7 @@ _NOMBRES_COURSE = (
     ("search_spin_speed_rps", {"positive": True, "maximum": 1.0}),
     ("search_max_radius_m", {"positive": True}),
     ("unstuck_distance_m", {"positive": True, "maximum": 1.0}),
+    ("referee_confirmation_sec", {"positive": True, "maximum": 10.0}),
 )
 _TEXTES_COURSE = ("order_topic", "start_topic", "state_topic", "events_topic",
                   "map_topic", "motor_start_service", "motor_stop_service")
@@ -435,6 +454,8 @@ class CourseConfig:
     search_max_radius_m: float
     unstuck_distance_m: float
     unstuck_after_failures: int
+    max_unstuck_attempts: int
+    referee_confirmation_sec: float
     alignment: AlignmentConfig
     strategy: StrategyConfig
     preparation: PreparationConfig
@@ -444,7 +465,8 @@ class CourseConfig:
         data = _section(data, path)
         _check_keys(data, (
             "tag_ids", "order_type", "referee", "stable_cycles", "alignment",
-            "strategy", "preparation", "unstuck_after_failures")
+            "strategy", "preparation", "unstuck_after_failures",
+            "max_unstuck_attempts")
             + _TEXTES_COURSE
             + tuple(cle for cle, _ in _NOMBRES_COURSE), path)
         valeurs = {
@@ -465,6 +487,9 @@ class CourseConfig:
             unstuck_after_failures=_as_int(
                 _get(data, "unstuck_after_failures", path),
                 f"{path}.unstuck_after_failures", 1),
+            max_unstuck_attempts=_as_int(
+                _get(data, "max_unstuck_attempts", path),
+                f"{path}.max_unstuck_attempts", 1),
             alignment=AlignmentConfig.from_mapping(
                 _get(data, "alignment", path), f"{path}.alignment"),
             strategy=StrategyConfig.from_mapping(

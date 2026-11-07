@@ -86,6 +86,9 @@ def _as_obstacle_sources(value, path):
         for index, source in enumerate(_as_list(value, path)))
     if not any(source.enabled for source in sources):
         raise ConfigurationError(f"{path}: au moins une source doit être active.")
+    if not any(source.enabled and source.required for source in sources):
+        raise ConfigurationError(
+            f"{path}: au moins une source obligatoire doit être active.")
     noms = [source.name for source in sources]
     if len(set(noms)) != len(noms):
         raise ConfigurationError(f"{path}: noms de sources en double.")
@@ -103,16 +106,21 @@ class ConfigurationSecurite:
     pas_sec: float
     periode_sec: float
     marge_m: float
+    penetration_tolerance_m: float
 
     @classmethod
     def from_mapping(cls, donnees, chemin="navigation.securite"):
         donnees = _section(donnees, chemin)
         nombres = ("age_scan_max_sec", "age_commande_max_sec", "horizon_sec",
                    "pas_sec", "periode_sec", "marge_m")
-        _check_keys(donnees, ("topic_entree",) + nombres, chemin)
+        _check_keys(donnees, ("topic_entree", "penetration_tolerance_m")
+                    + nombres, chemin)
         securite = cls(
             topic_entree=_as_str(_get(donnees, "topic_entree", chemin),
                                 f"{chemin}.topic_entree"),
+            penetration_tolerance_m=_as_number(
+                _get(donnees, "penetration_tolerance_m", chemin),
+                f"{chemin}.penetration_tolerance_m", minimum=0.0),
             **{cle: _as_number(_get(donnees, cle, chemin), f"{chemin}.{cle}",
                                positive=True) for cle in nombres})
         if securite.pas_sec > securite.horizon_sec:

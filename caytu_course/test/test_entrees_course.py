@@ -1,5 +1,6 @@
 """Entrées du nœud de course, avec un faux nœud ROS (sans rclpy.init)."""
 
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -85,7 +86,8 @@ def _configuration(order_type='string', listen_start=True):
         perception=SimpleNamespace(
             tags_topic='/tags',
             apriltag=SimpleNamespace(detection_image_topic='/tags/image')),
-        navigation=SimpleNamespace(scan_topic='/scan', mode='carte'))
+        navigation=SimpleNamespace(
+            scan_topic='/scan', mode='carte', odom_frame='odom'))
 
 
 class _DepartArbitre:
@@ -97,18 +99,21 @@ class _DepartArbitre:
 class _StatutArbitre:
     IDLE, ARMED, RUNNING, FINISHED, TIMED_OUT, TERMINATED = range(6)
 
-    def __init__(self, state):
+    def __init__(self, state, tags_reported=(), tag_order=()):
         self.state = state
+        self.tags_reported = list(tags_reported)
+        self.tag_order = list(tag_order)
 
 
-def _entrees(attente, monkeypatch=None, **options):
+def _entrees(attente, monkeypatch=None, memoire_tf=None, **options):
     if monkeypatch is not None:
         types = {'parc_msgs/msg/StartSignal': _DepartArbitre}
         monkeypatch.setattr(entrees_course, 'charger_type', types.get)
     noeud = _FauxNoeud()
+    memoire_odom = MemoireTags(4.0, repere='odom')
     entrees = EntreesCourse(
-        noeud, _configuration(**options), MemoireTags(4.0), None,
-        lambda: attente['valeur'])
+        noeud, _configuration(**options), MemoireTags(4.0), memoire_tf,
+        lambda: attente['valeur'], memoire_odom=memoire_odom)
     return noeud, entrees
 
 
@@ -219,12 +224,55 @@ def test_un_etat_terminal_de_l_arbitre_arrete_la_course():
     entrees._recevoir_statut_arbitre(_StatutArbitre(_StatutArbitre.TERMINATED))
     assert entrees.arbitre_termine is True
     assert entrees.motif_arbitre == 'arbitre_termine'
+    assert entrees.arbitre_interrompt_visite
+
+
+def test_une_fin_normale_de_l_arbitre_est_distinguée_d_un_arret():
+    _, entrees = _entrees({'valeur': False})
+    entrees._recevoir_statut_arbitre(_StatutArbitre(_StatutArbitre.FINISHED))
+    assert entrees.arbitre_termine
+    assert entrees.motif_arbitre == 'arbitre_fini'
+    assert not entrees.arbitre_interrompt_visite
 
 
 def test_une_ancienne_fin_ne_termine_pas_le_prochain_match():
     _, entrees = _entrees({'valeur': True})
     entrees._recevoir_statut_arbitre(_StatutArbitre(_StatutArbitre.FINISHED))
     assert not entrees.arbitre_termine
+
+
+def test_les_visites_accusees_par_l_arbitre_sont_suivies():
+    _, entrees = _entrees({'valeur': False})
+    entrees._recevoir_statut_arbitre(_StatutArbitre(_StatutArbitre.RUNNING))
+    assert entrees.tags_reportes == ()
+    assert not entrees.visite_confirmee(7)
+    entrees._recevoir_statut_arbitre(_StatutArbitre(
+        _StatutArbitre.RUNNING, tags_reported=(7,)))
+    assert entrees.tags_reportes == (7,)
+    assert entrees.visite_confirmee(7)
+    assert not entrees.visite_confirmee(1)
+    entrees._recevoir_statut_arbitre(_StatutArbitre(
+        _StatutArbitre.RUNNING, tags_reported=(7, 1)))
+    assert entrees.visite_confirmee(1)
+
+
+def test_l_ordre_de_l_arbitre_est_memorise_sans_ecraser_l_ordre_vide():
+    _, entrees = _entrees({'valeur': False})
+    entrees._recevoir_statut_arbitre(_StatutArbitre(
+        _StatutArbitre.RUNNING, tag_order=(4, 1, 9, 7)))
+    assert entrees.ordre_arbitre == (4, 1, 9, 7)
+    entrees._recevoir_statut_arbitre(_StatutArbitre(_StatutArbitre.RUNNING))
+    assert entrees.ordre_arbitre == (4, 1, 9, 7)
+
+
+def test_un_accuse_de_la_course_precedente_est_efface_au_depart():
+    attente = {'valeur': True}
+    noeud, entrees = _entrees(attente)
+    entrees._recevoir_statut_arbitre(_StatutArbitre(
+        _StatutArbitre.FINISHED, tags_reported=(7, 1)))
+    assert entrees.visite_confirmee(7)
+    _publier(noeud, '/depart', 'commande')
+    assert not entrees.visite_confirmee(7)
 
 
 def test_une_image_d_un_autre_tag_ou_perimee_n_est_pas_une_preuve():
@@ -262,3 +310,55 @@ def test_costmap_roulante_ne_double_pas_l_inflation():
     grille.info.width, grille.info.height, grille.info.resolution = 5, 1, 0.05
     entrees._recevoir_carte(grille)
     assert entrees.grille().donnees == [-1, 0, 0, 0, 100]
+
+
+class _FauxTF:
+    """TF odom → base_link fixe, pour tester la mémoire parallèle."""
+
+    def __init__(self, x=0.0, y=0.0, lacet=0.0):
+        self._x, self._y, self._lacet = x, y, lacet
+
+    def lookup_transform(self, cible, source, instant):
+        return SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=self._x, y=self._y, z=0.0),
+            rotation=SimpleNamespace(
+                x=0.0, y=0.0,
+                z=math.sin(self._lacet / 2.0),
+                w=math.cos(self._lacet / 2.0))))
+
+
+def test_une_detection_est_aussi_memorisee_en_odom():
+    """La TF odom → base_link replace la vue robot dans le repère odom."""
+    import math
+    from caytu_interfaces.msg import TagDetection, TagDetectionArray
+    memoire_tf = _FauxTF(x=1.0, y=2.0, lacet=math.pi / 2.0)
+    noeud, entrees = _entrees({'valeur': True}, memoire_tf=memoire_tf)
+    detection = TagDetection(tag_id=7, has_pose_robot=True, distance_m=0.8)
+    detection.header.stamp.sec = 100
+    detection.pose_robot.pose.position.x = 0.8
+    demi = math.sqrt(0.5)
+    detection.pose_robot.pose.orientation.y = demi
+    detection.pose_robot.pose.orientation.w = demi
+    for rappel in noeud.abonnements['/tags']:
+        rappel(TagDetectionArray(detections=[detection]))
+
+    pose = entrees._memoire_odom.pose(7)
+    assert (pose.x, pose.y) == pytest.approx((1.0, 2.8))
+    assert pose.cap == pytest.approx(math.pi / 2.0)
+    assert entrees._memoire_odom.repere() == 'odom'
+
+
+def test_sans_tf_odom_la_detection_robot_reste_utilisable():
+    import math
+    from caytu_interfaces.msg import TagDetection, TagDetectionArray
+    noeud, entrees = _entrees({'valeur': True})
+    detection = TagDetection(tag_id=4, has_pose_robot=True, distance_m=0.5)
+    detection.header.stamp.sec = 100
+    detection.pose_robot.pose.position.x = 0.5
+    demi = math.sqrt(0.5)
+    detection.pose_robot.pose.orientation.y = demi
+    detection.pose_robot.pose.orientation.w = demi
+    for rappel in noeud.abonnements['/tags']:
+        rappel(TagDetectionArray(detections=[detection]))
+    assert entrees.detection_recente(4, 0.6) is not None
+    assert entrees._memoire_odom.ids() == []

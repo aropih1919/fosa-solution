@@ -42,6 +42,19 @@ ETATS_TERMINAUX_ARBITRE = (
 )
 
 
+def _distance_ponderee(detection):
+    """Distance de pondération : une pose moins fiable compte plus loin.
+
+    Le détecteur met 1,0 pour une pose exacte et 0,5 pour une TF approchée.
+    Une confiance absente (0, valeur par défaut d'un message) ne doit pas
+    faire rejeter la détection : elle est traitée comme exacte.
+    """
+    confiance = detection.confidence
+    if not math.isfinite(confiance) or confiance <= 0.0:
+        confiance = 1.0
+    return detection.distance_m / confiance
+
+
 @dataclass(frozen=True)
 class DetectionRobot:
     """Dernière vue d'un tag dans le repère du robot."""
@@ -60,20 +73,29 @@ def _qos(fiabilite, durabilite, profondeur):
 class EntreesCourse:
 
     def __init__(self, node, configuration, memoire, memoire_tf, attente_depart,
-                 ecouter_arbitre=True):
-        """attente_depart() : vrai tant que la course n'a pas commencé."""
+                 ecouter_arbitre=True, memoire_odom=None):
+        """attente_depart() : vrai tant que la course n'a pas commencé.
+
+        `memoire_odom` reçoit les mêmes détections dans le repère `odom` :
+        contrairement à `map`, ce repère n'est pas déplacé par les corrections
+        SLAM, donc l'export final reste cohérent avec la carte enregistrée.
+        """
         self._node = node
         self._attente_depart = attente_depart
         self._course = configuration.course
         self._memoire = memoire
+        self._memoire_odom = memoire_odom
         self._memoire_tf = memoire_tf
         self._repere_robot = configuration.system.base_frame
+        self._repere_odom = configuration.navigation.odom_frame
         self._sans_carte = configuration.navigation.mode == 'sans_carte'
         self.ordre = None
         self.source_depart = None
         self.mot_entendu = ''
         self.depart_de_l_arbitre = False
         self.statut_arbitre = None
+        self.tags_reportes = ()       # accusés `tags_reported` de l'arbitre
+        self.ordre_arbitre = ()
         self.arbitre_termine = False
         self.arbitre_interrompt_visite = False
         self.motif_arbitre = ''
@@ -143,12 +165,13 @@ class EntreesCourse:
                 # Volatile : un ancien départ resté en mémoire ne relance rien.
                 self._node.create_subscription(
                     classe, arbitre.start_topic, self._recevoir_depart_arbitre, 10)
-        # Best effort : compatible avec tout éditeur, simple suivi dans le journal.
+        # QoS du protocole officiel : reliable + transient local, profondeur 1.
+        # L'arbitre republie son état à 2 Hz ; un abonné tardif reçoit le dernier.
         self._abonner_quand_publie(
             arbitre.run_status_topic,
             lambda classe: self._node.create_subscription(
                 classe, arbitre.run_status_topic, self._recevoir_statut_arbitre,
-                _qos(ReliabilityPolicy.BEST_EFFORT, DurabilityPolicy.VOLATILE, 10)))
+                _qos(ReliabilityPolicy.RELIABLE, DurabilityPolicy.TRANSIENT_LOCAL, 1)))
 
     # ------------------------------------------------------------ ordre/départ
     def _recevoir_ordre(self, message):
@@ -198,6 +221,9 @@ class EntreesCourse:
         self.source_depart = source
         self.mot_entendu = entendu
         self.depart_de_l_arbitre = de_l_arbitre
+        # Un accusé de la course précédente (RunStatus transient local) ne doit
+        # pas confirmer une visite de la nouvelle course.
+        self.tags_reportes = ()
         origine = ' via l\'arbitre' if de_l_arbitre else ''
         self._node.get_logger().info(f'DÉPART reçu ({source}{origine}).')
 
@@ -206,6 +232,14 @@ class EntreesCourse:
         if texte != self.statut_arbitre:
             self.statut_arbitre = texte
             self._node.get_logger().info(f'Statut de l\'arbitre : {texte[:300]}')
+        reportes = tuple(getattr(message, 'tags_reported', ()))
+        if reportes != self.tags_reportes:
+            self.tags_reportes = reportes
+            self._node.get_logger().info(
+                f'Visites reçues par l’arbitre : {list(reportes)}.')
+        ordre = tuple(getattr(message, 'tag_order', ()))
+        if ordre and ordre != self.ordre_arbitre:
+            self.ordre_arbitre = ordre
         etat = getattr(message, 'state', None)
         # La dernière course peut être encore FINISHED quand nous démarrons.
         # Elle ne doit pas terminer la nouvelle course avant son départ.
@@ -216,10 +250,17 @@ class EntreesCourse:
                 self.arbitre_interrompt_visite = nom in ('TIMED_OUT', 'TERMINATED')
                 if not self.arbitre_termine:
                     self.arbitre_termine = True
-                    self.motif_arbitre = 'arbitre_termine'
+                    # FINISHED est la fin normale (4 tags ou /parc/finish) ;
+                    # TIMED_OUT et TERMINATED sont des arrêts imposés.
+                    self.motif_arbitre = (
+                        'arbitre_fini' if nom == 'FINISHED' else 'arbitre_termine')
                     self._node.get_logger().warning(
                         f'ARBITRE : état {nom} — arrêt de la course.')
                 return
+
+    def visite_confirmee(self, tag_id):
+        """Vrai si l'arbitre a accusé réception de ce tag (`tags_reported`)."""
+        return int(tag_id) in self.tags_reportes
 
     # -------------------------------------------------------------- détections
     def _recevoir_detections(self, message):
@@ -235,7 +276,7 @@ class EntreesCourse:
                     # lointaine, donc moins que les vues exactes.
                     self._memoire.ajouter(
                         detection.tag_id, pose.position.x, pose.position.y, cap,
-                        detection.distance_m / max(detection.confidence, 0.1))
+                        _distance_ponderee(detection))
             if detection.has_pose_robot:
                 pose = detection.pose_robot.pose
                 cap = cap_normale(
@@ -245,8 +286,41 @@ class EntreesCourse:
                     self._detections_robot[detection.tag_id] = DetectionRobot(
                         pose.position.x, pose.position.y, cap,
                         detection.distance_m, maintenant)
+                    self._ajouter_odom(
+                        detection, pose.position.x, pose.position.y, cap)
             self._stamps_tag.setdefault(detection.tag_id, deque(maxlen=IMAGES_GARDEES)).append(
                 _cle_image(detection.header))
+
+    def _ajouter_odom(self, detection, x, y, cap):
+        """Mémorise la détection dans `odom`, insensible aux corrections SLAM."""
+        if self._memoire_odom is None or self._memoire_tf is None:
+            return
+        try:
+            transformation = self._memoire_tf.lookup_transform(
+                self._repere_odom, self._repere_robot,
+                Time.from_msg(detection.header.stamp))
+        except TransformException:
+            try:
+                transformation = self._memoire_tf.lookup_transform(
+                    self._repere_odom, self._repere_robot, Time())
+            except TransformException:
+                self._node.get_logger().warning(
+                    f'TF {self._repere_odom} → {self._repere_robot} '
+                    'indisponible : détection non mémorisée en odom.',
+                    throttle_duration_sec=5.0)
+                return
+        t = transformation.transform.translation
+        q = transformation.transform.rotation
+        lacet = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                           1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        cosinus, sinus = math.cos(lacet), math.sin(lacet)
+        cap_odom = math.atan2(math.sin(cap + lacet), math.cos(cap + lacet))
+        self._memoire_odom.ajouter(
+            detection.tag_id,
+            t.x + cosinus * x - sinus * y,
+            t.y + sinus * x + cosinus * y,
+            cap_odom,
+            _distance_ponderee(detection))
 
     def _maintenant(self):
         """Horloge ROS : Gazebo peut tourner bien plus lentement que le temps réel."""

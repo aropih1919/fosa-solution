@@ -13,6 +13,11 @@ def libre(points, v, w):
     return trajectoire_libre(points, v, w, EMPREINTE, 0.02, 1.0, 0.05)
 
 
+def libre_avec_tolerance(points, v, w, tolerance=0.02):
+    return trajectoire_libre(
+        points, v, w, EMPREINTE, 0.08, 1.0, 0.05, tolerance)
+
+
 @pytest.mark.parametrize('points,v,w', [
     ([(0.4, 0.0)], 0.3, 0.0),
     ([(-0.45, 0.0)], -0.2, 0.0),
@@ -34,3 +39,29 @@ def test_capteur_absent_perime_ou_futur(instants):
 
 def test_tous_les_capteurs_doivent_etre_frais():
     assert donnees_fraiches([9.5, 9.8, 10.0], 10.0, 0.6)
+
+
+def test_un_obstacle_lateral_n_immobilise_plus():
+    """Déjà dans la marge : avance, recul et rotation lente restent possibles."""
+    assert libre_avec_tolerance([(0.0, 0.30)], 0.1, 0.0)
+    assert libre_avec_tolerance([(0.0, 0.30)], -0.1, 0.0)
+    assert libre_avec_tolerance([(0.0, 0.30)], 0.0, 0.2)
+    # Une rotation rapide aggraverait trop la pénétration : elle est refusée.
+    assert not libre_avec_tolerance([(0.0, 0.30)], 0.0, 0.8)
+
+
+def test_un_obstacle_devant_bloque_l_avance_mais_autorise_le_recul():
+    points = [(0.35, 0.0)]
+    assert not libre_avec_tolerance(points, 0.1, 0.0)
+    assert libre_avec_tolerance(points, -0.1, 0.0)
+
+
+def test_un_obstacle_derriere_bloque_le_recul_mais_autorise_l_avance():
+    points = [(-0.40, 0.0)]
+    assert not libre_avec_tolerance(points, -0.1, 0.0)
+    assert libre_avec_tolerance(points, 0.1, 0.0)
+
+
+def test_la_tolerance_borne_l_aggravation():
+    """Sans tolérance, la rotation lente elle-même est refusée."""
+    assert not libre_avec_tolerance([(0.0, 0.30)], 0.0, 0.2, tolerance=0.0)

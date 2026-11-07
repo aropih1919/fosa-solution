@@ -16,10 +16,12 @@ aide() {
     cat <<'AIDE'
 Usage : ./deployer_robot.sh MODE
   --archive [fichier.zip]  sources Fosa seules + manifeste SHA-256 (sans robot)
-  --envoyer ROBOT_IP      transfère, compile dans une nouvelle livraison, active actuel
+  --envoyer ROBOT_IP      transfère, compile, active actuel (prépare la voix si absente)
   --preparer              télécharge Vosk ARM/Python et son modèle depuis le PC
   --installer            sur le Jetson : vérifie les dépendances, compile, installe la voix préparée
   --help                 affiche cette aide
+
+FOSA_SANS_VOIX=1 avec --envoyer déploie sans préparer la voix (départ par commande).
 
 Sur le robot : ~/teams/fosa/actuel/src/fosa-solution/run.sh
 Les anciennes livraisons restent dans ~/teams/fosa/livraisons ; precedent pointe sur l'ancienne.
@@ -119,6 +121,17 @@ envoyer() {
     [[ "$hote" =~ ^[a-zA-Z0-9][a-zA-Z0-9.:-]*$ && $# == 1 ]] || {
         echo "Usage : --envoyer ROBOT_IP" >&2; return 2;
     }
+    # La voix manquante est préparée sur le PC avant l'archive. Un déploiement
+    # sans voix reste possible avec FOSA_SANS_VOIX=1 (départ par commande).
+    if [[ "${FOSA_SANS_VOIX:-0}" != 1 ]] \
+            && { [[ ! -f "$LIVRAISON/$MODELE.zip" ]] \
+                 || ! compgen -G "$LIVRAISON/roues/*.whl" >/dev/null; }; then
+        echo "Voix incomplète : préparation automatique (Vosk ARM + modèle)..."
+        if ! preparer_voix; then
+            echo "Préparation de la voix impossible ; déploiement sans voix." >&2
+            echo "Relancez ./deployer_robot.sh --preparer, ou utilisez FOSA_SANS_VOIX=1 pour ignorer." >&2
+        fi
+    fi
     archiver "$archive"
     empreinte="$(sha256sum "$archive" | cut -d ' ' -f 1)"
     ssh "$UTILISATEUR@$hote" "mkdir -p \"\$HOME/$DOSSIER_ROBOT/entree\""

@@ -45,6 +45,41 @@ def test_le_resume_explique_chaque_tag_non_visite():
     assert lignes[4].startswith('Bilan : 2 tag(s) sur 4, 50 points')
 
 
+def test_le_resume_signale_les_visites_confirmees_par_l_arbitre():
+    lignes = resume_fin(
+        (7, 1, 9, 4), [7, 1, 9, 4], {}, confirmees=[7, 1, 9, 4],
+        motif='terminee')
+    assert '(confirmée)' in lignes[0]
+    assert lignes[4].startswith(
+        'Bilan : 4 tag(s) sur 4, 100 points espérés, '
+        '4 visite(s) confirmée(s) par l’arbitre')
+    assert 'toutes les visites sont confirmées' in lignes[5]
+
+
+def test_le_resume_distingue_une_visite_non_confirmee():
+    lignes = resume_fin((7, 1), [7, 1], {}, confirmees=[7], motif='terminee')
+    assert '(confirmée)' in lignes[0]
+    assert '(non confirmée)' in lignes[1]
+    assert '1 visite(s) confirmée(s)' in lignes[2]
+    assert 'n’a pas confirmé toutes les visites' in lignes[3]
+
+
+def test_un_resume_sans_suivi_de_l_arbitre_reste_sobre():
+    lignes = resume_fin((7, 1), [7, 1], {}, motif='terminee')
+    assert '(confirmée)' not in lignes[0]
+    assert 'arbitre' not in lignes[2]
+    assert 'tous les tags de l’ordre sont visités' in lignes[3]
+
+
+def test_le_resume_explique_un_temps_ecoule_ou_un_arret_arbitre():
+    temps = resume_fin((7, 1), [7], {}, confirmees=[7], motif='temps_ecoule')
+    assert 'temps est écoulé' in temps[-1]
+    arbitre = resume_fin((7, 1), [7], {}, confirmees=[], motif='arbitre_termine')
+    assert 'interrompue par l’arbitre' in arbitre[-1]
+    fin = resume_fin((7, 1), [7], {}, confirmees=[7], motif='arbitre_fini')
+    assert 'terminée par l’arbitre avant tous les tags' in fin[-1]
+
+
 def test_les_autres_phrases():
     assert 'voix' in phrase_depart('voix', 'allez') and 'allez' in phrase_depart('voix', 'allez')
     assert 'commande' in phrase_depart('commande', '')

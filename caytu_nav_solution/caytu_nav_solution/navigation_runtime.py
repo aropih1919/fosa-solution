@@ -13,7 +13,9 @@ import time
 from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration
 from caytu_nav_solution.nav_math import quaternion_depuis_lacet
+from caytu_nav_solution.vie_nav2 import etats_inactifs, noeuds_attendus
 from geometry_msgs.msg import PoseStamped
+from lifecycle_msgs.srv import GetState
 from nav2_msgs.action import NavigateToPose, Spin
 from nav2_msgs.srv import ClearEntireCostmap
 import rclpy
@@ -100,6 +102,11 @@ class NavigateurNav2:
 
         self._client = ActionClient(node, NavigateToPose, 'navigate_to_pose')
         self._client_rotation = ActionClient(node, Spin, 'spin')
+        # Nav2 peut avoir ses serveurs d'action prêts alors que ses nœuds
+        # lifecycle sont encore inactifs : vérifier l'état avant le premier but.
+        self._lifecycle_clients = {
+            nom: node.create_client(GetState, f'/{nom}/get_state')
+            for nom in noeuds_attendus(navigation.mode)}
         self._clear_clients = [
             node.create_client(
                 ClearEntireCostmap,
@@ -123,6 +130,30 @@ class NavigateurNav2:
     def serveur_pret(self):
         return self._client.server_is_ready()
 
+    def _etats_lifecycle(self):
+        """États des nœuds Nav2, ou None si un service ne répond pas encore."""
+        if not self._lifecycle_clients:
+            return {}
+        futures = {}
+        for nom, client in self._lifecycle_clients.items():
+            if not client.service_is_ready():
+                return None
+            futures[nom] = client.call_async(GetState.Request())
+        fin = time.monotonic() + 0.5
+        while (self._is_ok()
+               and any(not future.done() for future in futures.values())
+               and time.monotonic() < fin):
+            self._spin(0.05)
+        etats = {}
+        for nom, future in futures.items():
+            try:
+                if not future.done() or future.result() is None:
+                    return None
+                etats[nom] = future.result().current_state.id
+            except Exception:       # service disparu pendant l'appel
+                return None
+        return etats
+
     def attendre_pret(self, timeout_sec):
         """Attend que Nav2 accepte des buts et que le robot soit localisé."""
         debut = time.monotonic()
@@ -133,10 +164,15 @@ class NavigateurNav2:
             serveur_pret = self.serveur_pret()
             rotation_prete = self._client_rotation.server_is_ready()
             robot_localise = self._pose_robot() is not None
+            etats = self._etats_lifecycle()
+            inactifs = (etats_inactifs(etats, self._navigation.mode)
+                        if etats is not None else ())
+            lifecycle_pret = etats is not None and not inactifs
 
-            if serveur_pret and rotation_prete and robot_localise:
+            if (serveur_pret and rotation_prete and robot_localise
+                    and lifecycle_pret):
                 self._node.get_logger().info(
-                    f'Nav2 et rotation prêts, robot localisé après '
+                    f'Nav2, lifecycle et rotation prêts, robot localisé après '
                     f'{time.monotonic() - debut:.1f} s réelles.')
                 return True
 
@@ -145,15 +181,23 @@ class NavigateurNav2:
                     or time.monotonic() - debut > timeout_sec):
                 self._node.get_logger().error(
                     "Nav2 n'est pas devenu disponible à temps.")
+                if inactifs:
+                    self._node.get_logger().error(
+                        'Nœuds lifecycle non actifs : '
+                        + ', '.join(inactifs) + '.')
                 return False
 
             if time.monotonic() - dernier_log > 5.0:
                 dernier_log = time.monotonic()
-                self._node.get_logger().info(
+                details = (
                     f"Attente de Nav2 (serveur d'action : "
                     f'{"oui" if serveur_pret else "non"}, '
                     f'spin : {"oui" if rotation_prete else "non"}, '
-                    f'localisation : {"oui" if robot_localise else "non"})...')
+                    f'localisation : {"oui" if robot_localise else "non"}, '
+                    f'lifecycle : {"oui" if lifecycle_pret else "non"}')
+                if inactifs:
+                    details += f'; inactifs : {", ".join(inactifs)}'
+                self._node.get_logger().info(details + ')...')
 
         return False
 

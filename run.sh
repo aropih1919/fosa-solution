@@ -23,7 +23,7 @@ Modes (robot réel par défaut) :
                 sans préparation valide, bascule automatiquement en sans carte
   course-sans-carte  match autonome en odom, sans carte enregistrée ni SLAM
   suivi         afficher en phrases ce que fait le robot (tags, plans, sauts…)
-  arreter       arrêter la préparation, la course et l'ancienne session tmux
+  arreter       arrêter la préparation, la course et la session Fosa en cours
   depart        donner le départ par commande (la course doit attendre)
   ordre-test O  publier un ordre de test, ex. "7,1,9,4" (ESSAIS SEULEMENT)
   test O        alias de ordre-test : publie l'ordre, ne lance pas la course
@@ -34,6 +34,10 @@ Modes (robot réel par défaut) :
   diagnostic-dds    vérifier les imports et la création d'un nœud ROS
   mesure-rotation   deux tours lents sur place : odométrie contre gyromètre
                     et lidar (robot dégagé, course arrêtée, ~1 min)
+
+Un lancement remplace automatiquement la session Fosa précédente.
+Après le lancement, Ctrl+C arrête la session ; fermer le terminal la laisse
+tourner en arrière-plan (./run.sh arreter depuis un autre terminal).
 
 Profils : FOSA_PROFIL=simulation pour Gazebo (sinon robot réel).
 Carte : celle de la livraison, ou FOSA_CARTE=/chemin/carte pour forcer.
@@ -121,7 +125,8 @@ arreter_ancienne_session() {
 
 signaler_course_ancienne() {
     local lignes
-    lignes="$(pgrep -af '[c]aytu_course/course_parc|[c]ourse\.launch\.py' || true)"
+    lignes="$(python3 "$DOSSIER_SCRIPT/outils/processus.py" lister \
+        --etat "$ETAT_SESSION" "${PORTEES_ARGUMENT[@]}" 2>/dev/null || true)"
     [[ -z "$lignes" ]] && return 0
     echo "Des nœuds Fosa tournent encore :" >&2
     printf '%s\n' "$lignes" | sed 's/^/  /' >&2
@@ -255,22 +260,62 @@ verifier_arbitre() {
     fi
 }
 
+# Surveille la session au premier plan. Ctrl+C l'arrête réellement ; une
+# fermeture de terminal (SIGHUP) la laisse continuer en arrière-plan.
+arreter_session_terminal() {
+    echo "Ctrl+C : arrêt de la session Fosa..." >&2
+    if ! python3 "$DOSSIER_SCRIPT/outils/processus.py" arreter \
+            --etat "$ETAT_SESSION" "${PORTEES_ARGUMENT[@]}"; then
+        echo "Arrêt incomplet : relancez ./run.sh arreter." >&2
+        exit 1
+    fi
+    annuler_vitesse
+    echo "Session arrêtée."
+    exit 0
+}
+
+surveiller_session() {
+    local journal="$1" jeton="$2" interrompu=0
+    JOURNAL_SESSION="$journal"
+    trap 'interrompu=1' INT
+    trap 'echo "Terminal fermé : la session Fosa continue en arrière-plan." >&2
+          echo "Arrêt : ./run.sh arreter ; journal : $JOURNAL_SESSION" >&2
+          exit 0' HUP
+    # Le jeton empêche un ancien terminal de surveiller une nouvelle session.
+    while python3 "$DOSSIER_SCRIPT/outils/processus.py" actif \
+            --etat "$ETAT_SESSION" --jeton "$jeton" >/dev/null 2>&1; do
+        if ((interrompu)); then arreter_session_terminal; fi
+        sleep 1 || true
+    done
+    # Le SIGINT a pu interrompre `actif` avant le tour de boucle suivant.
+    if ((interrompu)); then arreter_session_terminal; fi
+    # Fin naturelle ou arrêt demandé depuis un autre terminal.
+    if [[ -f "$ETAT_SESSION" ]]; then
+        python3 "$DOSSIER_SCRIPT/outils/processus.py" arreter \
+            --etat "$ETAT_SESSION" "${PORTEES_ARGUMENT[@]}" >/dev/null 2>&1 || true
+    fi
+    echo "Session Fosa terminée."
+}
+
+jeton_session() {
+    python3 -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("jeton", ""))
+except (OSError, ValueError):
+    print("")' "$ETAT_SESSION"
+}
+
 # Lance la course (match ou préparation) détachée de la session SSH : une
 # coupure Wi-Fi ne l'arrête pas. Journal conservé dans FOSA_DONNEES.
 lancer_detache() {
     local nom="$1"; shift
-    local donnees="$FOSA_DONNEES" journal
-    if python3 "$DOSSIER_SCRIPT/outils/processus.py" actif --etat "$ETAT_SESSION" >/dev/null 2>&1; then
-        echo "Une session Fosa est déjà active : ./run.sh arreter, puis relancez." >&2
-        echo "Si vous êtes simplement reconnecté après une coupure SSH, utilisez ./run.sh suivi." >&2
-        exit 1
-    fi
+    local donnees="$FOSA_DONNEES" journal jeton
     arreter_ancienne_session
-    # Nœuds d'une ancienne version ou d'une session sans état : les arrêter
-    # automatiquement plutôt que de laisser deux sources de commandes.
+    # Un nouveau lancement remplace toute session ou tout nœud Fosa déjà en
+    # cours : une seule source de commandes doit rester active.
     if python3 "$DOSSIER_SCRIPT/outils/processus.py" actif \
             --etat "$ETAT_SESSION" "${PORTEES_ARGUMENT[@]}" >/dev/null 2>&1; then
-        echo "Anciens nœuds Fosa détectés : arrêt automatique avant le lancement."
+        echo "Session Fosa déjà en cours : arrêt avant le nouveau lancement."
         python3 "$DOSSIER_SCRIPT/outils/processus.py" arreter \
             --etat "$ETAT_SESSION" "${PORTEES_ARGUMENT[@]}" || exit 1
         annuler_vitesse
@@ -281,7 +326,10 @@ lancer_detache() {
     echo "Suivi lisible dans un autre terminal : ./run.sh suivi"
     python3 "$DOSSIER_SCRIPT/outils/processus.py" lancer --etat "$ETAT_SESSION" \
         --journal "$journal" "${PORTEES_ARGUMENT[@]}" -- "${interne[@]}"
-    echo "Lancement détaché de SSH. Arrêt : ./run.sh arreter ; journal : $journal"
+    jeton="$(jeton_session)"
+    echo "Session au premier plan : Ctrl+C l'arrête ; fermer le terminal la laisse tourner."
+    echo "Arrêt depuis un autre terminal : ./run.sh arreter ; journal : $journal"
+    surveiller_session "$journal" "$jeton"
 }
 
 verifier_paquet() {
@@ -292,10 +340,54 @@ verifier_paquet() {
     fi
 }
 
+verifier_voix() {
+    # Préflight non bloquant : le départ par commande reste toujours possible.
+    python3 - <<'PY'
+from pathlib import Path
+
+from caytu_config import load_config
+from caytu_config.loader import config_directory
+
+voix = load_config().start_word
+if not voix.enabled:
+    print('Voix : désactivée dans la configuration ; départ par commande uniquement.')
+    raise SystemExit(0)
+try:
+    import vosk  # noqa: F401
+    vosk_pret = True
+except ImportError:
+    vosk_pret = False
+chemin = Path(voix.model_path).expanduser()
+if not chemin.is_absolute():
+    chemin = config_directory() / chemin
+modele_pret = chemin.is_dir()
+try:
+    from rosidl_runtime_py.utilities import get_message
+    get_message('audio_common_msgs/msg/AudioData')
+    type_pret = True
+except Exception:
+    type_pret = False
+print(f'Voix : Vosk {"installé" if vosk_pret else "ABSENT"}, '
+      f'modèle {"présent" if modele_pret else "ABSENT"} ({chemin}), '
+      f'type audio {"disponible" if type_pret else "ABSENT"}.')
+if vosk_pret and modele_pret and type_pret:
+    print(f'Le mot « {", ".join(voix.words)} » sera écouté sur '
+          f'{voix.audio_topic} ({voix.sample_rate} Hz).')
+else:
+    print('Départ vocal indisponible ; le départ par commande reste actif.')
+PY
+    local topic
+    topic="$(lire_config c.start_word.audio_topic)"
+    if ! ros2 topic list 2>/dev/null | grep -qx "$topic"; then
+        echo "Topic audio $topic non détecté pour l'instant : vérifier respeaker_node avant le départ." >&2
+    fi
+}
+
 case "$mode" in
     course)
         verifier_paquet caytu_course
         verifier_arbitre
+        verifier_voix
         if [[ -n "${FOSA_CARTE:-}" && "${FOSA_NAVIGATION:-carte}" == carte ]] \
                 && ! python3 -c "
 from caytu_config import load_config
@@ -317,15 +409,24 @@ raise SystemExit(0 if carte_preparee(load_config()) is not None else 1)"; then
         echo "Match : profil ${FOSA_PROFIL:-robot}, ROS_DOMAIN_ID=$ROS_DOMAIN_ID."
         python3 -c "
 from caytu_config import load_config
-from caytu_course.lancement import carte_preparee, fichier_tags_match
+from caytu_course.lancement import carte_preparee, fichier_tags_match, pose_depart
 c = load_config(); carte = carte_preparee(c)
 if c.navigation.mode == 'sans_carte':
     print('Sans carte : costmaps roulantes en odom ; aucune carte chargée.')
 elif carte is None:
     print('Aucune carte : cartographie en direct, tags à chercher.')
 else:
-    print(f'Carte utilisée : {carte}.posegraph et {fichier_tags_match(c)}.')
-    print('Placer le robot à la position de départ de la carte avant le match.')"
+    tags = fichier_tags_match(c)
+    print(f'Carte utilisée : {carte}.posegraph et {carte}.data.')
+    if tags.is_file() and tags.stat().st_size > 0:
+        print(f'Tags associés : {tags}.')
+    else:
+        print(f'ATTENTION : {tags} absent ou vide ; les tags seront cherchés pendant le match.')
+    try:
+        print(f'Pose de départ attendue : {pose_depart(c)} (x, y, lacet).')
+    except ValueError as erreur:
+        raise SystemExit(f'Pose de départ invalide : {erreur}')
+    print('Placer le robot exactement à cette pose avant le match.')"
         echo "Le robot attend l'ordre puis le départ (./run.sh depart ou « allez »)."
         lancer_detache course "$@"
         ;;
@@ -409,7 +510,8 @@ PYTHON
         python3 "$DOSSIER_SCRIPT/outils/diagnostic_dds.py"
         ;;
     mesure-rotation)
-        if pgrep -f "[c]aytu_course/course_parc|[c]ourse.launch.py" >/dev/null; then
+        if python3 "$DOSSIER_SCRIPT/outils/processus.py" actif \
+                --etat "$ETAT_SESSION" "${PORTEES_ARGUMENT[@]}" >/dev/null 2>&1; then
             echo "La course tourne : ./run.sh arreter d'abord (une seule source de commandes)." >&2
             exit 1
         fi

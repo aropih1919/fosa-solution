@@ -244,3 +244,51 @@ d'action, et ordre de tags reçu avant toute navigation de match.
 
 **Aucune réparation du code n'a été appliquée** : cette note fixe le diagnostic
 et l'ordre des vérifications avant toute modification.
+
+---
+
+## Corrections appliquées le 7 novembre 2026
+
+Le diagnostic ci-dessus reste la référence des incidents observés. Les
+corrections correspondantes sont détaillées dans
+[`docs/PLAN-CORRECTIONS-2026-11-07.md`](docs/PLAN-CORRECTIONS-2026-11-07.md) :
+
+- **Arrêt et relance** : `run.sh` surveille la session au premier plan ;
+  `Ctrl+C` l'arrête, `SIGHUP` la laisse continuer. Les PID sont identifiés par
+  jeton et empreinte `starttime`. Un nouveau lancement remplace l'ancienne
+  session au lieu de la refuser.
+- **Carte et tags** : chemins relatifs résolus, dossier avec un seul
+  `*.posegraph` accepté, fichiers vides refusés. Les tags sont exportés dans
+  `map` via la TF finale `map → odom`, pour rester cohérents après une
+  correction SLAM.
+- **Garde** : distance signée à l'empreinte, tolérance de pénétration bornée
+  (`penetration_tolerance_m`) et sources d'obstacles `required` ou
+  optionnelles. Un recul lent qui diminue la pénétration reste autorisé.
+- **Nav2** : état lifecycle `active` vérifié pour chaque nœud avant le premier
+  but, au lieu de la seule présence des serveurs d'action.
+- **Récupération** : après des échecs d'approche répétés, les costmaps sont
+  vidées puis le robot recule lentement, dans la limite
+  `max_unstuck_attempts` par tag.
+- **Visites** : `tags_reported` est suivi, la confirmation attend
+  `referee_confirmation_sec` sans bloquer la course, et le résumé final
+  distingue les visites confirmées, non confirmées et sautées.
+- **Voix** : préflight non bloquant dans `run.sh`, préparation automatique de
+  Vosk par `deployer_robot.sh --envoyer`, et `FOSA_SANS_VOIX=1` pour déployer
+  sans voix.
+
+### À vérifier sur le robot
+
+1. **Audio ReSpeaker** : `ros2 topic hz` sur le topic audio, puis vérifier que
+   les octets PCM sont en 16 bits, 16 kHz, mono, sans en-tête (format attendu
+   par `mot_depart`). Comparer le champ `sample_rate` de `start_word` à la
+   sortie réelle de `respeaker_node`.
+2. **Empreinte et centre** : mesurer l'empreinte réelle, `center_offset_x` et
+   les TF caméra → `base_link` ; les valeurs actuelles viennent de la
+   simulation.
+3. **Pose de départ** : replacer le robot à la pose `map_start_pose` et
+   vérifier que la localisation ne saute pas au démarrage.
+4. **Confirmations** : jouer quatre tags, vérifier que `tags_reported` accuse
+   chaque tag signalé, puis contrôler le résumé final (visites confirmées,
+   non confirmées et sautées).
+5. **Arrêt/relance** : `Ctrl+C`, puis relance immédiate ; répéter avec
+   `./run.sh arreter` depuis un second terminal.

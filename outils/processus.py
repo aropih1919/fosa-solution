@@ -31,24 +31,43 @@ def _stat(pid):
         return None
 
 
-def _vivant(pid):
-    """Un zombie n'est plus un processus à arrêter."""
-    stat = _stat(pid)
-    if stat is None:
-        return False
-    try:
-        return stat.rsplit(') ', 1)[1].split()[0] != 'Z'
-    except (IndexError, ValueError):
-        return False
-
-
-def _parent(pid):
+def _champs_stat(pid):
+    """Champs de /proc/<pid>/stat après le nom, ou None si illisible."""
     stat = _stat(pid)
     if stat is None:
         return None
     try:
-        return int(stat.rsplit(') ', 1)[1].split()[1])
+        return stat.rsplit(') ', 1)[1].split()
     except (IndexError, ValueError):
+        return None
+
+
+def _starttime(pid):
+    """Date de démarrage du PID : distingue un PID réutilisé.
+
+    Le champ 22 de /proc/<pid>/stat est le 20e après le nom du processus.
+    """
+    champs = _champs_stat(pid)
+    if champs is None or len(champs) < 20:
+        return None
+    return champs[19]
+
+
+def _vivant(pid):
+    """Un zombie n'est plus un processus à arrêter."""
+    champs = _champs_stat(pid)
+    if not champs:
+        return False
+    return champs[0] != 'Z'
+
+
+def _parent(pid):
+    champs = _champs_stat(pid)
+    if champs is None or len(champs) < 2:
+        return None
+    try:
+        return int(champs[1])
+    except ValueError:
         return None
 
 
@@ -58,6 +77,15 @@ def _cmdline(pid):
                 .replace(b'\0', b' ').decode('utf-8', 'replace'))
     except OSError:
         return ''
+
+
+def _argv(pid):
+    try:
+        brut = Path(f'/proc/{pid}/cmdline').read_bytes()
+    except OSError:
+        return []
+    return [morceau.decode('utf-8', 'replace')
+            for morceau in brut.split(b'\0') if morceau]
 
 
 def _environ(pid):
@@ -94,16 +122,50 @@ def _descendants(racine, parents):
 def _dans_portee(pid, portees):
     """Processus ROS lancé depuis ce workspace (actuel ou ancienne livraison).
 
-    Un éditeur ouvert sur un fichier du dépôt ne doit jamais être arrêté :
-    seuls les exécutables de build/install, les lancements de la course et
-    notre propre script de lancement sont reconnus.
+    Un éditeur, un `less` ou un `grep` ouvert sur un fichier du dépôt ne doit
+    jamais être arrêté : on regarde les arguments réels, pas la ligne de
+    commande concaténée. Seuls les exécutables de build/install, `ros2 launch`
+    et notre propre script de lancement sont reconnus.
     """
-    commande = _cmdline(pid)
-    if not any(portee in commande for portee in portees):
+    argv = _argv(pid)
+    if not argv:
         return False
-    return ('/install/' in commande or '/build/' in commande
-            or 'course.launch.py' in commande or 'course_parc' in commande
-            or 'fosa-solution/run.sh course-premier-plan' in commande)
+    racines = {str(portee).rstrip('/') for portee in portees if portee}
+    for portee in racines:
+        for argument in argv:
+            if (argument.startswith(f'{portee}/install/')
+                    or argument.startswith(f'{portee}/build/')):
+                return True
+        for index, argument in enumerate(argv):
+            if (argument.endswith('/run.sh')
+                    and argument.startswith(f'{portee}/')
+                    and 'course-premier-plan' in argv[index + 1:]):
+                return True
+    # `ros2 launch` ne contient pas forcément le chemin du workspace dans sa
+    # ligne de commande ; ses nœuds enfants, eux, sont sous install/build.
+    if (Path(argv[0]).name == 'ros2' and len(argv) >= 3
+            and argv[1] == 'launch' and 'course.launch.py' in argv[2:]):
+        return True
+    return False
+
+
+def _racine_valide(etat):
+    """Le PID racine de l'état est-il encore celui de notre session ?
+
+    Le jeton seul suffit pour un ancien état ; l'empreinte `starttime` évite
+    qu'un PID réutilisé par un programme extérieur soit suivi avec ses
+    descendants.
+    """
+    if not etat:
+        return False
+    racine = int(etat.get('pid') or 0)
+    if not racine or not _vivant(racine):
+        return False
+    empreinte = etat.get('starttime')
+    if empreinte is not None:
+        return _starttime(racine) == str(empreinte)
+    jeton = etat.get('jeton')
+    return bool(jeton) and f'FOSA_SESSION_ID={jeton}'.encode() in _environ(racine)
 
 
 def membres(etat, portees=None):
@@ -121,7 +183,11 @@ def membres(etat, portees=None):
     if etat:
         marque = f'FOSA_SESSION_ID={etat["jeton"]}'.encode()
         racine = int(etat.get('pid') or 0)
-        descendants = _descendants(racine, parents) if racine else set()
+        # Les descendants ne sont suivis que si le PID racine est bien le
+        # nôtre. Un PID réutilisé par un programme extérieur ne doit jamais
+        # entraîner l'arrêt de ses enfants.
+        descendants = (_descendants(racine, parents)
+                       if _racine_valide(etat) else set())
         pgid = int(etat.get('pgid') or 0)
         # Ancien état (sans pid) : on n'utilise le groupe que si son chef porte
         # encore le jeton, pour ne jamais tuer un PID réutilisé par un autre.
@@ -171,11 +237,21 @@ def arreter(etat, delai, portees=None):
         raise RuntimeError(f'Des processus Fosa ne se sont pas arrêtés :\n{details}')
 
 
+def _delai_arret():
+    regles = (Path(__file__).resolve().parents[1]
+              / 'caytu_config/config/exploitation.json')
+    return json.loads(regles.read_text(encoding='utf-8'))['arret_delai_sec']
+
+
 def main():
     analyseur = argparse.ArgumentParser(description=__doc__)
-    analyseur.add_argument('action', choices=('lancer', 'arreter', 'actif'))
+    analyseur.add_argument(
+        'action', choices=('lancer', 'arreter', 'actif', 'lister'))
     analyseur.add_argument('--etat', type=Path, required=True)
     analyseur.add_argument('--journal', type=Path)
+    analyseur.add_argument(
+        '--jeton', type=str, default=None,
+        help='actif : ne répond oui que pour cette session précise')
     analyseur.add_argument(
         '--portee', type=str, action='append', default=None,
         help='racine du workspace : arrête aussi les processus Fosa sans état')
@@ -188,16 +264,38 @@ def main():
     with chemin.with_suffix('.lock').open('w') as verrou:
         fcntl.flock(verrou, fcntl.LOCK_EX)
         etat = lire_etat(chemin)
+        # Un état sans aucun membre réel ne doit jamais bloquer la relance.
+        if etat and not membres(etat):
+            chemin.unlink(missing_ok=True)
+            etat = None
         if args.action == 'actif':
+            if args.jeton and (not etat or etat.get('jeton') != args.jeton):
+                return 1
             return 0 if membres(etat, args.portee) else 1
+        if args.action == 'lister':
+            cibles = membres(etat, args.portee)
+            for pid in cibles:
+                print(f'{pid}\t{_cmdline(pid)}')
+            return 0 if cibles else 1
         if args.action == 'arreter':
-            regles = Path(__file__).resolve().parents[1] / 'caytu_config/config/exploitation.json'
-            delai = json.loads(regles.read_text(encoding='utf-8'))['arret_delai_sec']
-            arreter(etat, delai, args.portee)
+            arreter(etat, _delai_arret(), args.portee)
             chemin.unlink(missing_ok=True)
             return 0
+        # Un nouveau lancement remplace toute session ou tout nœud Fosa déjà
+        # en cours : une seule source de commandes doit rester active.
+        restes = membres(etat, args.portee)
+        if restes:
+            if etat and not _racine_valide(etat):
+                message = ('Ancienne session sans lanceur : arrêt des '
+                           'processus restants.')
+            else:
+                message = 'Session Fosa déjà en cours : arrêt avant le nouveau lancement.'
+            print(message, file=sys.stderr)
+            arreter(etat, _delai_arret(), args.portee)
+            chemin.unlink(missing_ok=True)
+            etat = None
         if membres(etat, args.portee):
-            analyseur.error(f'Une session Fosa est déjà active : {chemin}')
+            analyseur.error('Des processus Fosa résistent à l’arrêt.')
         if not commande or args.journal is None:
             analyseur.error('lancer exige --journal et -- COMMANDE')
         args.journal.parent.mkdir(parents=True, exist_ok=True)
@@ -207,9 +305,11 @@ def main():
                 commande, stdin=subprocess.DEVNULL, stdout=journal,
                 stderr=subprocess.STDOUT, start_new_session=True,
                 env={**os.environ, 'FOSA_SESSION_ID': jeton})
+        empreinte = _starttime(processus.pid)
         chemin.write_text(json.dumps({
             'pid': processus.pid, 'pgid': processus.pid, 'jeton': jeton,
-            'journal': str(args.journal)}), encoding='utf-8')
+            'starttime': empreinte, 'journal': str(args.journal)}),
+            encoding='utf-8')
         print(f'Session Fosa {processus.pid} ; journal : {args.journal}')
     return 0
 

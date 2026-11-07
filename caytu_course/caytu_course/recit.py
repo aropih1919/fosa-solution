@@ -102,15 +102,49 @@ def phrase_visite(tag_id, rang, total, distance, cap_deg):
             f'face au tag à {abs(cap_deg):.1f}° près. Photo envoyée à l\'arbitre.')
 
 
-def resume_fin(ordre, visites, raisons):
-    """Une ligne par tag de l'ordre : visité, ou pourquoi il ne l'a pas été."""
+def resume_fin(ordre, visites, raisons, confirmees=None, motif=None):
+    """Une ligne par tag de l'ordre : visité, ou pourquoi il ne l'a pas été.
+
+    `confirmees` : tags accusés par `tags_reported` ; None pour un résumé qui
+    ne parle pas de l'arbitre. `motif` distingue une mission terminée d'un
+    temps écoulé ou d'un arrêt de l'arbitre.
+    """
     lignes = []
     for tag in ordre:
         if tag in visites:
-            lignes.append(f'Tag {tag} : visité ({visites.index(tag) + 1}e visite).')
+            suite = ''
+            if confirmees is not None:
+                suite = (' (confirmée)' if tag in confirmees
+                         else ' (non confirmée)')
+            lignes.append(
+                f'Tag {tag} : visité ({visites.index(tag) + 1}e visite){suite}.')
         else:
             lignes.append(f'Tag {tag} : non visité — {raisons.get(tag, "temps écoulé avant d’y arriver")}.')
     points = 25 * len(visites)
-    lignes.append(f'Bilan : {len(visites)} tag(s) sur {len(ordre)}, '
-                  f'{points} points espérés (hors bonus vocal et pénalités).')
+    bilan = (f'Bilan : {len(visites)} tag(s) sur {len(ordre)}, '
+             f'{points} points espérés')
+    if confirmees is not None:
+        bilan += f', {len(confirmees)} visite(s) confirmée(s) par l’arbitre'
+    lignes.append(bilan + ' (hors bonus vocal et pénalités).')
+    if ordre and len(visites) == len(ordre):
+        if confirmees is None:
+            lignes.append(
+                'Mission terminée : tous les tags de l’ordre sont visités.')
+        elif len(confirmees) == len(ordre):
+            lignes.append(
+                'Mission terminée : toutes les visites sont confirmées par '
+                'l’arbitre (le verdict des juges reste séparé).')
+        else:
+            lignes.append(
+                'Mission terminée : tous les tags de l’ordre sont visités, '
+                'mais l’arbitre n’a pas confirmé toutes les visites.')
+    elif motif == 'terminee':
+        lignes.append(
+            'Mission terminée avec des tags sautés : voir les raisons ci-dessus.')
+    elif motif == 'arbitre_termine':
+        lignes.append('Mission interrompue par l’arbitre.')
+    elif motif == 'arbitre_fini':
+        lignes.append('Mission terminée par l’arbitre avant tous les tags.')
+    elif motif == 'temps_ecoule':
+        lignes.append('Mission non terminée : le temps est écoulé avant tous les tags.')
     return lignes

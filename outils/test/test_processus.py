@@ -1,11 +1,40 @@
 """Arrêter Fosa ne doit jamais arrêter un processus extérieur à sa session."""
 
 import json
+import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
+import time
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'processus.py'
+
+
+def _vivant(pid):
+    """Vrai seulement si le processus existe et n'est pas un zombie."""
+    try:
+        stat = Path(f'/proc/{pid}/stat').read_text(encoding='utf-8')
+    except OSError:
+        return False
+    try:
+        return stat.rsplit(') ', 1)[1].split()[0] != 'Z'
+    except (IndexError, ValueError):
+        return False
+
+
+def _attendre_mort(pid, delai=5.0):
+    fin = time.monotonic() + delai
+    while _vivant(pid) and time.monotonic() < fin:
+        time.sleep(0.1)
+    return not _vivant(pid)
+
+
+def _arreter_processus(pid):
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
 
 
 def test_arret_cible_et_pid_reutilise(tmp_path):
@@ -15,7 +44,17 @@ def test_arret_cible_et_pid_reutilise(tmp_path):
     try:
         subprocess.run(commande + ['lancer', '--etat', str(etat), '--journal', str(journal),
                        '--', sys.executable, '-c', 'import time; time.sleep(60)'], check=True)
+        session = json.loads(etat.read_text(encoding='utf-8'))
+        assert session['starttime']
         subprocess.run(commande + ['actif', '--etat', str(etat)], check=True)
+        subprocess.run(commande + ['actif', '--etat', str(etat),
+                                   '--jeton', session['jeton']], check=True)
+        autre_jeton = subprocess.run(
+            commande + ['actif', '--etat', str(etat), '--jeton', 'inconnu'])
+        assert autre_jeton.returncode == 1
+        liste = subprocess.run(commande + ['lister', '--etat', str(etat)],
+                               check=True, capture_output=True, text=True)
+        assert str(session['pid']) in liste.stdout
         subprocess.run(commande + ['arreter', '--etat', str(etat)], check=True)
         assert autre.poll() is None
         etat.write_text(json.dumps({'pgid': autre.pid, 'jeton': 'ancien-pid'}))
@@ -25,3 +64,104 @@ def test_arret_cible_et_pid_reutilise(tmp_path):
         autre.terminate()
         autre.wait(timeout=5)
         subprocess.run(commande + ['arreter', '--etat', str(etat)], check=True)
+
+
+def test_un_nouveau_lancement_arrete_l_ancien(tmp_path):
+    """Lancer un mode remplace la session précédente au lieu de la refuser."""
+    etat, journal = tmp_path / 'session.json', tmp_path / 'session.log'
+    commande = [sys.executable, str(SCRIPT)]
+    try:
+        subprocess.run(commande + [
+            'lancer', '--etat', str(etat), '--journal', str(journal),
+            '--', sys.executable, '-c', 'import time; time.sleep(60)'],
+            check=True)
+        ancien = json.loads(etat.read_text(encoding='utf-8'))
+        subprocess.run(commande + [
+            'lancer', '--etat', str(etat), '--journal', str(journal),
+            '--', sys.executable, '-c', 'import time; time.sleep(60)'],
+            check=True)
+        nouveau = json.loads(etat.read_text(encoding='utf-8'))
+        assert nouveau['pid'] != ancien['pid']
+        assert _attendre_mort(ancien['pid'])
+        subprocess.run(commande + ['actif', '--etat', str(etat),
+                                   '--jeton', nouveau['jeton']], check=True)
+    finally:
+        subprocess.run(commande + ['arreter', '--etat', str(etat)], check=True)
+
+
+def test_pid_reutilise_ne_suit_pas_ses_descendants(tmp_path):
+    """Un PID racine réutilisé ne doit pas entraîner l'arrêt de ses enfants."""
+    etat = tmp_path / 'session.json'
+    programme = tmp_path / 'parent.py'
+    programme.write_text(
+        'import subprocess, sys, time\n'
+        "enfant = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        'print(enfant.pid, flush=True)\n'
+        'time.sleep(60)\n',
+        encoding='utf-8')
+    parent = subprocess.Popen(
+        [sys.executable, str(programme)], stdout=subprocess.PIPE, text=True)
+    enfant = None
+    commande = [sys.executable, str(SCRIPT)]
+    try:
+        enfant = int(parent.stdout.readline())
+        etat.write_text(json.dumps({
+            'pid': parent.pid, 'pgid': parent.pid, 'jeton': 'ancien-pid',
+            'starttime': 'empreinte-perimee'}), encoding='utf-8')
+        subprocess.run(commande + ['arreter', '--etat', str(etat)], check=True)
+        assert parent.poll() is None
+        assert _vivant(enfant)
+    finally:
+        if enfant is not None:
+            _arreter_processus(enfant)
+        parent.terminate()
+        parent.wait(timeout=5)
+        subprocess.run(commande + ['arreter', '--etat', str(etat)], check=True)
+
+
+def test_etat_perime_est_supprime(tmp_path):
+    etat = tmp_path / 'session.json'
+    fini = subprocess.Popen([sys.executable, '-c', 'pass'])
+    fini.wait(timeout=5)
+    etat.write_text(json.dumps({
+        'pid': fini.pid, 'pgid': fini.pid, 'jeton': 'ancien-pid'}),
+        encoding='utf-8')
+    resultat = subprocess.run(
+        [sys.executable, str(SCRIPT), 'actif', '--etat', str(etat)])
+    assert resultat.returncode == 1
+    assert not etat.exists()
+
+
+def test_lister_reconnait_le_lanceur_du_workspace(tmp_path):
+    """Le lanceur `run.sh course-premier-plan` est reconnu par sa portée."""
+    lanceur = tmp_path / 'run.sh'
+    lanceur.write_text('#!/usr/bin/env bash\nsleep 60\n', encoding='utf-8')
+    processus = subprocess.Popen(['bash', str(lanceur), 'course-premier-plan'])
+    try:
+        resultat = subprocess.run(
+            [sys.executable, str(SCRIPT), 'lister',
+             '--etat', str(tmp_path / 'absent.json'), '--portee', str(tmp_path)],
+            capture_output=True, text=True)
+        assert resultat.returncode == 0
+        assert str(processus.pid) in resultat.stdout
+    finally:
+        processus.terminate()
+        processus.wait(timeout=5)
+
+
+def test_lister_ignore_un_editeur_ouvert_sur_le_lancement(tmp_path):
+    """Un processus qui ne fait qu'afficher un fichier ne doit pas être tué."""
+    cible = tmp_path / 'course.launch.py'
+    cible.write_text('', encoding='utf-8')
+    processus = subprocess.Popen(
+        [sys.executable, '-c', 'import time; time.sleep(60)', str(cible)])
+    try:
+        resultat = subprocess.run(
+            [sys.executable, str(SCRIPT), 'lister',
+             '--etat', str(tmp_path / 'absent.json'), '--portee', str(tmp_path)],
+            capture_output=True, text=True)
+        assert resultat.returncode == 1
+        assert str(processus.pid) not in resultat.stdout
+    finally:
+        processus.terminate()
+        processus.wait(timeout=5)

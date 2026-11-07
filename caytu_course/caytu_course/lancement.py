@@ -10,6 +10,7 @@ Trois modes :
   - `cartographie` : SLAM, Nav2 et perception sans mission (réglages).
 """
 
+import math
 import os
 from pathlib import Path
 
@@ -24,19 +25,37 @@ def dossier_preparation(configuration):
     return Path(configuration.course.preparation.directory).expanduser()
 
 
-def _base_carte(chemin):
-    """Dossier ou fichier de carte -> préfixe sans extension."""
+def _base_carte(chemin, racine=None):
+    """Dossier ou fichier de carte -> préfixe sans extension.
+
+    Un chemin relatif est résolu avant de tester le dossier : sinon
+    `cartes/arene_2026_11_06` est vu comme un simple préfixe et la carte
+    livrée n'est jamais trouvée depuis la racine du dépôt.
+    """
     base = Path(chemin).expanduser()
+    if not base.is_absolute():
+        base = (Path(racine) if racine is not None else Path.cwd()) / base
     if base.is_dir():
-        base = base / NOM_CARTE
+        posegraphs = sorted(base.glob('*.posegraph'))
+        # Un seul fichier : son nom est celui de la carte. Plusieurs : le
+        # nom conventionnel `carte` tranche, sinon le dossier est ambigu.
+        base = (posegraphs[0].with_suffix('') if len(posegraphs) == 1
+                else base / NOM_CARTE)
     if base.suffix in ('.posegraph', '.data', '.yaml', '.pgm'):
         base = base.with_suffix('')
     return base
 
 
+def _fichier_non_vide(chemin):
+    try:
+        return chemin.is_file() and chemin.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def _carte_valide(base):
-    return (base.with_suffix('.posegraph').is_file()
-            and base.with_suffix('.data').is_file())
+    return (_fichier_non_vide(base.with_suffix('.posegraph'))
+            and _fichier_non_vide(base.with_suffix('.data')))
 
 
 def _carte_embarquee(configuration):
@@ -45,9 +64,8 @@ def _carte_embarquee(configuration):
     chemin = forcee or configuration.course.preparation.carte_embarquee
     if not chemin:
         return None
-    base = _base_carte(chemin)
-    if not base.is_absolute():
-        base = (Path.cwd() if forcee else config_directory()) / base
+    racine = Path.cwd() if forcee else config_directory()
+    base = _base_carte(chemin, racine)
     return base if _carte_valide(base) else None
 
 
@@ -62,7 +80,7 @@ def carte_preparee(configuration):
         return None
     if os.environ.get('FOSA_CARTE'):
         return _carte_embarquee(configuration)
-    base = dossier_preparation(configuration) / NOM_CARTE
+    base = _base_carte(dossier_preparation(configuration))
     if _carte_valide(base):
         return base
     return _carte_embarquee(configuration)
@@ -77,6 +95,27 @@ def fichier_tags_match(configuration):
     """Tags associés à la carte réellement utilisée pour le match."""
     carte = carte_preparee(configuration)
     return (carte.parent if carte is not None else dossier_preparation(configuration)) / NOM_TAGS
+
+
+def pose_depart(configuration):
+    """Pose [x, y, lacet] du début de carte, surchargeable par FOSA_POSE_DEPART.
+
+    La variable d'environnement accepte les espaces ou les virgules :
+    `FOSA_POSE_DEPART="1.2 -0.4 0.0"`.
+    """
+    valeur = os.environ.get('FOSA_POSE_DEPART', '').strip()
+    if not valeur:
+        return list(configuration.course.preparation.map_start_pose)
+    morceaux = valeur.replace(',', ' ').split()
+    try:
+        nombres = [float(morceau) for morceau in morceaux]
+    except ValueError as erreur:
+        raise ValueError(
+            'FOSA_POSE_DEPART doit contenir trois nombres : x y lacet.') from erreur
+    if len(nombres) != 3 or not all(math.isfinite(n) for n in nombres):
+        raise ValueError(
+            'FOSA_POSE_DEPART doit contenir trois nombres finis : x y lacet.')
+    return nombres
 
 
 def _localiser(configuration, mode):
@@ -112,5 +151,5 @@ def parametres_slam(configuration, mode='course'):
     if _localiser(configuration, mode):
         parametres.update(
             mode='localization', map_file_name=str(carte_preparee(configuration)),
-            map_start_pose=[0.0, 0.0, 0.0])
+            map_start_pose=pose_depart(configuration))
     return parametres

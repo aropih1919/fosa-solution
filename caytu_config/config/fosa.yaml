@@ -31,6 +31,9 @@ navigation:
     pas_sec: 0.05
     periode_sec: 0.05
     marge_m: 0.05
+    # Aggravation maximale de la marge déjà pénétrée : permet un dégagement
+    # lent (recul/rotation) sans laisser le robot s'enfoncer dans l'obstacle.
+    penetration_tolerance_m: 0.02
   odom_topic: /botwheel_explorer/odom
   odom_frame: odom
 
@@ -49,6 +52,7 @@ navigation:
     - name: lidar
       topic: /scan_filtered
       enabled: true
+      required: true              # sans lidar frais, la garde immobilise le robot
       obstacle_min_range: 0.12
       obstacle_max_range: 3.5
       raytrace_max_range: 4.0
@@ -59,6 +63,7 @@ navigation:
     - name: camera1
       topic: /fosa/scan_camera1
       enabled: true
+      required: false             # caméra absente : ignorée, le lidar suffit
       obstacle_min_range: 0.25
       obstacle_max_range: 2.0         # < range_max du scan (2,5 m) : un secteur vide n'est jamais marqué
       raytrace_max_range: 2.5
@@ -67,6 +72,7 @@ navigation:
     - name: camera2
       topic: /fosa/scan_camera2
       enabled: true
+      required: false             # caméra absente : ignorée, le lidar suffit
       obstacle_min_range: 0.25
       obstacle_max_range: 2.0         # < range_max du scan (2,5 m) : un secteur vide n'est jamais marqué
       raytrace_max_range: 2.5
@@ -205,6 +211,10 @@ course:
   # Simulation : le robot restait coincé entre un tag et un meuble.
   unstuck_distance_m: 0.30
   unstuck_after_failures: 2
+  max_unstuck_attempts: 3        # dégagements par tag avant de laisser la stratégie trancher
+  # Délai d'attente de l'accusé `tags_reported` après le maintien réglementaire.
+  # Non bloquant : passé ce délai, la visite est dite « non confirmée ».
+  referee_confirmation_sec: 2.0
   alignment:
     linear_gain: 0.6
     angular_gain: 1.2
@@ -250,6 +260,9 @@ course:
     # préparation faite sur le robot reste prioritaire ; FOSA_CARTE force
     # une autre carte (simulation ou autre arène).
     carte_embarquee: cartes/arene_2026_11_06
+    # Pose [x, y, lacet] du robot au début de la carte. Le match doit partir
+    # exactement de cette pose ; FOSA_POSE_DEPART="x y lacet" la surcharge.
+    map_start_pose: [0.0, 0.0, 0.0]
     max_duration_sec: 720.0       # 12 min sur 15 : marge pour vérifier et relancer
     close_view_m: 1.3             # tag vu plus loin : on va le mesurer de près
     approach_attempts: 2          # rapprochements tentés par tag

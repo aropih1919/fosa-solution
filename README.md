@@ -39,7 +39,13 @@ Après le guidage, arrêter le téléopérateur (`Ctrl+C`), puis dans le termina
 ./run.sh arreter
 ```
 
+`Ctrl+C` dans le terminal de lancement arrête aussi la session et le robot.
+Fermer le terminal (ou couper SSH) laisse au contraire la session détachée
+continuer ; `./run.sh arreter` reste disponible depuis un autre terminal.
+Un nouveau lancement arrête automatiquement toute session Fosa précédente.
+
 Les fichiers sont enregistrés dans `~/teams/fosa/donnees/preparation`.
+La carte et `tags.yaml` sont ensuite rechargés automatiquement par le match.
 
 ## Lancer le match
 
@@ -51,6 +57,20 @@ Placez le robot à la position et orientation de départ de la carte.
 ./run.sh suivi          # suivi, dans un autre terminal si souhaité
 ./run.sh arreter
 ```
+
+Au lancement, `run.sh` vérifie sans bloquer que Vosk, le modèle et le topic
+audio sont disponibles, puis annonce la carte, les tags et la pose de départ
+utilisés. Le départ par commande reste toujours possible ; le départ vocal
+demande en plus de prononcer un mot de `start_word.words` (par défaut
+« allez »).
+
+Pour déployer sans préparer la voix :
+
+```bash
+FOSA_SANS_VOIX=1 ./deployer_robot.sh --envoyer 192.168.1.3
+```
+
+Sinon `--envoyer` télécharge automatiquement Vosk et son modèle s'ils manquent.
 
 ## Simuler sur le PC
 

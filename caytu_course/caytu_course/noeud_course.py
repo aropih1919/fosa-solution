@@ -83,6 +83,8 @@ class NoeudCourse(Node):
         self._rotation_indisponible = False  # behavior Spin absent de Nav2
         self._points_essayes = []  # points de recherche déjà tentés
         self._echecs = {}          # visites ratées par tag
+        self._echecs_suite = 0     # échecs d'approche/alignement consécutifs
+        self._degagements = {}     # dégagements tentés par tag
         self._debut_cible = {}     # instant où chaque tag est devenu la cible
         self._plan = None          # dernier plan de la stratégie
         self._plan_instant = None
@@ -105,12 +107,15 @@ class NoeudCourse(Node):
         self._ecouteur_tf = TransformListener(
             self._memoire_tf, self, spin_thread=False)
         self._memoire = self._charger_memoire()
+        self._memoire_odom = MemoireTags(
+            configuration.perception.apriltag.max_distance_m, repere='odom')
         self._tags_reperes.update(self._memoire.ids())
         # Minuteur : les tags repérés sont annoncés aussi pendant un trajet Nav2.
         self.create_timer(0.5, self._annoncer_tags_reperes)
         self._entrees = EntreesCourse(
             self, configuration, self._memoire, self._memoire_tf,
-            lambda: self._en_attente, ecouter_arbitre=self._mode == 'course')
+            lambda: self._en_attente, ecouter_arbitre=self._mode == 'course',
+            memoire_odom=self._memoire_odom)
         self._statut = PublicateurArbitre(self, self._course.referee)
         self._publicateur_etat = self.create_publisher(
             String, self._course.state_topic, qos_statut(1))
@@ -329,6 +334,7 @@ class NoeudCourse(Node):
                 continue
             if resultat == 'visite':
                 self._sequence.marquer_visite(cible)
+                self._echecs_suite = 0
                 if not self._sequence.terminee():
                     self._degager('laisser la place devant le tag avant le suivant')
             elif resultat == 'saute':
@@ -388,11 +394,16 @@ class NoeudCourse(Node):
                     self._tags_reperes.discard(tag_id)
                 elif resultat == 'echec' and self._garder:
                     self._echecs[tag_id] = self._echecs.get(tag_id, 0) + 1
+                    self._echecs_suite += 1
                     self.evenement('echec', recit.phrase_echec(
                         tag_id, self._raison_echec or 'alignement', self._echecs[tag_id]),
                         tag=tag_id, raison=self._raison_echec)
                     self._plan_instant = None   # replanifier tout de suite
-                    self.traiter_pendant(0.5)
+                    if self._echecs_suite >= self._course.unstuck_after_failures:
+                        self._echecs_suite = 0
+                        self._degager_apres_echecs(tag_id)
+                    else:
+                        self.traiter_pendant(0.5)
             else:
                 self._chercher(tag_id, abandonner)
         return 'temps_ecoule'
@@ -718,6 +729,31 @@ class NoeudCourse(Node):
             self.traiter_pendant(PERIODE_BOUCLE)
         return 'echec'
 
+    def _degager_apres_echecs(self, tag_id):
+        """Vide les costmaps puis recule après des échecs d'approche répétés.
+
+        Un obstacle mobile peut rester marqué dans les costmaps ; le recul
+        lent dégage le robot du meuble ou du tag contre lequel Nav2 bute.
+        Le nombre de dégagements par tag est borné par la configuration ;
+        au-delà, la stratégie décide de continuer ou de sauter le tag.
+        """
+        tentatives = self._degagements.get(tag_id, 0)
+        if tentatives >= self._course.max_unstuck_attempts:
+            self.evenement(
+                'degagement',
+                f'Tag {tag_id} : {tentatives} dégagement(s) déjà tenté(s), '
+                'arrêt des reculs ; la stratégie décide de la suite.',
+                tag=tag_id)
+            return
+        self._degagements[tag_id] = tentatives + 1
+        self._navigateur.annuler_but()
+        self._navigateur.vider_costmaps()
+        # Laisser aux services de costmap le temps de traiter la demande.
+        self.traiter_pendant(0.3)
+        self._degager(
+            f'{self._echecs.get(tag_id, 0)} échec(s) d’approche ou '
+            f'd’alignement du tag {tag_id} ; costmaps vidées')
+
     def _degager(self, raison):
         """Recule lentement de `unstuck_distance_m`, garde arrière active.
 
@@ -821,7 +857,33 @@ class NoeudCourse(Node):
                and not self._entrees.arbitre_interrompt_visite):
             self.publier_vitesse(0.0, 0.0)
             self.traiter_pendant(0.2)
+        if self._attendre_confirmation(tag_id):
+            self.evenement('visite_confirmee',
+                           f'Visite du tag {tag_id} confirmée par l’arbitre.',
+                           tag=tag_id)
+        else:
+            self.evenement(
+                'visite_non_confirmee',
+                f'Visite du tag {tag_id} signalée, mais non confirmée par '
+                f'l’arbitre après {self._course.referee_confirmation_sec:.1f} s.',
+                tag=tag_id)
         return 'visite'
+
+    def _attendre_confirmation(self, tag_id):
+        """Attend `tags_reported` sans bloquer la course au-delà du délai.
+
+        L'arbitre peut publier FINISHED juste après le dernier tag ; ce délai
+        court reste indépendant du budget et ne remet pas la visite en cause.
+        """
+        if self._entrees.visite_confirmee(tag_id):
+            return True
+        fin = time.monotonic() + self._course.referee_confirmation_sec
+        while (rclpy.ok() and time.monotonic() < fin
+               and not self._entrees.arbitre_interrompt_visite):
+            self.traiter_pendant(0.1)
+            if self._entrees.visite_confirmee(tag_id):
+                return True
+        return self._entrees.visite_confirmee(tag_id)
 
     # ---------------------------------------------------------------- fin
     def _terminer(self, motif):
@@ -831,17 +893,24 @@ class NoeudCourse(Node):
         resume = (self._sequence.resume() if self._sequence is not None
                   else {'ordre': [], 'visites': [], 'sautes': []})
         resume['temps_ecoule_s'] = round(self._chrono.ecoule(), 1)
+        confirmees = [tag for tag in resume['visites']
+                      if self._entrees.visite_confirmee(tag)]
+        resume['visites_confirmees'] = confirmees
         self._statut.signaler_fin(motif, resume)
         if self._sequence is not None and not self._sequence.terminee():
             cible = self._sequence.cible()
             self._raisons.setdefault(cible, (
                 'temps écoulé pendant la recherche' if not self._memoire.connait(cible)
                 else 'temps écoulé pendant l’approche ou le placement'))
-        lignes = recit.resume_fin(resume['ordre'], resume['visites'], self._raisons)
+        lignes = recit.resume_fin(
+            resume['ordre'], resume['visites'], self._raisons,
+            confirmees=confirmees, motif=motif)
         if motif == 'ordre_absent':
             lignes.insert(0, "Aucun ordre reçu de l'arbitre : rien n'a pu être visité.")
         elif motif == 'arbitre_termine':
             lignes.insert(0, "L'arbitre a mis fin à la course : robot arrêté.")
+        elif motif == 'arbitre_fini':
+            lignes.insert(0, "L'arbitre a déclaré la course terminée.")
         self.evenement('fin', ' '.join(lignes), lignes=lignes, motif=motif)
         self.publier_etat('TERMINEE', detail=motif)
 
@@ -934,11 +1003,47 @@ class NoeudCourse(Node):
         dossier.mkdir(parents=True, exist_ok=True)
         return dossier
 
+    def _memoire_export(self):
+        """Mémoire des tags dans `map`, corrigée par la TF finale `map → odom`.
+
+        La mémoire `odom` n'est pas affectée par les corrections SLAM. On la
+        transforme au dernier moment ; les tags jamais revus en odom gardent
+        leur pose `map`. Si la TF ou la mémoire odom manque, repli explicite
+        sur la mémoire `map`.
+        """
+        if not self._memoire_odom.ids():
+            return self._memoire
+        try:
+            tf = self._memoire_tf.lookup_transform(
+                self._configuration.system.global_frame,
+                self._navigation.odom_frame, Time())
+        except TransformException as erreur:
+            self.get_logger().warning(
+                f'TF {self._configuration.system.global_frame} → '
+                f'{self._navigation.odom_frame} indisponible : tags exportés '
+                f'depuis la mémoire map ({erreur}).', throttle_duration_sec=10.0)
+            return self._memoire
+        age = (self.get_clock().now()
+               - Time.from_msg(tf.header.stamp)).nanoseconds * 1e-9
+        if not 0.0 <= age <= self._configuration.perception.apriltag.tf_max_lag_sec:
+            self.get_logger().warning(
+                f'TF {self._configuration.system.global_frame} → '
+                f'{self._navigation.odom_frame} périmée ({age:.1f} s) : tags '
+                'exportés depuis la mémoire map.', throttle_duration_sec=10.0)
+            return self._memoire
+        q = tf.transform.rotation
+        transformation = (
+            tf.transform.translation.x, tf.transform.translation.y,
+            lacet_depuis_quaternion(q.x, q.y, q.z, q.w))
+        return self._memoire.fusionner(
+            self._memoire_odom.transformer(transformation))
+
     def _enregistrer_tags(self):
         chemin = fichier_tags(self._configuration)
         try:
             chemin.write_text(yaml.safe_dump(
-                self._memoire.exporter(), allow_unicode=True), encoding='utf-8')
+                self._memoire_export().exporter(), allow_unicode=True),
+                encoding='utf-8')
         except OSError as erreur:
             self.get_logger().error(f'Enregistrement des tags impossible : {erreur}',
                                     throttle_duration_sec=10.0)
@@ -959,11 +1064,13 @@ class NoeudCourse(Node):
         serialisee = reponse is not None and reponse.result == 0
         self._appeler_slam(SaveMap, '/slam_toolbox/save_map',
                            SaveMap.Request(name=Texte(data=str(base))))
-        manquants = [tag for tag in self._course.tag_ids if not self._memoire.connait(tag)]
+        exportee = self._memoire_export()
+        manquants = [tag for tag in self._course.tag_ids
+                     if not exportee.connait(tag)]
         lignes = [
             f'Carte enregistrée : {base}.posegraph' if serialisee
             else 'ÉCHEC de l’enregistrement de la carte : relancer une préparation.',
-            f'Tags enregistrés : {", ".join(map(str, self._memoire.ids())) or "aucun"} '
+            f'Tags enregistrés : {", ".join(map(str, exportee.ids())) or "aucun"} '
             f'({fichier_tags(self._configuration)}).']
         if manquants:
             lignes.append(f'Tags non trouvés : {", ".join(map(str, manquants))} '

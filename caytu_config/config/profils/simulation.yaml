@@ -47,3 +47,4 @@ course:
     # La carte du robot réel n'est pas celle du monde Gazebo ; FOSA_CARTE
     # permet de la choisir explicitement pour une répétition.
     carte_embarquee: ""
+    map_start_pose: [0.0, 0.0, 0.0]

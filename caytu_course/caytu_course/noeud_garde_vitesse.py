@@ -115,29 +115,63 @@ class GardeVitesse(Node):
         reglage = self._reglages
         sortie = Twist()
         maintenant = self.get_clock().now().nanoseconds * 1e-9
-        frais = donnees_fraiches(
-            [scan[0] if scan is not None else None for scan in self._scans.values()],
+        instant_monotone = time.monotonic()
+        sources_obligatoires = [
+            self._scans[source.topic] for source in self._sources.values()
+            if source.required]
+        # Une source obligatoire absente ou périmée immobilise le robot.
+        frais_obligatoires = donnees_fraiches(
+            [scan[0] if scan is not None else None
+             for scan in sources_obligatoires],
             maintenant, reglage.age_scan_max_sec)
-        frais = frais and donnees_fraiches(
-            [scan[2] for scan in self._scans.values()], time.monotonic(),
-            reglage.age_scan_max_sec)
+        frais_obligatoires = frais_obligatoires and donnees_fraiches(
+            [scan[2] if scan is not None else None
+             for scan in sources_obligatoires],
+            instant_monotone, reglage.age_scan_max_sec)
+        # Une caméra optionnelle absente est ignorée : le lidar suffit.
+        scans_utilises = []
+        for source in self._sources.values():
+            scan = self._scans[source.topic]
+            if scan is None:
+                continue
+            if not donnees_fraiches(
+                    [scan[2]], instant_monotone, reglage.age_scan_max_sec):
+                continue
+            scans_utilises.append(scan)
         commande_fraiche = donnees_fraiches(
-            [self._instant_commande], time.monotonic(), reglage.age_commande_max_sec)
+            [self._instant_commande], instant_monotone,
+            reglage.age_commande_max_sec)
         v, w = self._commande.linear.x, self._commande.angular.z
-        if (self.mouvement_autorise() and frais and commande_fraiche
-                and math.isfinite(v) and math.isfinite(w)):
+        raisons = []
+        if not self.mouvement_autorise():
+            raisons.append('course inactive ou terminée')
+        if not frais_obligatoires:
+            raisons.append('scan obligatoire absent ou périmé')
+        if not commande_fraiche:
+            raisons.append('commande absente ou périmée')
+        if not (math.isfinite(v) and math.isfinite(w)):
+            raisons.append('commande non finie')
+        if not raisons:
             v = max(-self._navigation.max_linear_speed, min(self._navigation.max_linear_speed, v))
             w = max(-self._navigation.max_angular_speed, min(self._navigation.max_angular_speed, w))
-            points = [point for scan in self._scans.values() for point in scan[1]]
+            points = [point for scan in scans_utilises for point in scan[1]]
             if trajectoire_libre(
                     points, v, w, self._navigation.footprint,
                     reglage.marge_m + self._navigation.footprint_padding,
-                    reglage.horizon_sec, reglage.pas_sec):
+                    reglage.horizon_sec, reglage.pas_sec,
+                    tolerance_penetration=reglage.penetration_tolerance_m):
                 sortie.linear.x, sortie.angular.z = v, w
-        if (v or w) and not (sortie.linear.x or sortie.angular.z):
+            else:
+                raisons.append('obstacle sur la trajectoire')
+        if (v or w) and raisons:
             self.get_logger().warning(
-                'Commande arrêtée : course inactive, obstacle ou données périmées.',
+                'Commande arrêtée : ' + ', '.join(raisons) + '.',
                 throttle_duration_sec=2.0)
+            for source in self._sources.values():
+                if not source.required and self._scans[source.topic] is None:
+                    self.get_logger().warning(
+                        f'Source optionnelle {source.name} absente ou périmée : '
+                        'ignorée.', throttle_duration_sec=5.0)
         self._sortie.publish(sortie)
 
 

@@ -86,3 +86,54 @@ def test_aucun_tag_cible_n_est_jamais_connu():
     memoire.ajouter(7, 1.0, 2.0, 0.0, 1.0)
     assert memoire.connait(7)
     assert not memoire.connait(None)
+
+
+def test_une_memoire_est_transformee_par_translation_et_rotation():
+    memoire = MemoireTags(4.0, repere='odom')
+    memoire.ajouter(7, 1.0, 0.0, 0.0, 1.0)
+    transformee = memoire.transformer((2.0, 3.0, math.pi / 2.0))
+    pose = transformee.pose(7)
+    assert (pose.x, pose.y) == pytest.approx((2.0, 4.0))
+    assert pose.cap == pytest.approx(math.pi / 2.0)
+    assert transformee.repere() == 'map'
+    assert transformee.exporter()['frame'] == 'map'
+    # La mémoire d'origine n'est pas modifiée.
+    assert memoire.repere() == 'odom'
+    assert memoire.pose(7).x == pytest.approx(1.0)
+
+
+def test_la_transformation_conserve_les_poids():
+    memoire = MemoireTags(4.0, repere='odom')
+    memoire.ajouter(7, 0.0, 0.0, 0.0, 1.0)   # poids 1
+    memoire.ajouter(7, 1.0, 0.0, 0.0, 1.4)   # poids 1/1,96
+    transformee = memoire.transformer((10.0, 0.0, 0.0))
+    assert transformee.pose(7).nombre == 2
+    assert transformee.pose(7).x == pytest.approx(10.0 + 0.5102 / 1.5102, abs=1e-3)
+    # Une nouvelle vue pèse face aux deux observations d'origine, pas
+    # seulement face à une pose agrégée.
+    transformee.ajouter(7, 12.0, 0.0, 0.0, 1.0)
+    assert transformee.pose(7).x == pytest.approx(11.0)
+
+
+def test_la_fusion_garde_les_tags_map_absents_d_odom():
+    memoire_map = MemoireTags(4.0)
+    memoire_map.ajouter(1, 0.0, 0.0, 0.0, 1.0)
+    memoire_map.ajouter(4, 5.0, 5.0, math.pi, 1.0)
+    memoire_odom = MemoireTags(4.0, repere='odom')
+    memoire_odom.ajouter(1, 1.0, 0.0, 0.0, 1.0)
+    fusion = memoire_map.fusionner(memoire_odom.transformer((1.0, 0.0, 0.0)))
+    assert fusion.ids() == [1, 4]
+    # La pose odom corrigée remplace la pose map du même tag.
+    assert fusion.pose(1).x == pytest.approx(2.0)
+    assert fusion.pose(4).x == pytest.approx(5.0)
+
+
+def test_un_tag_odom_ecrase_la_pose_map_devenue_obsolete():
+    memoire_map = MemoireTags(4.0)
+    memoire_map.ajouter(9, 100.0, 100.0, 0.0, 1.0)
+    memoire_odom = MemoireTags(4.0, repere='odom')
+    memoire_odom.ajouter(9, 2.0, 3.0, 0.5, 0.8)
+    fusion = memoire_map.fusionner(memoire_odom.transformer((0.0, 0.0, 0.0)))
+    pose = fusion.pose(9)
+    assert (pose.x, pose.y, pose.cap) == pytest.approx((2.0, 3.0, 0.5))
+    assert pose.nombre == 1

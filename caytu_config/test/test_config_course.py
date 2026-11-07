@@ -55,6 +55,8 @@ def _course_minimale(**surcharges):
         "preapproach_margin_m": 0.3, "search_spin_speed_rps": 0.4,
         "search_max_radius_m": 5.0, "unstuck_distance_m": 0.3,
         "unstuck_after_failures": 2,
+        "max_unstuck_attempts": 3,
+        "referee_confirmation_sec": 2.0,
         "alignment": {
             "linear_gain": 0.6, "angular_gain": 1.2, "max_linear_mps": 0.08,
             "max_angular_rps": 0.35, "min_linear_mps": 0.03,
@@ -70,6 +72,7 @@ def _course_minimale(**surcharges):
             "min_skip_gain_points": 5.0, "replan_period_sec": 2.0},
         "preparation": {
             "directory": "~/.ros/fosa/preparation", "carte_embarquee": "",
+            "map_start_pose": [0.0, 0.0, 0.0],
             "max_duration_sec": 720.0, "close_view_m": 1.3,
             "approach_attempts": 2},
     }
@@ -173,6 +176,22 @@ def test_la_recherche_de_secours_ne_rapproche_pas_des_obstacles():
         CourseConfig.from_mapping(_course_minimale(search_fallback_clearance_m=0.35))
 
 
+def test_le_nombre_de_degagements_par_tag_est_borne():
+    assert CourseConfig.from_mapping(
+        _course_minimale(max_unstuck_attempts=4)).max_unstuck_attempts == 4
+    with pytest.raises(ConfigurationError, match="max_unstuck_attempts"):
+        CourseConfig.from_mapping(_course_minimale(max_unstuck_attempts=0))
+
+
+def test_le_delai_de_confirmation_de_l_arbitre_est_borne():
+    assert CourseConfig.from_mapping(
+        _course_minimale(referee_confirmation_sec=3.5)).referee_confirmation_sec == 3.5
+    with pytest.raises(ConfigurationError, match="referee_confirmation_sec"):
+        CourseConfig.from_mapping(_course_minimale(referee_confirmation_sec=0.0))
+    with pytest.raises(ConfigurationError, match="referee_confirmation_sec"):
+        CourseConfig.from_mapping(_course_minimale(referee_confirmation_sec=11.0))
+
+
 def test_le_mot_de_depart_exige_au_moins_un_mot():
     with pytest.raises(ConfigurationError, match="words"):
         StartWordConfig.from_mapping({
@@ -187,6 +206,7 @@ def test_une_source_d_obstacles_incoherente_est_refusee():
     with pytest.raises(ConfigurationError, match="raytrace_max_range"):
         ObstacleSourceConfig.from_mapping({
             "name": "lidar", "topic": "/scan", "enabled": True,
+            "required": True,
             "obstacle_min_range": 0.1, "obstacle_max_range": 4.0,
             "raytrace_max_range": 3.0, "inf_is_valid": False,
             "global_costmap": True})
@@ -206,6 +226,7 @@ def test_une_source_camera_ne_marque_pas_au_bout_du_scan(tmp_path, monkeypatch):
     surcharge.write_text(
         "navigation:\n  obstacle_sources:\n    - name: camera1\n"
         "      topic: /fosa/scan_camera1\n      enabled: true\n"
+        "      required: true\n"
         "      obstacle_min_range: 0.25\n      obstacle_max_range: 2.5\n"
         "      raytrace_max_range: 3.0\n      inf_is_valid: true\n"
         "      global_costmap: true\n", encoding="utf-8")

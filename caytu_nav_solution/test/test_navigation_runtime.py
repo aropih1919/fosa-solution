@@ -3,14 +3,19 @@
 import math
 from types import SimpleNamespace
 
-from caytu_nav_solution.nav_math import Pose2D
-from caytu_nav_solution.navigation_runtime import (
+import pytest
+
+pytest.importorskip('action_msgs')
+pytest.importorskip('nav2_msgs')
+pytest.importorskip('rclpy')
+
+from caytu_nav_solution.nav_math import Pose2D  # noqa: E402
+from caytu_nav_solution.navigation_runtime import (  # noqa: E402
     ChronometreCourse,
     construire_but,
     est_arrive,
     NavigateurNav2,
 )
-import pytest
 
 
 class _FakeTime:
