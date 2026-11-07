@@ -1,51 +1,67 @@
 # Fosa — PARC 2026
 
-## Déployer ou mettre à jour depuis le PC
+## Déployer depuis le PC
 
 ```bash
 cd ~/Solution/ros2_ws/src/fosa-solution
-./deployer_robot.sh --envoyer ROBOT_IP
+./deployer_robot.sh --envoyer 192.168.1.3
 ```
 
-## Compiler sur le robot
+## Installer sur le robot
 
 ```bash
-ssh sitoe@ROBOT_IP
+ssh sitoe@192.168.1.3
 source /opt/ros/jazzy/setup.bash
-source ~/parc_ws/install/setup.bash   # sinon ~/ros2_ws/install/setup.bash
+source ~/parc_ws/install/setup.bash   # ou ~/ros2_ws/install/setup.bash
 cd ~/teams/fosa/actuel
 rosdep install --from-paths src --ignore-src -r -y
-colcon build --packages-select caytu_config caytu_interfaces \
-  caytu_nav_bringup caytu_nav_solution caytu_perception caytu_course \
-  --executor sequential
+colcon build --packages-select caytu_config caytu_interfaces caytu_nav_bringup \
+  caytu_nav_solution caytu_perception caytu_course --executor sequential
 source install/setup.bash
+cd src/fosa-solution
 ```
 
-## Lancer le match
+## Cartographier manuellement
 
+Terminal 1 :
 ```bash
-cd ~/teams/fosa/actuel/src/fosa-solution
-./run.sh course
-./run.sh depart          # ou dire « allez »
-./run.sh ordre-test '4,9,1,7'   # répétition sans arbitre
+./run.sh preparation-manuelle
 ```
 
-## Suivre et arrêter
-
+Terminal 2 :
 ```bash
-./run.sh suivi
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/fosa/cmd_vel
+```
+
+Après le guidage, arrêter le téléopérateur (`Ctrl+C`), puis dans le terminal 1 :
+```bash
+./run.sh sauver-carte
 ./run.sh arreter
 ```
 
-## Carte
+Les fichiers sont enregistrés dans `~/teams/fosa/donnees/preparation`.
 
-La carte livrée est `caytu_config/config/cartes/arene_2026_11_06`.
-Placer le robot à la position de départ de l'enregistrement avant
-`./run.sh course`.
+## Lancer le match
+
+Placez le robot à la position et orientation de départ de la carte.
 
 ```bash
-FOSA_CARTE=/chemin/vers/carte ./run.sh course   # autre carte
-./run.sh course-sans-carte                     # sans carte
-./run.sh preparation                           # refaire la carte
 ./run.sh course
+./run.sh depart         # ou dire « allez »
+./run.sh suivi          # suivi, dans un autre terminal si souhaité
+./run.sh arreter
+```
+
+La carte des organisateurs est utilisée par défaut. Pour la forcer :
+
+```bash
+FOSA_CARTE="$(ros2 pkg prefix caytu_config)/share/caytu_config/config/cartes/arene_2026_11_06" ./run.sh course
+```
+
+## Autres commandes
+
+```bash
+./run.sh preparation              # cartographie autonome et tags
+./run.sh course-sans-carte        # match sans carte
+./run.sh ordre-test '4,9,1,7'     # test seulement, sans arbitre
 ```
