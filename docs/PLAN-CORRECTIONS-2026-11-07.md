@@ -54,8 +54,26 @@ env PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   caytu_perception/test outils/test
 ```
 
-Les tests ROS réels (`outils/test/test_ros_integration.py`) sont réservés au
-conteneur isolé et ne tournent pas sans rclpy.
+Les tests ROS natifs ont été exécutés sur ce PC avec ROS 2 Jazzy :
+
+```bash
+./outils/verifier.sh
+```
+
+Les tests d'intégration qui publient des commandes moteur restent réservés à
+un réseau isolé. Ils peuvent être exécutés en domaine dédié et localhost :
+
+```bash
+set +u
+source /opt/ros/jazzy/setup.bash
+source "${FOSA_WS:-$HOME/ros2_ws}/install/setup.bash"
+set -u
+FOSA_TEST_ROS_ISOLE=1 ROS_LOCALHOST_ONLY=1 \
+  python3 -m pytest -q outils/test/test_ros_integration.py
+```
+
+Le build complet se vérifie avec `./simulation/simulation.sh preparer` (dix
+paquets Fosa et officiels).
 
 ---
 
@@ -485,5 +503,6 @@ reconnue.
   `./outils/verifier.sh` : 280 tests passés, 4 sautés (DDS et intégration
   réservés au conteneur). Les deux tests de `test_ros_integration.py` ont été
   exécutés en domaine isolé et passent après alignement du test de la garde
-  sur les sources `required` / optionnelles. La validation physique sur le
-  robot reste seule ouverte.
+  sur les sources `required` / optionnelles. `./simulation/simulation.sh
+  preparer` reconstruit les dix paquets sans erreur. La validation physique
+  sur le robot reste seule ouverte.
