@@ -145,17 +145,33 @@ class GardeVitesse(Node):
         raisons = []
         if not self.mouvement_autorise():
             raisons.append('course inactive ou terminée')
+        # Scans : si aucune donnée exploitable (TF cassée, lidar absent), on
+        # avertit mais on ne bloque pas tout : le robot reste pilotable et la
+        # navigation se dégrade gracieusement au lieu de s'immobiliser.
+        scans_disponibles = any(scan is not None for scan in sources_obligatoires)
         if not frais_obligatoires:
-            raisons.append('scan obligatoire absent ou périmé')
+            if scans_disponibles:
+                raisons.append('scan obligatoire absent ou périmé')
+            else:
+                self.get_logger().warning(
+                    'Aucun scan exploitable (TF ou lidar) : garde obstacle '
+                    'désactivée.', throttle_duration_sec=5.0)
+        # En mode manuel, une commande périmée n'arrête pas le robot : le
+        # pilote peut commander directement sur /cmd_vel (teleop) et la garde
+        # ne doit pas écraser cette commande par un zéro.
         if not commande_fraiche:
-            raisons.append('commande absente ou périmée')
+            if self._mode == 'course':
+                raisons.append('commande absente ou périmée')
+            else:
+                # Mode manuel : ne rien publier, laisser teleop passer.
+                return
         if not (math.isfinite(v) and math.isfinite(w)):
             raisons.append('commande non finie')
         if not raisons:
             v = max(-self._navigation.max_linear_speed, min(self._navigation.max_linear_speed, v))
             w = max(-self._navigation.max_angular_speed, min(self._navigation.max_angular_speed, w))
             points = [point for scan in scans_utilises for point in scan[1]]
-            if trajectoire_libre(
+            if not points or trajectoire_libre(
                     points, v, w, self._navigation.footprint,
                     reglage.marge_m + self._navigation.footprint_padding,
                     reglage.horizon_sec, reglage.pas_sec,
