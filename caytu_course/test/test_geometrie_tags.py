@@ -7,6 +7,7 @@ import pytest
 
 from caytu_course.geometrie_tags import (
     cap_normale,
+    distances_approche,
     erreurs_visite,
     pose_approche,
     visite_valide,
@@ -70,6 +71,12 @@ def test_erreurs_nulles_quand_le_robot_est_bien_place():
 
 def test_erreur_de_distance_positive_quand_le_robot_est_trop_loin():
     assert erreurs_visite(0.6, 0.0, math.pi, 0.0, 0.5).distance == pytest.approx(0.1)
+
+
+def test_les_distances_approche_reculent_par_pas_jusqu_au_maximum():
+    assert distances_approche(0.9, 0.25, 1.15) == (0.9, 1.15)
+    assert distances_approche(0.9, 0.1, 1.15) == (0.9, 1.0, 1.1, 1.15)
+    assert distances_approche(0.9, 0.5, 0.9) == (0.9,)
 
 
 def test_erreur_de_cap_signee():

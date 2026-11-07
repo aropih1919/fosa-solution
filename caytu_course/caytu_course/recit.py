@@ -11,6 +11,7 @@ RAISONS_ECHEC = {
     'alignement': "le placement à 0,5 m n'a pas été stable dans le délai",
     'introuvable': "le tag n'était pas à sa position mémorisée",
     'biais': 'le tag était vu trop de biais ou de trop loin pour finir à la caméra',
+    'bloque': "Nav2 est resté bloqué sans avancer (obstacle ou récupération impossible)",
 }
 
 
@@ -20,6 +21,7 @@ RESULTATS_APPROCHE = {
     'perdu': "tag non revu à l'arrivée",
     'echec': 'approche interrompue',
     'temps_ecoule': 'temps écoulé',
+    'bloque': 'Nav2 bloqué, alignement visuel repris',
 }
 
 

@@ -82,11 +82,12 @@ class NavigateurNav2:
 
     def __init__(self, node, navigation, chronometre, pose_robot,
                   spin_once=None, is_ok=None, success_radius=None,
-                  arrival_recheck_radius=None, interrompre=None):
+                  arrival_recheck_radius=None, interrompre=None, now=None):
         self._node = node
         self._navigation = navigation
         self._chronometre = chronometre
         self._pose_robot = pose_robot
+        self._now = now or time.monotonic
         # Les paramètres ROS peuvent surcharger les valeurs du YAML. Les
         # conserver explicitement évite de perdre ces overrides à l'extraction.
         self._success_radius = float(
@@ -252,7 +253,7 @@ class NavigateurNav2:
             self._but_en_cours = poignee
             self.annuler_but()
 
-    def _attendre_future(self, future, interrompre=None):
+    def _attendre_future(self, future, interrompre=None, surveiller=None):
         """Traite les messages jusqu'à la fin de `future`.
 
         Retourne 'ok', 'temps_ecoule' ou 'interrompu'.
@@ -265,6 +266,10 @@ class NavigateurNav2:
                 return 'interrompu'
             if interrompre is not None and interrompre():
                 return 'interrompu'
+            if surveiller is not None:
+                etat = surveiller()
+                if etat:
+                    return etat
         return 'ok'
 
     def naviguer_une_fois(self, goal_x, goal_y, frame, spawn, cap=None,
@@ -289,8 +294,15 @@ class NavigateurNav2:
             return 'refuse'
         self._but_en_cours = but
 
+        surveillance = SurveillanceBut(
+            self._now, self._pose_robot,
+            self._navigation.goal_stall_sec,
+            self._navigation.goal_stall_distance_m,
+            self._navigation.goal_stall_rotation_rad,
+            self._navigation.goal_timeout_sec)
         future_resultat = but.get_result_async()
-        resultat = self._attendre_future(future_resultat, interrompre)
+        resultat = self._attendre_future(
+            future_resultat, interrompre, surveiller=surveillance.update)
         if resultat == 'temps_ecoule':
             self._node.get_logger().error(
                 'Limite de temps atteinte : annulation du but.')
@@ -299,6 +311,13 @@ class NavigateurNav2:
         if resultat == 'interrompu':
             self.annuler_but()
             return 'interrompu'
+        if resultat in ('immobile', 'duree'):
+            self._node.get_logger().warn(
+                'But Nav2 bloqué (robot immobile ou délai dépassé) : '
+                'annulation et nettoyage des costmaps.')
+            self.vider_costmaps()
+            self.annuler_but()
+            return 'bloque'
 
         self._but_en_cours = None
         resultat_final = (future_resultat.result()
@@ -351,12 +370,72 @@ class NavigateurNav2:
             return 'echec'
 
         self._but_en_cours = poignee
+        surveillance = SurveillanceBut(
+            self._now, self._pose_robot,
+            self._navigation.goal_stall_sec,
+            10.0,  # le spin ne doit pas être jugé sur la translation
+            self._navigation.goal_stall_rotation_rad,
+            delai_sec + self._navigation.cancel_timeout_sec)
         future_resultat = poignee.get_result_async()
-        resultat = self._attendre_future(future_resultat, interrompre)
-        if resultat in ('interrompu', 'temps_ecoule'):
+        resultat = self._attendre_future(
+            future_resultat, interrompre, surveiller=surveillance.update)
+        if resultat == 'temps_ecoule':
             self.annuler_but()
-            return resultat
+            return 'temps_ecoule'
+        if resultat == 'interrompu':
+            self.annuler_but()
+            return 'interrompu'
+        if resultat in ('immobile', 'duree'):
+            self._node.get_logger().warn(
+                'Rotation Nav2 bloquée : annulation et nettoyage des costmaps.')
+            self.vider_costmaps()
+            self.annuler_but()
+            return 'bloque'
         self._but_en_cours = None
         final = future_resultat.result() if future_resultat.done() else None
         statut = final.status if final is not None else GoalStatus.STATUS_UNKNOWN
         return 'succes' if statut == GoalStatus.STATUS_SUCCEEDED else 'echec'
+
+
+class SurveillanceBut:
+    """Détecte un but Nav2 qui n'agit plus : immobile ou délai dépassé.
+
+    Pur et sans ROS : la fonction d'horloge et la pose du robot sont injectées,
+    ce qui permet de le tester sans nœud ROS.
+    """
+
+    def __init__(self, now, pose_robot, duree_immobilite_sec,
+                 distance_m, rotation_rad, duree_max_sec):
+        self._now = now
+        self._pose_robot = pose_robot
+        self._duree_immobilite_sec = float(duree_immobilite_sec)
+        self._distance_m = float(distance_m)
+        self._rotation_rad = float(rotation_rad)
+        self._duree_max_sec = float(duree_max_sec)
+        self._depart = now()
+        self._reference = pose_robot()
+        self._dernier_mouvement = self._depart
+
+    def _a_bouge(self, pose):
+        if pose is None or self._reference is None:
+            return False
+        distance = math.hypot(
+            pose.x - self._reference.x, pose.y - self._reference.y)
+        rotation = abs(math.atan2(
+            math.sin(pose.yaw - self._reference.yaw),
+            math.cos(pose.yaw - self._reference.yaw)))
+        return (distance >= self._distance_m
+                or rotation >= self._rotation_rad)
+
+    def update(self):
+        """Retourne 'immobile', 'duree' ou None."""
+        maintenant = self._now()
+        pose = self._pose_robot()
+        if self._a_bouge(pose):
+            self._reference = pose
+            self._dernier_mouvement = maintenant
+        if maintenant - self._depart >= self._duree_max_sec:
+            return 'duree'
+        if maintenant - self._dernier_mouvement >= self._duree_immobilite_sec:
+            return 'immobile'
+        return None

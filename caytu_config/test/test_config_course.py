@@ -42,6 +42,7 @@ def _course_minimale(**surcharges):
         "time_limit_sec": 600.0, "stop_margin_sec": 5.0,
         "nav2_ready_timeout_sec": 60.0,
         "visit_distance_m": 0.5, "approach_distance_m": 0.9,
+        "approach_fallback_step_m": 0.25, "approach_fallback_max_m": 1.15,
         "distance_tolerance_m": 0.04, "lateral_tolerance_m": 0.06,
         "heading_tolerance_deg": 5.0, "stable_cycles": 5, "hold_sec": 5.0,
         "detection_max_age_sec": 0.6, "image_max_age_sec": 1.0,

@@ -85,6 +85,14 @@ navigation:
   cancel_timeout_sec: 2.0
   feedback_log_period_sec: 5.0
 
+  # Watchdog anti-immobilité : un but Nav2 qui ne déplace plus le robot est
+  # abandonné, costmaps vidées. Le temps de match est compté, une récupération
+  # Nav2 qui tourne en boucle ne doit jamais coûter des minutes.
+  goal_stall_sec: 6.0             # immobilité tolérée pendant un but
+  goal_stall_distance_m: 0.10     # déplacement qui prouve que le robot avance
+  goal_stall_rotation_rad: 0.15   # rotation qui prouve que le robot tourne
+  goal_timeout_sec: 45.0          # plafond absolu d'un but, détours compris
+
 perception:
   tags_topic: /perception/tags
 
@@ -185,6 +193,10 @@ course:
   nav2_ready_timeout_sec: 60.0
   visit_distance_m: 0.50          # règlement : centre du robot à 0,5 m du tag
   approach_distance_m: 0.90       # pré-approche si le tag n'a été vu que de loin
+  # Nav2 bloqué (obstacle, costmap) : on recule le point d'approche par pas,
+  # puis l'alignement visuel finit le travail depuis la distance atteinte.
+  approach_fallback_step_m: 0.25  # pas de repli, plus loin du tag
+  approach_fallback_max_m: 1.15   # au-delà, l'alignement ne peut plus prendre le relais
   distance_tolerance_m: 0.04
   lateral_tolerance_m: 0.06
   heading_tolerance_deg: 5.0      # règlement : ±12°

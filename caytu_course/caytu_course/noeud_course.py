@@ -39,7 +39,8 @@ from caytu_course.alignement import (
 )
 from caytu_course.entrees_course import EntreesCourse
 from caytu_course import recit
-from caytu_course.geometrie_tags import erreurs_visite, pose_approche, visite_valide
+from caytu_course.geometrie_tags import (
+    distances_approche, erreurs_visite, pose_approche, visite_valide)
 from caytu_course.lancement import (
     NOM_CARTE,
     carte_preparee,
@@ -522,7 +523,7 @@ class NoeudCourse(Node):
         resultat = self._navigateur.naviguer_une_fois(
             point[0], point[1], self._configuration.system.global_frame,
             Pose2D(0.0, 0.0, 0.0), interrompre=interrompre)
-        if resultat in ('refuse', 'reessayer'):
+        if resultat in ('refuse', 'reessayer', 'bloque'):
             self._echecs_trajet += 1
             if self._echecs_trajet >= self._course.unstuck_after_failures:
                 self._degager(f'{self._echecs_trajet} trajets ratés de suite')
@@ -597,6 +598,10 @@ class NoeudCourse(Node):
         course = self._course
         renavigations = 0
         forcer_nav2 = False
+        points = distances_approche(
+            course.approach_distance_m, course.approach_fallback_step_m,
+            course.approach_fallback_max_m)
+        repli = 0
         while rclpy.ok() and renavigations <= course.alignment.max_renavigations:
             if self._temps_ecoule():
                 return 'temps_ecoule'
@@ -607,11 +612,36 @@ class NoeudCourse(Node):
                 return 'perdu'
             portee = course.approach_distance_m + course.preapproach_margin_m
             if forcer_nav2 or tag[3] > portee:
-                resultat = self._approcher(tag_id, tag, abandonner)
+                resultat = self._approcher(
+                    tag_id, tag, abandonner, distance=points[repli])
                 if resultat in ('temps_ecoule', 'perdu'):
                     return resultat
                 if resultat == 'echec':
                     return 'echec'
+                if resultat == 'bloque':
+                    self._raison_echec = 'bloque'
+                    # Alignement visuel direct si le tag est à portée de l'asservissement.
+                    portee_alignement = (course.visit_distance_m
+                                         + course.alignment.max_distance_error_m)
+                    tag = self._pose_tag_courante(tag_id)
+                    if tag is not None and tag[3] <= portee_alignement:
+                        self.evenement(
+                            'blocage',
+                            f'Tag {tag_id} : Nav2 bloqué, l\'alignement '
+                            'visuel prend le relais depuis la distance atteinte.',
+                            tag=tag_id)
+                        # tomber dans l'alignement ci-dessous
+                    elif repli + 1 < len(points):
+                        repli += 1
+                        renavigations += 1
+                        self.evenement(
+                            'repli',
+                            f'Tag {tag_id} : point d\'approche reculé à '
+                            f'{points[repli]:.2f} m du tag.', tag=tag_id,
+                            distance=round(points[repli], 2))
+                        continue
+                    else:
+                        return 'echec'
                 if resultat == 'reessayer':
                     renavigations += 1
                     continue
@@ -628,16 +658,20 @@ class NoeudCourse(Node):
             forcer_nav2 = resultat == 'renaviguer'
         return 'echec'
 
-    def _approcher(self, tag_id, tag, abandonner):
+    def _approcher(self, tag_id, tag, abandonner, distance=None):
         """Nav2 jusqu'au point de pré-approche, face au tag.
 
-        Retourne 'arrive', 'reessayer', 'perdu', 'echec' ou 'temps_ecoule'.
+        Retourne 'arrive', 'reessayer', 'perdu', 'echec', 'temps_ecoule'
+        ou 'bloque'.
         """
         course = self._course
+        if distance is None:
+            distance = course.approach_distance_m
         tag_x, tag_y, tag_cap, _ = tag
-        x, y, cap = pose_approche(tag_x, tag_y, tag_cap, course.approach_distance_m)
+        x, y, cap = pose_approche(tag_x, tag_y, tag_cap, distance)
         x, y = self._but_pour_centre(x, y, cap)
-        self.publier_etat('APPROCHE', tag_id, f'{course.approach_distance_m:.2f} m du tag')
+        self.publier_etat('APPROCHE', tag_id, f'{distance:.2f} m du tag'
+                          + (' (repli)' if distance > course.approach_distance_m + 1e-9 else ''))
         resultat = self._navigateur.naviguer_une_fois(
             x, y, self._configuration.system.global_frame, Pose2D(0.0, 0.0, 0.0),
             cap=cap, interrompre=abandonner)
@@ -658,6 +692,9 @@ class NoeudCourse(Node):
             if vue is not None and vue.distance <= portee:
                 return 'arrive'   # même si Nav2 a abandonné : le tag est à portée
             self.traiter_pendant(PERIODE_BOUCLE)
+        if resultat == 'bloque':
+            self._raison_echec = 'bloque'
+            return 'bloque'
         if resultat == 'reessayer':
             self._raison_echec = 'nav2'
             return 'reessayer'
@@ -976,8 +1013,17 @@ class NoeudCourse(Node):
         pose = self._memoire.pose(tag_id)
         self.evenement('mesure', f'Tag {tag_id} vu de loin ({pose.distance_min:.1f} m) : '
                        'on s\'en approche pour mesurer précisément sa position.', tag=tag_id)
-        resultat = self._approcher(
-            tag_id, (pose.x, pose.y, pose.cap, pose.distance_min), self._temps_ecoule)
+        points = distances_approche(
+            self._course.approach_distance_m,
+            self._course.approach_fallback_step_m,
+            self._course.approach_fallback_max_m)
+        resultat = 'bloque'
+        for distance in points:
+            resultat = self._approcher(
+                tag_id, (pose.x, pose.y, pose.cap, pose.distance_min),
+                self._temps_ecoule, distance=distance)
+            if resultat != 'bloque':
+                break
         # Conserver la position pendant les dernières observations du tag.
         self.arreter_robot()
         self.traiter_pendant(1.0)

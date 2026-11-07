@@ -63,3 +63,20 @@ def visite_valide(erreurs, tolerance_distance, tolerance_laterale, tolerance_cap
     return (abs(erreurs.distance) <= tolerance_distance
             and abs(erreurs.laterale) <= tolerance_laterale
             and abs(erreurs.cap) <= tolerance_cap)
+
+
+def distances_approche(distance, pas, distance_max):
+    """Points d'approche successifs, du nominal au repli le plus loin.
+
+    Utilisé quand Nav2 est bloqué : on recule le point d'approche par `pas`,
+    jusqu'à `distance_max`, puis l'alignement visuel prend le relais.
+    """
+    valeurs = [float(distance)]
+    courante = float(distance)
+    while courante < float(distance_max) - 1e-9:
+        courante = min(courante + float(pas), float(distance_max))
+        if courante > valeurs[-1] + 1e-9:
+            valeurs.append(courante)
+        else:
+            break
+    return tuple(valeurs)

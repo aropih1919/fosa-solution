@@ -1,6 +1,7 @@
 """Tests du chronomètre de course et du client Nav2."""
 
 import math
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,7 @@ from caytu_nav_solution.navigation_runtime import (  # noqa: E402
     construire_but,
     est_arrive,
     NavigateurNav2,
+    SurveillanceBut,
 )
 
 
@@ -144,6 +146,7 @@ def _navigateur_sans_ros(chronometre):
     navigateur._spin = lambda timeout: None
     navigateur._is_ok = lambda: True
     navigateur._interrompre = lambda: False
+    navigateur._now = time.monotonic
     return navigateur
 
 
@@ -193,7 +196,9 @@ def _navigateur_pour_resultat(handle, pose):
     navigateur._node = _FakeRuntimeNode()
     navigateur._navigation = SimpleNamespace(
         success_radius=0.2, arrival_recheck_radius=0.35,
-        feedback_log_period_sec=5.0, cancel_timeout_sec=2.0)
+        feedback_log_period_sec=5.0, cancel_timeout_sec=2.0,
+        goal_stall_sec=8.0, goal_stall_distance_m=0.10,
+        goal_stall_rotation_rad=0.15, goal_timeout_sec=45.0)
     navigateur._success_radius = 0.2
     navigateur._arrival_recheck_radius = 0.35
     navigateur._chronometre = SimpleNamespace(
@@ -204,6 +209,7 @@ def _navigateur_pour_resultat(handle, pose):
     navigateur._interrompre = lambda: False
     navigateur._but_en_cours = None
     navigateur._dernier_log_feedback = 0.0
+    navigateur._now = time.monotonic
     navigateur.message_but = lambda *args: object()
     navigateur.recevoir_feedback = lambda message: None
     return navigateur
@@ -346,3 +352,64 @@ def test_un_but_accepte_apres_l_interruption_est_annule():
         0.0, 0.0, 'map', Pose2D(0, 0, 0), interrompre=lambda: True)
     assert resultat == 'interrompu'
     assert handle.cancelled is True
+
+
+class _FakeClockMonotonic:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, delta):
+        self.now += delta
+
+
+def test_la_surveillance_signale_un_robot_immobile_apres_le_delai():
+    clock = _FakeClockMonotonic()
+    pose = Pose2D(0.0, 0.0, 0.0)
+    surveillance = SurveillanceBut(
+        clock, lambda: pose, 8.0, 0.10, 0.15, 45.0)
+    clock.advance(3.0)
+    assert surveillance.update() is None
+    clock.advance(5.0)
+    assert surveillance.update() == 'immobile'
+
+
+def test_la_surveillance_ne_signale_pas_un_robot_qui_avance():
+    clock = _FakeClockMonotonic()
+    courante = {'pose': Pose2D(0.0, 0.0, 0.0)}
+
+    def pose():
+        return courante['pose']
+
+    surveillance = SurveillanceBut(clock, pose, 8.0, 0.10, 0.15, 45.0)
+    for i in range(1, 6):
+        clock.advance(1.0)
+        courante['pose'] = Pose2D(0.1 * i, 0.0, 0.0)
+        assert surveillance.update() is None
+
+
+def test_la_surveillance_signale_le_depassement_du_delai_global():
+    clock = _FakeClockMonotonic()
+    pose = Pose2D(0.0, 0.0, 0.0)
+    surveillance = SurveillanceBut(clock, lambda: pose, 8.0, 0.10, 0.15, 5.0)
+    clock.advance(5.0)
+    assert surveillance.update() == 'duree'
+
+
+def test_un_but_nav2_bloque_est_annule_et_les_costmaps_videes():
+    handle = _FakeGoalHandleEnCours()
+    navigateur = _navigateur_pour_resultat(handle, Pose2D(0.0, 0.0, 0.0))
+    clock = _FakeClockMonotonic()
+    navigateur._now = clock
+    vides = []
+    navigateur.vider_costmaps = lambda: vides.append(True)
+    navigateur._clear_clients = []
+    navigateur._spin = lambda timeout: clock.advance(1.0)
+
+    resultat = navigateur.naviguer_une_fois(0.0, 0.0, 'map', Pose2D(0, 0, 0))
+
+    assert resultat == 'bloque'
+    assert handle.cancelled is True
+    assert vides == [True]

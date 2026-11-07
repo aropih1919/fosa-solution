@@ -151,6 +151,15 @@ class NavigationConfig:
     local_costmap_clear_service: str
     cancel_timeout_sec: float
     feedback_log_period_sec: float
+    goal_stall_sec: float
+    goal_stall_distance_m: float
+    goal_stall_rotation_rad: float
+    goal_timeout_sec: float
+
+    def __post_init__(self):
+        if self.goal_timeout_sec < self.goal_stall_sec:
+            raise ConfigurationError(
+                "navigation: goal_timeout_sec doit être >= goal_stall_sec.")
 
     @classmethod
     def from_mapping(cls, data, path="navigation"):
@@ -163,7 +172,9 @@ class NavigationConfig:
             "max_linear_speed", "max_angular_speed", "laser_self_filter",
             "obstacle_sources", "global_costmap_clear_service",
             "local_costmap_clear_service", "cancel_timeout_sec",
-            "feedback_log_period_sec"), path)
+            "feedback_log_period_sec", "goal_stall_sec",
+            "goal_stall_distance_m", "goal_stall_rotation_rad",
+            "goal_timeout_sec"), path)
         return cls(
             mode=_choice(_get(data, "mode", path), ("carte", "sans_carte"),
                          f"{path}.mode"),
@@ -218,6 +229,18 @@ class NavigationConfig:
             feedback_log_period_sec=_as_number(
                 _get(data, "feedback_log_period_sec", path),
                 f"{path}.feedback_log_period_sec", positive=True),
+            goal_stall_sec=_as_number(
+                _get(data, "goal_stall_sec", path),
+                f"{path}.goal_stall_sec", positive=True),
+            goal_stall_distance_m=_as_number(
+                _get(data, "goal_stall_distance_m", path),
+                f"{path}.goal_stall_distance_m", positive=True),
+            goal_stall_rotation_rad=_as_number(
+                _get(data, "goal_stall_rotation_rad", path),
+                f"{path}.goal_stall_rotation_rad", positive=True),
+            goal_timeout_sec=_as_number(
+                _get(data, "goal_timeout_sec", path),
+                f"{path}.goal_timeout_sec", positive=True),
         )
 
 

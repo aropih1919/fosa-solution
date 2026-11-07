@@ -384,6 +384,8 @@ _NOMBRES_COURSE = (
     ("nav2_ready_timeout_sec", {"positive": True}),
     ("visit_distance_m", {"positive": True}),
     ("approach_distance_m", {"positive": True}),
+    ("approach_fallback_step_m", {"positive": True}),
+    ("approach_fallback_max_m", {"positive": True}),
     ("distance_tolerance_m", {"positive": True}),
     ("lateral_tolerance_m", {"positive": True}),
     ("heading_tolerance_deg", {
@@ -431,6 +433,8 @@ class CourseConfig:
     nav2_ready_timeout_sec: float
     visit_distance_m: float
     approach_distance_m: float
+    approach_fallback_step_m: float
+    approach_fallback_max_m: float
     distance_tolerance_m: float
     lateral_tolerance_m: float
     heading_tolerance_deg: float
@@ -504,6 +508,17 @@ class CourseConfig:
         if course.approach_distance_m < course.visit_distance_m:
             raise ConfigurationError(
                 f"{path}: approach_distance_m doit être >= visit_distance_m.")
+        if course.approach_fallback_max_m < course.approach_distance_m:
+            raise ConfigurationError(
+                f"{path}: approach_fallback_max_m doit être >= "
+                "approach_distance_m.")
+        # Le repli ne doit pas dépasser la portée de l'alignement visuel.
+        if (course.approach_fallback_max_m
+                - course.visit_distance_m
+                > course.alignment.max_distance_error_m):
+            raise ConfigurationError(
+                f"{path}: approach_fallback_max_m - visit_distance_m dépasse "
+                "alignment.max_distance_error_m.")
         if course.search_fallback_clearance_m < course.search_clearance_m:
             raise ConfigurationError(
                 f"{path}: search_fallback_clearance_m doit être >= "

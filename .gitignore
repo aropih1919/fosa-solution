@@ -9,6 +9,8 @@ results/
 /caytu_config/config/models/
 modeles-fosa.tar.gz
 diag.log
+key_ssh.txt
+key_ssh.txt.pub
 step.md
 test.txt
 *.wav
